@@ -5,7 +5,7 @@ Part of the [Implementation Plan](./tasks.md).
 ## Tasks
 
 - [ ] 23. Implement framework-specific parsing
-  - [ ] 23.0 Implement Magento 2 parser
+  - [x] 23.0 Implement Magento 2 parser
     - _Skills: `php-pro`, `typescript-expert`_
     - Parse webapi.xml to extract REST and GraphQL endpoint definitions (route → interface method mapping)
     - Extract Controller/Action classes from Controller/ directories (execute() method as entry point)
