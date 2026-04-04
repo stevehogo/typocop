@@ -77,8 +77,8 @@ Part of the [Implementation Plan](./tasks.md).
     - Find all clusters containing the symbol
     - _Requirements: 12.1, 12.2, 12.3, 12.4, 12.5, 12.6_
 
-- [ ] 21. Implement data flow tracing queries
-  - [ ] 21.1 Implement end-to-end data flow tracing
+- [x] 21. Implement data flow tracing queries
+  - [x] 21.1 Implement end-to-end data flow tracing
     - _Skills: `typescript-expert`, `architecture`_
     - Identify entry point symbol (API endpoint)
     - Trace through controllers using call graph
@@ -88,7 +88,7 @@ Part of the [Implementation Plan](./tasks.md).
     - Ensure Full tracing frameworks include API→Controller→DB path
     - _Requirements: 13.1, 13.2, 13.3, 13.4, 13.5, 13.6, 13.7_
 
-  - [ ]* 21.2 Write property test for framework tracing completeness
+  - [x]* 21.2 Write property test for framework tracing completeness
     - _Skills: `testing-patterns`, `tdd-workflow`_
     - **Property 16: Framework Tracing Completeness** - Verify Full tracing includes API, controllers, and DB models
     - **Property 17: Framework Partial Tracing** - Verify Partial tracing has at least one component type

@@ -7,3 +7,4 @@ export { executeQuery } from "./execute-query.js";
 export { formatResponse } from "./format-response.js";
 export { executeImpactAnalysis, calculateImpactRisk } from "./impact-analysis.js";
 export { executeContextRetrieval } from "./context-retrieval.js";
+export { executeDataFlowTrace } from "./data-flow-trace.js";

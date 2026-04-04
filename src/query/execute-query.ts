@@ -111,6 +111,12 @@ async function executeQueryInternal(
     return { intent, ...result };
   }
 
+  if (intent.type === "dataFlowTrace") {
+    const { executeDataFlowTrace } = await import("./data-flow-trace.js");
+    const result = await executeDataFlowTrace(intent.entryPoint, query.maxResults, graphSession);
+    return { intent, ...result };
+  }
+
   // Fallback for unimplemented query types
   return {
     intent,
