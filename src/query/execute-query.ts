@@ -66,14 +66,13 @@ async function executeQueryInternal(
   graphSession: Session,
 ): Promise<QueryResult> {
   const { intent, confidence: intentConfidence } = parseQueryIntent(query.text);
-  // Stub for remaining query types (tasks 18-21)
-  let symbols: Symbol[] = [];
-  let relationships: Relationship[] = [];
-  let clusters: Cluster[] = [];
-  let processes: Process[] = [];
-
 
   // Route to specific query handler based on intent
+  if (intent.type === "impactAnalysis") {
+    const result = await executeImpactAnalysis(intent.target, query.maxResults, graphSession);
+    return { intent, ...result };
+  }
+
   if (intent.type === "smartSearch") {
     const { executeSmartSearch } = await import("./smart-search.js");
     const { generateEmbedding } = await import("../vector/embed.js");
@@ -84,18 +83,27 @@ async function executeQueryInternal(
       graphSession,
       generateEmbedding,
     );
-    symbols = result.symbols;
-    clusters = result.clusters;
-    processes = result.processes;
-  } else if (intent.type === "impactAnalysis" || intent.type === "contextRetrieval") {
-    if (intent.type === "impactAnalysis") {
-      const result = await executeImpactAnalysis(intent.target, query.maxResults, graphSession);
-      return { intent, ...result };
-    }
-    // Stub implementation for other query types (tasks 17, 19, 20, 21)
+    const confidence = result.symbols.length > 0 ? Math.max(0.90, intentConfidence) : 0.75;
+    const riskLevel = calculateRiskLevel(result.symbols.length, result.symbols);
+    const affectedFlows = result.processes.map((p) => p.name);
+
+    return {
+      intent,
+      symbols: result.symbols,
+      relationships: [],
+      clusters: result.clusters,
+      processes: result.processes,
+      confidence,
+      riskLevel,
+      affectedFlows,
+    };
+  }
+
+  // Stub for remaining query types (tasks 19, 20, 21)
+  if (intent.type === "contextRetrieval") {
     const node = await findNode(graphSession, intent.target);
     if (node) {
-      symbols.push({
+      const symbol: Symbol = {
         id: node.id,
         name: node.properties["name"] ?? node.id,
         kind: "function",
@@ -108,28 +116,29 @@ async function executeQueryInternal(
         },
         visibility: "public",
         modifiers: [],
-      });
+      };
+      return {
+        intent,
+        symbols: [symbol],
+        relationships: [],
+        clusters: [],
+        processes: [],
+        confidence: 0.75,
+        riskLevel: "low",
+        affectedFlows: [],
+      };
     }
   }
-  // Enforce maxResults limit (Req 9.6)
-  const limitedSymbols = symbols.slice(0, query.maxResults);
 
-  const confidence = Math.max(
-    calculateConfidence(limitedSymbols, relationships, intent),
-    intentConfidence * 0.8,
-  );
-
-  const riskLevel = calculateRiskLevel(limitedSymbols.length, limitedSymbols);
-  const affectedFlows: string[] = processes.map((p) => p.name);
-
+  // Fallback for unimplemented query types
   return {
     intent,
-    symbols: limitedSymbols,
-    relationships,
-    clusters,
-    processes,
-    confidence,
-    riskLevel,
-    affectedFlows,
+    symbols: [],
+    relationships: [],
+    clusters: [],
+    processes: [],
+    confidence: 0.5,
+    riskLevel: "low",
+    affectedFlows: [],
   };
 }
