@@ -48,7 +48,7 @@ Part of the [Implementation Plan](./tasks.md).
     - Set tracingLevel to Partial
     - _Requirements: 14.6, 14.10_
 
-  - [ ] 23.5 Implement FastAPI and Django parsers
+  - [x] 23.5 Implement FastAPI and Django parsers
     - _Skills: `typescript-expert`, `clean-code`_
     - Extract FastAPI route decorators and SQLAlchemy models
     - Extract Django URL patterns and Django ORM models

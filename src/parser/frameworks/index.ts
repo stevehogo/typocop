@@ -8,4 +8,6 @@ export { parseLaravelFile, LARAVEL_SUPPORT } from "./laravel.js";
 export { parseExpressFile, EXPRESS_SUPPORT } from "./express.js";
 export { parseFastifyFile, FASTIFY_SUPPORT } from "./fastify.js";
 export { parseSpringBootFile, SPRING_BOOT_SUPPORT } from "./spring-boot.js";
+export { parseFastAPIFile, FASTAPI_SUPPORT } from "./fastapi.js";
+export { parseDjangoFile, DJANGO_SUPPORT } from "./django.js";
 export { parseORMModels } from "./orm.js";
