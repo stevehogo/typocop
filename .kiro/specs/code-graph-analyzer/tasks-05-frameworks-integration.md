@@ -41,7 +41,7 @@ Part of the [Implementation Plan](./tasks.md).
     - Set tracingLevel to Partial
     - _Requirements: 14.4, 14.5, 14.10_
 
-  - [ ] 23.4 Implement Spring Boot parser
+  - [x] 23.4 Implement Spring Boot parser
     - _Skills: `typescript-expert`, `clean-code`_
     - Extract REST controller annotations (@GetMapping, @PostMapping, etc.)
     - Parse JPA entities and Hibernate models
