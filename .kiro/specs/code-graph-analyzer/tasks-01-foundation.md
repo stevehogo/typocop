@@ -55,8 +55,8 @@ Part of the [Implementation Plan](./tasks.md).
     - Add error handling for syntax errors with logging and file skipping
     - _Requirements: 2.13, 2.14, 18.1, 18.2_
 
-- [ ] 4. Implement Phase 1: File tree walking
-  - [ ] 4.1 Implement directory traversal
+- [x] 4. Implement Phase 1: File tree walking
+  - [x] 4.1 Implement directory traversal
     - _Skills: `nodejs-best-practices`, `error-handling-patterns`_
     - Define FileNode structure
     - Implement walkFileTree function with recursive directory traversal
@@ -64,8 +64,8 @@ Part of the [Implementation Plan](./tasks.md).
     - Implement language detection for discovered files
     - _Requirements: 3.1_
 
-- [ ] 5. Implement Phase 2: Symbol extraction from ASTs
-  - [ ] 5.1 Implement symbol extraction pipeline
+- [x] 5. Implement Phase 2: Symbol extraction from ASTs
+  - [x] 5.1 Implement symbol extraction pipeline
     - _Skills: `typescript-expert`, `clean-code`_
     - Implement extractAllSymbols function to process all FileNodes
     - Implement extractSymbolsFromAST recursive function
@@ -73,7 +73,7 @@ Part of the [Implementation Plan](./tasks.md).
     - Extract symbol metadata: name, kind, location, signature, visibility, modifiers
     - _Requirements: 3.2, 4.1, 4.2_
 
-  - [ ]* 5.2 Write property test for symbol extraction
+  - [x] 5.2 Write property test for symbol extraction
     - _Skills: `testing-patterns`, `tdd-workflow`_
     - **Property 1: Symbol Uniqueness** - Verify no duplicate symbol IDs in extracted symbols
     - **Validates: Requirements 4.1, 4.3**

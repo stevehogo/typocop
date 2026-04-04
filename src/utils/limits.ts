@@ -1,7 +1,7 @@
 // Resource limits — enforced throughout the system (Req 23)
 
 /** Maximum source file size in bytes before skipping during indexing (Req 23.1) */
-export const MAX_FILE_SIZE_BYTES = 1_000_000; // 1 MB
+export const MAX_FILE_SIZE_BYTES = 512 * 1024; // 512 KB — matches two-phase scan threshold
 
 /** Alias used by the parser module */
 export const MAX_FILE_SIZE = MAX_FILE_SIZE_BYTES;

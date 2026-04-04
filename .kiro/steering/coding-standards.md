@@ -33,20 +33,84 @@ const process = (x: any) => { ... }
 
 ```
 src/
-  cli/          # CLI entry point and command parsing
-  parser/       # Tree-sitter AST parsing
-  indexer/      # 6-phase indexing pipeline (phases 1-6)
+  cli/          # CLI entry point, command parsing, executor
+  parser/       # Tree-sitter AST parsing (ast-node, init, parse-file, queries, extract-symbols, language)
+  indexer/      # 6-phase indexing pipeline
+    structure/  # Phase 1: walk file tree, map folder/file relationships
+    parsing/    # Phase 2: extract symbols from ASTs
+    resolution/ # Phase 3: resolve imports, calls, inheritance
+    clustering/ # Phase 4: group symbols into functional communities
+    processes/  # Phase 5: trace execution flows from entry points
+    search/     # Phase 6: build hybrid vector + keyword indexes
+    index.ts    # re-exports all phases
   graph/        # Neo4j graph database interface
   vector/       # pgvector semantic search interface
   enrichment/   # AI Context Enrichment component
   query/        # Query server, intent classification, query execution
   mcp/          # MCP server and tool registration
-  types/        # Shared data model types (no logic)
-  utils/        # Pure utility functions
+  types/        # Shared data model types + arbitraries (no logic)
+  utils/        # Pure utility functions (ignore, limits)
 ```
 
-- One component per file, named after the component
-- Types live in `src/types/` — never co-located with logic unless local-only
+## Folder Grouping Rule
+
+**Group files by domain, not by type.** When a folder grows beyond ~5 files, split it into subfolders named after the domain concern — not after the file type (no `helpers/`, `utils/`, `models/` inside a domain folder).
+
+### When to create a subfolder
+
+Create a subfolder when a folder has more than 5 files that share a distinct responsibility:
+
+```
+// Too flat — hard to navigate
+src/parser/
+  ast-node.ts
+  extract-symbols.ts
+  extract-queries.ts
+  init-typescript.ts
+  init-python.ts
+  init-java.ts
+  language-detect.ts
+  parse-file.ts
+  queries-typescript.ts
+  queries-python.ts
+
+// Grouped by domain concern
+src/parser/
+  ast/            # AST node types and traversal
+  grammars/       # Per-language grammar initialisation
+  queries/        # Per-language tree-sitter query strings
+  extract/        # Symbol extraction from ASTs
+  index.ts
+```
+
+### Subfolder rules
+
+- Name subfolders after the **domain concern**, not the file type
+- Each subfolder has an `index.ts` as its public API
+- Co-locate `index.test.ts` with `index.ts` in the same subfolder
+- Additional files in the subfolder are implementation details — not re-exported from the parent
+- No re-export shim files — consumers import from the subfolder's `index.ts` directly
+
+### What NOT to do
+
+```
+// Bad — grouped by file type, not domain
+src/parser/
+  types/        ← types belong in src/types/
+  helpers/      ← vague, not a domain
+  utils/        ← vague, not a domain
+  models/       ← duplicates src/types/
+
+// Bad — re-export shim
+src/parser/index.ts  ← just re-exports everything from subfiles, adds no value
+```
+
+### Canonical locations
+
+- All shared data model types → `src/types/index.ts` — never redefine inline
+- All resource limit constants → `src/utils/limits.ts`
+- No `models/` folder — it duplicates `types/`
+- No `__tests__/` folder — tests are co-located with their source file
 - No circular imports between modules
 
 ## Naming Conventions

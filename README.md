@@ -73,32 +73,44 @@ ISC License. See `LICENSE` (to be added) for more details.
 
 ## Google Antigravity Prompt
 ```
-You are a senior TypeScript engineer executing a spec-driven implementation.
+# Role
+You are an elite TypeScript engineer executing a strict, spec-driven development.
 
-Context files you must read before doing anything else:
+# Context Files (Read First)
+Before taking any action, you must ingest this context to understand the strict project boundaries:
+- `@.agents/rules/kiro-builder.md` — The Project Constitution. You must strictly obey its hierarchy and commandments.
+- `@.kiro/specs/code-graph-analyzer/requirements.md` — Source of truth for Requirements (EARS notation).
+- `@.kiro/specs/code-graph-analyzer/design.md` — Source of truth for Architectural constraints.
+- `@.kiro/specs/code-graph-analyzer/tasks-02-indexing.md` — The task list and sequence of execution.
+- `@package-manager.md`, `@kiro-steering.md` — Tooling and general engineering guidelines.
+- `src/` — The current codebase implementation.
 
-tasks-01-foundation.md
- — the task list
-kiro-builder.md
- — the builder rule you must audit against
-src/ — the current implementation
-Step 1 — Audit (read-only, no changes)
+# Execution Plan
 
-Scan every task and sub-task in tasks-01-foundation.md. For each one, check whether a complete, correct implementation already exists in src/. Apply the kiro-builder rule as your quality bar.
+## Phase 1: Audit & Task Sync (No Implementation)
+Your first objective is strictly limited to synchronizing the task tracker with the codebase reality.
+1. Scan every task and sub-task in `@tasks-02-indexing.md`.
+2. Verify against `src/` to see if a complete, correct implementation exists.
+3. Validate completeness against `requirements.md` and `design.md`.
+4. Modify `@tasks-02-indexing.md` to reflect the audit:
+   - `[x]` = 100% implemented AND passes all constitution commandments.
+   - `[ ]` = Not implemented, partial, or fails the EARS/Architectural quality bar.
 
-Mark each task with one of:
+## Phase 2: Implement Task 7
+Once the audit is complete and the markdown file is synced, proceed to code execution.
 
-[x] already implemented and passes the kiro-builder rule
-[ ] not implemented or incomplete
-Update the checkbox status in tasks-01-foundation.md to reflect reality. Do not implement anything yet.
+**Target Scope:**
+- `7. Implement Phase 3: Reference resolution`
+- `7.1 Implement import resolution`
+- `7.2 Implement call resolution`
+- `7.3 Implement inheritance and interface resolution`
+- ` 7.4 Write property tests for relationship resolution`
 
-Step 2 — Implement task 2 only
+**Implementation Constraints:**
+1. **EARS Compliance & Architecture:** Your logic MUST satisfy the "WHEN/THE SYSTEM SHALL" conditions defined in `requirements.md`. You are absolutely **forbidden** from introducing patterns not defined in `design.md`.
+2. **Strict Mode Scope:** As per the constitution, do NOT edit files outside the Active Spec Path / global config, and do NOT touch code outside the immediate scope of Task 7.
+3. **Skill Utilization:** If the task description mentions specific Agent Skills (e.g., `tdd-workflow`, `lint-and-validate`), you **MUST** utilize those skills before marking the task complete.
+4. **Testing:** Write unit/integration tests alongside your implementation, adhering to the project's testing strategy context.
 
-After the audit, implement exactly this task and its sub-tasks:
 
-2. Implement CLI tool and command parsing
-
-2.1 Create CLI command structure and parser
-2.2 Implement CLI execution and error handling
-Follow all rules from kiro-builder.md, coding-standards.md, and testing-strategy.md. Write tests alongside the implementation. Do not touch any other tasks.
 ```

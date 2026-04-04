@@ -4,8 +4,8 @@ Part of the [Implementation Plan](./tasks.md).
 
 ## Tasks
 
-- [ ] 7. Implement Phase 3: Reference resolution
-  - [ ] 7.1 Implement import resolution
+- [x] 7. Implement Phase 3: Reference resolution
+  - [x] 7.1 Implement import resolution
     - _Skills: `typescript-expert`, `clean-code`_
     - Build symbol map for fast lookups
     - Implement findImports function to extract import statements from symbols
@@ -13,21 +13,21 @@ Part of the [Implementation Plan](./tasks.md).
     - Create Imports relationships with unresolved flag for missing targets
     - _Requirements: 3.3, 5.1, 5.6_
 
-  - [ ] 7.2 Implement call resolution
+  - [x] 7.2 Implement call resolution
     - _Skills: `typescript-expert`, `clean-code`_
     - Implement findCalls function to extract function calls from symbols
     - Implement resolveCall function to match calls to target symbols
     - Create Calls relationships
     - _Requirements: 3.3, 5.2_
 
-  - [ ] 7.3 Implement inheritance and interface resolution
+  - [x] 7.3 Implement inheritance and interface resolution
     - _Skills: `typescript-expert`, `clean-code`_
     - Implement inheritance detection for class hierarchies
     - Implement interface implementation detection
     - Create Inherits and Implements relationships
     - _Requirements: 3.3, 5.3, 5.4_
 
-  - [ ]* 7.4 Write property tests for relationship resolution
+  - [x] 7.4 Write property tests for relationship resolution
     - _Skills: `testing-patterns`, `tdd-workflow`_
     - **Property 2: Relationship Validity** - Verify all relationships reference existing symbols
     - **Validates: Requirements 5.5, 5.7**

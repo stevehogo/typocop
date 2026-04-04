@@ -1,2 +1,3 @@
-export * from "./phase1.js";
-export * from "./phase2.js";
+export * from "./structure/index.js";
+export * from "./parsing/index.js";
+export * from "./resolution/index.js";
