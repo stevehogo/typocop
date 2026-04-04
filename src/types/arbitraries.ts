@@ -11,6 +11,8 @@ import type {
   Modifier,
   Cluster,
   ClusterCategory,
+  Process,
+  ProcessStep,
 } from "./index.js";
 
 // ─── Primitives ───────────────────────────────────────────────────────────────
@@ -78,3 +80,44 @@ export const clusterArbitrary = (): fc.Arbitrary<Cluster> =>
     confidence: fc.double({ min: 0, max: 1, noNaN: true }),
     category: clusterCategoryArbitrary(),
   });
+
+// ─── Process ──────────────────────────────────────────────────────────────────
+
+/**
+ * Generates a valid ProcessStep with 0-indexed sequential order.
+ * The `order` field is set externally by processArbitrary to ensure no gaps.
+ */
+const processStepArbitrary = (order: number): fc.Arbitrary<ProcessStep> =>
+  fc.record({
+    order: fc.constant(order),
+    symbolId: fc.string({ minLength: 1 }),
+    description: fc.string({ minLength: 1 }),
+  });
+
+/**
+ * Generates a valid Process:
+ * - at least 2 steps
+ * - steps[i].order === i (0-indexed, sequential, no gaps)
+ */
+export const processArbitrary = (): fc.Arbitrary<Process> =>
+  fc
+    .integer({ min: 2, max: 10 })
+    .chain((stepCount) =>
+      fc.record({
+        id: fc.string({ minLength: 1 }),
+        name: fc.string({ minLength: 1 }),
+        entryPoint: fc.string({ minLength: 1 }),
+        steps: fc.tuple(...Array.from({ length: stepCount }, (_, i) => processStepArbitrary(i))),
+        dataFlow: fc.array(
+          fc.record({
+            from: fc.string({ minLength: 1 }),
+            to: fc.string({ minLength: 1 }),
+            dataType: fc.option(fc.string({ minLength: 1 }), { nil: undefined }),
+          }),
+        ),
+      }),
+    )
+    .map((rec) => ({
+      ...rec,
+      steps: Array.from(rec.steps),
+    }));
