@@ -88,9 +88,12 @@ async function executeQueryInternal(
     clusters = result.clusters;
     processes = result.processes;
   } else if (intent.type === "impactAnalysis" || intent.type === "contextRetrieval") {
+    if (intent.type === "impactAnalysis") {
+      const result = await executeImpactAnalysis(intent.target, query.maxResults, graphSession);
+      return { intent, ...result };
+    }
     // Stub implementation for other query types (tasks 17, 19, 20, 21)
-    const target = intent.type === "impactAnalysis" ? intent.target : intent.target;
-    const node = await findNode(graphSession, target);
+    const node = await findNode(graphSession, intent.target);
     if (node) {
       symbols.push({
         id: node.id,
