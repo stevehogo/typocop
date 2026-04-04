@@ -40,23 +40,70 @@ graph TD
 
 ```bash
 pnpm install
+pnpm build
+```
+
+### Prerequisites
+
+Before running the indexer, ensure you have:
+
+1. **Neo4j** running (default: `bolt://localhost:7687`)
+2. **PostgreSQL with pgvector** extension enabled (default: `postgresql://localhost:5432/typocop`)
+3. **OpenAI API key** (optional, for AI enrichment features)
+
+Set environment variables:
+```bash
+export NEO4J_URI=bolt://localhost:7687
+export NEO4J_USER=neo4j
+export NEO4J_PASSWORD=your-password
+export POSTGRES_URI=postgresql://localhost:5432/typocop
+export OPENAI_API_KEY=sk-...  # Optional
 ```
 
 ### Parsing a Codebase
 
 ```bash
 # General command structure
-node dist/index.js parse --path <source_path> --lang <language>
+node dist/cli/index.js parse --path <source_path> --lang <language> [--verbose]
+
+# Example: TypeScript Project
+node dist/cli/index.js parse --path ./src --lang typescript --verbose
 
 # Example: Magento 2 Project
-node dist/index.js parse --path ./app/code --lang php --verbose
+node dist/cli/index.js parse --path ./app/code --lang php --verbose
+
+# Example: Python Project
+node dist/cli/index.js parse --path ./src --lang python --verbose
 ```
+
+### Supported Languages
+
+TypeScript, JavaScript, Python, PHP, Java, Go, Rust, C, C++, C#, Ruby, Swift
 
 ### Checking Status
 
 ```bash
-node dist/index.js status
+node dist/cli/index.js status
 ```
+
+### Reindexing
+
+```bash
+node dist/cli/index.js reindex
+```
+
+## 📊 Six-Phase Indexing Pipeline
+
+The indexing pipeline (`src/indexer/pipeline.ts`) orchestrates all phases:
+
+1. **Phase 1: Structure** — Walk file tree and map folder/file relationships
+2. **Phase 2: Parsing** — Extract symbols from ASTs using tree-sitter
+3. **Phase 3: Resolution** — Resolve imports, calls, and inheritance across files
+4. **Phase 4: Clustering** — Group related symbols into functional communities (Louvain algorithm)
+5. **Phase 5: Processes** — Trace execution flows from entry points through call chains
+6. **Phase 6: Search** — Build hybrid indexes (vector + keyword) for fast retrieval
+
+Each phase builds on the previous, with results stored in Neo4j (graph structure) and PostgreSQL with pgvector (semantic search).
 
 ## ✅ Correctness Principles
 
@@ -70,6 +117,13 @@ Typocop follows strict correctness properties validated through property-based t
 ## 📄 License
 
 ISC License. See `LICENSE` (to be added) for more details.
+
+## 📚 Documentation
+
+- [Architecture Overview](docs/ARCHITECTURE.md) - System design and pipeline orchestration
+- [Design Specification](.kiro/specs/code-graph-analyzer/design.md) - Detailed system architecture
+- [Requirements](.kiro/specs/code-graph-analyzer/requirements.md) - Functional requirements (EARS notation)
+- [Implementation Tasks](.kiro/specs/code-graph-analyzer/tasks.md) - Development roadmap and progress
 
 ## Google Antigravity Prompt
 ```

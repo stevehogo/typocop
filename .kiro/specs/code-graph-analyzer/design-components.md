@@ -75,6 +75,26 @@ interface FileNode {
 
 type RelationType = "calls" | "imports" | "inherits" | "implements" | "contains" | "references" | "defines";
 
+interface PipelineConfig {
+  readonly sourcePath: string;
+  readonly language: Language;
+  readonly verbose: boolean;
+  readonly graphSession: Session;
+  readonly vectorPool: Pool;
+  readonly aiClient?: AIClient;
+}
+
+interface PipelineResult {
+  readonly symbols: Symbol[];
+  readonly relationships: Relationship[];
+  readonly clusters: Cluster[];
+  readonly processes: Process[];
+  readonly skippedFiles: number;
+}
+
+// Main pipeline orchestrator
+function runIndexingPipeline(config: PipelineConfig): Promise<PipelineResult>;
+
 // Phase 1: Structure
 function walkFileTree(rootPath: string): Promise<FileNode[]>;
 
@@ -82,25 +102,29 @@ function walkFileTree(rootPath: string): Promise<FileNode[]>;
 function extractAllSymbols(fileNodes: FileNode[]): Promise<Symbol[]>;
 
 // Phase 3: Resolution
-function resolveReferences(symbols: Symbol[]): Promise<Relationship[]>;
+function resolveReferences(symbols: Symbol[]): Relationship[];
 
 // Phase 4: Clustering
-function clusterSymbols(symbols: Symbol[], rels: Relationship[]): Promise<Cluster[]>;
+function clusterSymbols(symbols: Symbol[], rels: Relationship[], aiClient?: AIClient): Promise<Cluster[]>;
 
 // Phase 5: Processes
-function traceProcesses(symbols: Symbol[], rels: Relationship[]): Promise<Process[]>;
+function traceProcesses(symbols: Symbol[], rels: Relationship[]): Process[];
 
 // Phase 6: Search
-function buildSearchIndex(symbols: Symbol[], clusters: Cluster[]): Promise<SearchIndex>;
+function buildSearchIndex(symbols: Symbol[], clusters: Cluster[], embedFn: (text: string) => Promise<Embedding | null>): Promise<void>;
 ```
 
 **Responsibilities**:
+- Orchestrate all 6 phases sequentially with progress logging
 - Phase 1: Walk file tree and map folder/file relationships
 - Phase 2: Extract functions, classes, methods, interfaces from ASTs
 - Phase 3: Resolve imports, calls, inheritance across files
 - Phase 4: Group related symbols into functional communities
 - Phase 5: Trace execution flows from entry points through call chains
 - Phase 6: Build hybrid search indexes for fast retrieval
+- Store all results in Neo4j (graph nodes/edges) and pgvector (embeddings)
+- Handle empty results gracefully at each phase
+- Track skipped files and provide detailed statistics
 
 ## Component 4: Graph Database Interface
 

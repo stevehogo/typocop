@@ -1,0 +1,108 @@
+/**
+ * Tests for MCP validation.
+ */
+import { describe, it, expect } from "vitest";
+import { validateMCPRequest, validateToolParams } from "./validation.js";
+import { MCPValidationError } from "./types.js";
+
+describe("validateMCPRequest", () => {
+  it("accepts valid request", () => {
+    const request = { method: "test", params: {} };
+    expect(() => validateMCPRequest(request)).not.toThrow();
+  });
+
+  it("throws for null request", () => {
+    expect(() => validateMCPRequest(null)).toThrow(MCPValidationError);
+    expect(() => validateMCPRequest(null)).toThrow("Request must be an object");
+  });
+
+  it("throws for non-object request", () => {
+    expect(() => validateMCPRequest("invalid")).toThrow(MCPValidationError);
+    expect(() => validateMCPRequest(123)).toThrow(MCPValidationError);
+  });
+
+  it("throws for missing method", () => {
+    expect(() => validateMCPRequest({ params: {} })).toThrow(MCPValidationError);
+    expect(() => validateMCPRequest({ params: {} })).toThrow("method");
+  });
+
+  it("throws for non-string method", () => {
+    expect(() => validateMCPRequest({ method: 123, params: {} })).toThrow(MCPValidationError);
+  });
+
+  it("throws for missing params", () => {
+    expect(() => validateMCPRequest({ method: "test" })).toThrow(MCPValidationError);
+    expect(() => validateMCPRequest({ method: "test" })).toThrow("params");
+  });
+
+  it("throws for non-object params", () => {
+    expect(() => validateMCPRequest({ method: "test", params: "invalid" })).toThrow(MCPValidationError);
+    expect(() => validateMCPRequest({ method: "test", params: [] })).toThrow(MCPValidationError);
+  });
+});
+
+describe("validateToolParams", () => {
+  describe("get_symbol_context", () => {
+    it("accepts valid params", () => {
+      expect(() => validateToolParams("get_symbol_context", { symbolName: "test" })).not.toThrow();
+    });
+
+    it("throws for missing symbolName", () => {
+      expect(() => validateToolParams("get_symbol_context", {})).toThrow(MCPValidationError);
+      expect(() => validateToolParams("get_symbol_context", {})).toThrow("symbolName");
+    });
+
+    it("throws for non-string symbolName", () => {
+      expect(() => validateToolParams("get_symbol_context", { symbolName: 123 })).toThrow(MCPValidationError);
+    });
+  });
+
+  describe("find_dependents", () => {
+    it("accepts valid params", () => {
+      expect(() => validateToolParams("find_dependents", { symbolName: "test" })).not.toThrow();
+      expect(() => validateToolParams("find_dependents", { symbolName: "test", maxDepth: 5 })).not.toThrow();
+    });
+
+    it("throws for missing symbolName", () => {
+      expect(() => validateToolParams("find_dependents", {})).toThrow(MCPValidationError);
+    });
+
+    it("throws for non-number maxDepth", () => {
+      expect(() => validateToolParams("find_dependents", { symbolName: "test", maxDepth: "5" })).toThrow(MCPValidationError);
+    });
+  });
+
+  describe("trace_data_flow", () => {
+    it("accepts valid params", () => {
+      expect(() => validateToolParams("trace_data_flow", { entryPoint: "test" })).not.toThrow();
+    });
+
+    it("throws for missing entryPoint", () => {
+      expect(() => validateToolParams("trace_data_flow", {})).toThrow(MCPValidationError);
+    });
+  });
+
+  describe("impact_analysis", () => {
+    it("accepts valid params", () => {
+      expect(() => validateToolParams("impact_analysis", { symbolName: "test" })).not.toThrow();
+      expect(() => validateToolParams("impact_analysis", { symbolName: "test", changeType: "modify" })).not.toThrow();
+      expect(() => validateToolParams("impact_analysis", { symbolName: "test", changeType: "delete" })).not.toThrow();
+      expect(() => validateToolParams("impact_analysis", { symbolName: "test", changeType: "rename" })).not.toThrow();
+    });
+
+    it("throws for missing symbolName", () => {
+      expect(() => validateToolParams("impact_analysis", {})).toThrow(MCPValidationError);
+    });
+
+    it("throws for invalid changeType", () => {
+      expect(() => validateToolParams("impact_analysis", { symbolName: "test", changeType: "invalid" })).toThrow(MCPValidationError);
+    });
+  });
+
+  describe("unknown tool", () => {
+    it("throws for unknown tool", () => {
+      expect(() => validateToolParams("unknown_tool", {})).toThrow(MCPValidationError);
+      expect(() => validateToolParams("unknown_tool", {})).toThrow("Unknown tool");
+    });
+  });
+});

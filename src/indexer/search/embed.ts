@@ -1,8 +1,10 @@
 // Phase 6: Embedding generation for symbols and clusters
 // Calls OpenAI text-embedding-3-large (3072 dimensions)
+// Requirements: 22.1, 22.2 - Only symbol signatures are sent, never full code
 
 import OpenAI from "openai";
 import type { Symbol, Cluster, Embedding } from "../../types/index.js";
+import { verifyEmbeddingText } from "../../security/privacy.js";
 
 export interface EmbeddingConfig {
   readonly apiKey: string;
@@ -15,6 +17,9 @@ const EMBEDDING_DIMENSIONS = 3072;
 /**
  * Formats a symbol into a text string suitable for embedding.
  * Uses name, kind, signature, and documentation.
+ * 
+ * PRIVACY: Only symbol metadata is included, never full source code.
+ * Requirements: 22.2
  */
 export function formatSymbolForEmbedding(symbol: Symbol): string {
   const parts: string[] = [
@@ -30,11 +35,20 @@ export function formatSymbolForEmbedding(symbol: Symbol): string {
   if (symbol.modifiers.length > 0) {
     parts.push(`modifiers: ${symbol.modifiers.join(", ")}`);
   }
-  return parts.join("\n");
+  
+  const formatted = parts.join("\n");
+  
+  // Verify no source code is included (Req 22.2)
+  verifyEmbeddingText(formatted, `symbol ${symbol.name}`);
+  
+  return formatted;
 }
 
 /**
  * Formats a cluster and its resolved symbols into a text string for embedding.
+ * 
+ * PRIVACY: Only cluster metadata and symbol names/kinds are included.
+ * Requirements: 22.2
  */
 export function formatClusterForEmbedding(cluster: Cluster, symbols: Symbol[]): string {
   const parts: string[] = [
@@ -46,7 +60,13 @@ export function formatClusterForEmbedding(cluster: Cluster, symbols: Symbol[]): 
     const symbolNames = symbols.map(s => `${s.kind} ${s.name}`).join(", ");
     parts.push(`symbols: ${symbolNames}`);
   }
-  return parts.join("\n");
+  
+  const formatted = parts.join("\n");
+  
+  // Verify no source code is included (Req 22.2)
+  verifyEmbeddingText(formatted, `cluster ${cluster.name}`);
+  
+  return formatted;
 }
 
 /**

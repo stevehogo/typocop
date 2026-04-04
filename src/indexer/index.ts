@@ -4,3 +4,4 @@ export * from "./resolution/index.js";
 export * from "./clustering/index.js";
 export * from "./processes/index.js";
 export * from "./search/index.js";
+export * from "./pipeline.js";

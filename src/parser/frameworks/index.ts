@@ -11,3 +11,5 @@ export { parseSpringBootFile, SPRING_BOOT_SUPPORT } from "./spring-boot.js";
 export { parseFastAPIFile, FASTAPI_SUPPORT } from "./fastapi.js";
 export { parseDjangoFile, DJANGO_SUPPORT } from "./django.js";
 export { parseORMModels } from "./orm.js";
+export { validateFrameworkSupport, assertValidFrameworkSupport } from "./framework-support.js";
+export type { ValidationResult, ValidationError } from "./framework-support.js";

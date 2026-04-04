@@ -1,6 +1,11 @@
+import type { Driver, Session } from "neo4j-driver";
+import type { Pool } from "pg";
 import { CLICommand } from "./parser.js";
 import chalk from "chalk";
 import ora from "ora";
+import { createDriver } from "../graph/connection.js";
+import { createPool, initVectorStore } from "../vector/connection.js";
+import { runIndexingPipeline, type PipelineConfig } from "../indexer/pipeline.js";
 
 export interface IndexingStats {
   symbolCount: number;
@@ -16,21 +21,111 @@ export interface GraphStatus {
   lastIndexed: string | null;
 }
 
-// Placeholder — replaced when pipeline is wired in (tasks 3–14)
-async function runIndexingPipeline(
+/**
+ * Get database configuration from environment variables.
+ * Requirements: 22.1
+ */
+function getDatabaseConfig() {
+  const neo4jUri = process.env.NEO4J_URI || "bolt://localhost:7687";
+  const neo4jUser = process.env.NEO4J_USER || "neo4j";
+  const neo4jPassword = process.env.NEO4J_PASSWORD || "password";
+  
+  const pgHost = process.env.POSTGRES_HOST || "localhost";
+  const pgPort = parseInt(process.env.POSTGRES_PORT || "5432", 10);
+  const pgDatabase = process.env.POSTGRES_DB || "typocop";
+  const pgUser = process.env.POSTGRES_USER || "postgres";
+  const pgPassword = process.env.POSTGRES_PASSWORD || "password";
+
+  return {
+    neo4j: { uri: neo4jUri, user: neo4jUser, password: neo4jPassword },
+    postgres: { host: pgHost, port: pgPort, database: pgDatabase, user: pgUser, password: pgPassword },
+  };
+}
+
+/**
+ * Execute the indexing pipeline with database connections.
+ * Requirements: 1.1, 3.1–3.8
+ */
+async function executeIndexingPipeline(
   sourcePath: string,
   language: string,
   verbose: boolean
 ): Promise<IndexingStats> {
-  void sourcePath;
-  void language;
-  void verbose;
-  return { symbolCount: 0, relationshipCount: 0, clusterCount: 0, processCount: 0, skippedFiles: 0 };
+  const config = getDatabaseConfig();
+  
+  // Create database connections
+  const driver = await createDriver(config.neo4j.uri, config.neo4j.user, config.neo4j.password);
+  const pool = await createPool(config.postgres);
+  
+  try {
+    // Initialize vector store
+    await initVectorStore(pool);
+    
+    const session = driver.session();
+    try {
+      const pipelineConfig: PipelineConfig = {
+        sourcePath,
+        language: language as any,
+        verbose,
+        graphSession: session,
+        vectorPool: pool,
+      };
+      
+      const result = await runIndexingPipeline(pipelineConfig);
+      
+      return {
+        symbolCount: result.symbols.length,
+        relationshipCount: result.relationships.length,
+        clusterCount: result.clusters.length,
+        processCount: result.processes.length,
+        skippedFiles: result.skippedFiles,
+      };
+    } finally {
+      await session.close();
+    }
+  } finally {
+    await driver.close();
+    await pool.end();
+  }
 }
 
-// Placeholder — replaced when graph DB is wired in (task 12)
+/**
+ * Read graph status from Neo4j.
+ * Requirements: 1.7
+ */
 async function readGraphStatus(_dbPath?: string): Promise<GraphStatus> {
-  return { symbolCount: 0, relationshipCount: 0, lastIndexed: null };
+  const config = getDatabaseConfig();
+  
+  const driver = await createDriver(config.neo4j.uri, config.neo4j.user, config.neo4j.password);
+  
+  try {
+    const session = driver.session();
+    try {
+      // Count symbols
+      const symbolResult = await session.run("MATCH (s:Symbol) RETURN count(s) as count");
+      const symbolCount = symbolResult.records[0]?.get("count").toNumber() || 0;
+      
+      // Count relationships
+      const relResult = await session.run("MATCH ()-[r]->() RETURN count(r) as count");
+      const relationshipCount = relResult.records[0]?.get("count").toNumber() || 0;
+      
+      // Get last indexed timestamp (stored as a property on a metadata node)
+      const timestampResult = await session.run(
+        "MATCH (m:Metadata {key: 'lastIndexed'}) RETURN m.timestamp as timestamp"
+      );
+      const lastIndexed = timestampResult.records[0]?.get("timestamp") || null;
+      
+      return {
+        symbolCount,
+        relationshipCount,
+        lastIndexed,
+      };
+    } finally {
+      await session.close();
+    }
+  } finally {
+    await driver.close();
+  }
 }
 
 export async function executeCLI(command: CLICommand): Promise<void> {
@@ -46,7 +141,7 @@ export async function executeCLI(command: CLICommand): Promise<void> {
           spinner.info("Verbose mode enabled.");
         }
 
-        const stats = await runIndexingPipeline(sourcePath, language, verbose);
+        const stats = await executeIndexingPipeline(sourcePath, language, verbose);
 
         spinner.succeed(chalk.green("Indexing completed successfully."));
         console.log(chalk.bold("\nStatistics:"));
@@ -68,7 +163,7 @@ export async function executeCLI(command: CLICommand): Promise<void> {
     case "reindex": {
       const spinner = ora(`Reindexing database at ${command.dbPath}...`).start();
       try {
-        await runIndexingPipeline(command.dbPath, "typescript", false);
+        await executeIndexingPipeline(command.dbPath, "typescript", false);
         spinner.succeed(chalk.green("Reindexing complete."));
       } catch (err) {
         spinner.fail(chalk.red("Reindexing failed."));

@@ -5,9 +5,12 @@
  * using heuristic keyword matching (no external API required at index time).
  * When an AI client is provided, it calls the LLM for richer names.
  *
- * Requirements: 3.4, 6.3, 6.4, 6.6, 24.1, 24.2
+ * PRIVACY: Only symbol names and kinds are sent to AI services, never full code.
+ *
+ * Requirements: 3.4, 6.3, 6.4, 6.6, 22.2, 24.1, 24.2
  */
 import type { Cluster, ClusterCategory, Symbol } from "../../types/index.js";
+import { verifyEnrichmentPrompt } from "../../security/privacy.js";
 
 // ─── Category keyword map ─────────────────────────────────────────────────────
 
@@ -99,7 +102,9 @@ export interface AIClient {
  * If an AI client is provided, calls the LLM with a concise prompt.
  * Falls back to the heuristic label when AI is unavailable or fails.
  *
- * Requirements: 6.6, 24.1
+ * PRIVACY: Only sends symbol names and kinds (max 20 symbols), never full code.
+ *
+ * Requirements: 6.6, 22.2, 24.1
  */
 export async function inferClusterName(
   heuristicLabel: string,
@@ -121,6 +126,9 @@ export async function inferClusterName(
     `Heuristic: "${heuristicLabel}"\n` +
     `Members: ${members}\n` +
     `Reply with ONLY the name, no punctuation.`;
+
+  // Verify no source code or file paths are in the prompt (Req 22.2)
+  verifyEnrichmentPrompt(prompt, `cluster ${heuristicLabel}`);
 
   try {
     const raw = await aiClient.generateText(prompt);

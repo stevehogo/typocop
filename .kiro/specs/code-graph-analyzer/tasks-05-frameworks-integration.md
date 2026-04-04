@@ -4,7 +4,7 @@ Part of the [Implementation Plan](./tasks.md).
 
 ## Tasks
 
-- [ ] 23. Implement framework-specific parsing
+- [x] 23. Implement framework-specific parsing
   - [x] 23.0 Implement Magento 2 parser
     - _Skills: `php-pro`, `typescript-expert`_
     - Parse webapi.xml to extract REST and GraphQL endpoint definitions (route → interface method mapping)
@@ -55,8 +55,8 @@ Part of the [Implementation Plan](./tasks.md).
     - Set tracingLevel to Partial
     - _Requirements: 14.7, 14.8, 14.10_
 
-- [ ] 24. Implement framework support validation
-  - [ ] 24.1 Implement FrameworkSupport validation rules
+- [x] 24. Implement framework support validation
+  - [x] 24.1 Implement FrameworkSupport validation rules
     - _Skills: `typescript-expert`, `clean-code`_
     - Enforce that at least one of apiEndpoints, controllers, or dbModels is true
     - Enforce that supportedORMs is non-empty when dbModels is true
@@ -64,7 +64,7 @@ Part of the [Implementation Plan](./tasks.md).
     - Enforce that tracingLevel "partial" requires at least one but not all capabilities to be true
     - _Requirements: 25.1, 25.2, 25.3, 25.4_
 
-  - [ ]* 24.2 Write property test for framework support invariant
+  - [x] 24.2 Write property test for framework support invariant
     - _Skills: `testing-patterns`, `tdd-workflow`_
     - **Property 21: Framework Support Invariant** - Verify full tracing requires all three capabilities, dbModels requires non-empty ORMs, and at least one capability is always enabled
     - **Validates: Requirements 25.1, 25.2, 25.3, 25.4**
