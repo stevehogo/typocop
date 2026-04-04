@@ -17,7 +17,7 @@ Part of the [Implementation Plan](./tasks.md).
     - Set tracingLevel to Full
     - _Requirements: 14.1, 14.9_
 
-  - [ ] 23.1 Implement NestJS parser
+  - [x] 23.1 Implement NestJS parser
     - _Skills: `nestjs-expert`, `typescript-expert`_
     - Extract route decorators (@Get, @Post, etc.)
     - Parse dependency injection patterns
@@ -25,7 +25,7 @@ Part of the [Implementation Plan](./tasks.md).
     - Set tracingLevel to Full
     - _Requirements: 14.2, 14.9_
 
-  - [ ] 23.2 Implement Laravel parser
+  - [x] 23.2 Implement Laravel parser
     - _Skills: `laravel-expert`, `php-pro`_
     - Extract route definitions from routes files
     - Parse Eloquent model definitions
@@ -33,7 +33,7 @@ Part of the [Implementation Plan](./tasks.md).
     - Set tracingLevel to Full
     - _Requirements: 14.3, 14.9_
 
-  - [ ] 23.3 Implement Express and Fastify parsers
+  - [x] 23.3 Implement Express and Fastify parsers
     - _Skills: `nodejs-best-practices`, `typescript-expert`_
     - Extract route handlers (app.get, app.post, etc.)
     - Parse middleware chains
