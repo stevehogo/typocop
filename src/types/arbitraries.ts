@@ -11,6 +11,7 @@ import type {
   Modifier,
   Cluster,
   ClusterCategory,
+  Embedding,
   Process,
   ProcessStep,
 } from "./index.js";
@@ -34,6 +35,15 @@ const clusterCategoryArbitrary = (): fc.Arbitrary<ClusterCategory> =>
     "authentication", "dataAccess", "businessLogic",
     "uiComponent", "utility", "unknown"
   );
+
+// ─── Embedding ────────────────────────────────────────────────────────────────
+
+/** Generates a valid Embedding: vector with exactly 3072 elements, dimensions === 3072. */
+export const embeddingArbitrary = (): fc.Arbitrary<Embedding> =>
+  fc.record({
+    vector: fc.array(fc.float({ noNaN: true }), { minLength: 3072, maxLength: 3072 }),
+    dimensions: fc.constant(3072 as const),
+  });
 
 // ─── Location ─────────────────────────────────────────────────────────────────
 

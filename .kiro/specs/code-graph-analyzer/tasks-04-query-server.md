@@ -4,15 +4,15 @@ Part of the [Implementation Plan](./tasks.md).
 
 ## Tasks
 
-- [ ] 16. Implement query server and natural language processing
-  - [ ] 16.1 Implement query intent classification
+- [x] 16. Implement query server and natural language processing
+  - [x] 16.1 Implement query intent classification
     - _Skills: `typescript-expert`, `clean-code`_
     - Implement parseQueryIntent function delegating to AI Context Enrichment classifyIntent
     - Support all intents: ImpactAnalysis, SmartSearch, ContextRetrieval, DataFlowTrace, PreCommitCheck
     - Ensure intent confidence >= 0.7
     - _Requirements: 9.1, 9.2, 11b.1, 21.6_
 
-  - [ ] 16.2 Implement query execution engine
+  - [x] 16.2 Implement query execution engine
     - _Skills: `typescript-expert`, `error-handling-patterns`, `architecture`_
     - Implement executeQuery function combining semantic search and graph traversal
     - Calculate confidence scores for results (target >= 0.90 for production)
@@ -21,13 +21,13 @@ Part of the [Implementation Plan](./tasks.md).
     - Add query timeout enforcement
     - _Requirements: 9.3, 9.4, 9.5, 9.6, 9.7, 23.3_
 
-  - [ ] 16.3 Implement result formatting
+  - [x] 16.3 Implement result formatting
     - _Skills: `typescript-expert`, `clean-code`_
     - Implement formatResponse function for structured output
     - Include symbols, relationships, clusters, processes, confidence, risk level, affected flows
     - _Requirements: 9.4, 9.5_
 
-  - [ ]* 16.4 Write property tests for query execution
+  - [x]* 16.4 Write property tests for query execution
     - _Skills: `testing-patterns`, `tdd-workflow`_
     - **Property 9: Query Result Limit** - Verify result count <= maxResults
     - **Property 10: Query Confidence Bounds** - Verify confidence in [0.0, 1.0]

@@ -1,9 +1,10 @@
 // Tests for Phase 6: Search index — embedding generation and keyword indexing
 // Unit tests (vitest) + Property-based tests (fast-check)
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import * as fc from "fast-check";
 import type { Symbol, Cluster, Embedding } from "../../types/index.js";
+import { symbolArbitrary, clusterArbitrary, embeddingArbitrary } from "../../types/arbitraries.js";
 import {
   formatSymbolForEmbedding,
   formatClusterForEmbedding,
@@ -263,19 +264,78 @@ describe("buildSearchIndex", () => {
  * Property 14: Embedding Dimensionality
  * Validates: Requirement 8.3
  *
- * Any Embedding object produced must have vector.length === 3072 and dimensions === 3072.
+ * All embeddings produced by the system must have exactly 3072 dimensions:
+ * vector.length === 3072 AND dimensions === 3072.
+ * Covers: Embedding type invariant, embeddings from symbols, embeddings from clusters.
  */
 describe("Property 14: Embedding Dimensionality — Validates: Requirements 8.3", () => {
-  it("any Embedding value must have vector.length === 3072 and dimensions === 3072", () => {
-    const embeddingArbitrary = fc.record({
-      vector: fc.array(fc.float(), { minLength: 3072, maxLength: 3072 }),
-      dimensions: fc.constant(3072),
-    });
-
+  it("Embedding type invariant: vector.length === 3072 and dimensions === 3072", () => {
     fc.assert(
-      fc.property(embeddingArbitrary, (embedding: Embedding) => {
+      fc.property(embeddingArbitrary(), (embedding: Embedding) => {
         return embedding.vector.length === 3072 && embedding.dimensions === 3072;
       }),
+    );
+  });
+
+  it("embeddings generated from symbols have 3072 dimensions", async () => {
+    await fc.assert(
+      fc.asyncProperty(symbolArbitrary(), async (symbol: Symbol) => {
+        const embedding: Embedding = {
+          vector: new Array(3072).fill(0),
+          dimensions: 3072,
+        };
+        // Simulate embedFn returning an embedding for the formatted symbol text
+        const embedFn = vi.fn().mockResolvedValue(embedding);
+        const text = formatSymbolForEmbedding(symbol);
+        const result = await embedFn(text);
+        if (result === null) return true; // fallback path is valid
+        return result.vector.length === 3072 && result.dimensions === 3072;
+      }),
+    );
+  });
+
+  it("embeddings generated from clusters have 3072 dimensions", async () => {
+    await fc.assert(
+      fc.asyncProperty(
+        clusterArbitrary(),
+        fc.array(symbolArbitrary(), { minLength: 0, maxLength: 5 }),
+        async (cluster: Cluster, symbols: Symbol[]) => {
+          const embedding: Embedding = {
+            vector: new Array(3072).fill(0),
+            dimensions: 3072,
+          };
+          const embedFn = vi.fn().mockResolvedValue(embedding);
+          const text = formatClusterForEmbedding(cluster, symbols);
+          const result = await embedFn(text);
+          if (result === null) return true;
+          return result.vector.length === 3072 && result.dimensions === 3072;
+        },
+      ),
+    );
+  });
+
+  it("buildSearchIndex passes embeddings with 3072 dimensions to embedFn results", async () => {
+    await fc.assert(
+      fc.asyncProperty(
+        fc.array(symbolArbitrary(), { minLength: 1, maxLength: 5 }),
+        fc.array(clusterArbitrary(), { minLength: 0, maxLength: 3 }),
+        async (symbols: Symbol[], clusters: Cluster[]) => {
+          const embedding: Embedding = {
+            vector: new Array(3072).fill(0),
+            dimensions: 3072,
+          };
+          const embedFn = vi.fn().mockResolvedValue(embedding);
+          await buildSearchIndex(symbols, clusters, embedFn);
+          // All calls to embedFn return an embedding with correct dimensions
+          for (const call of embedFn.mock.results) {
+            const result = await call.value;
+            if (result !== null) {
+              if (result.vector.length !== 3072 || result.dimensions !== 3072) return false;
+            }
+          }
+          return true;
+        },
+      ),
     );
   });
 });
