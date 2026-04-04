@@ -62,24 +62,35 @@ export async function executeQuery(
 
 async function executeQueryInternal(
   query: Query,
-  _vectorPool: Pool,
+  vectorPool: Pool,
   graphSession: Session,
 ): Promise<QueryResult> {
   const { intent, confidence: intentConfidence } = parseQueryIntent(query.text);
-
-  if (intent.type === "impactAnalysis") {
-    const result = await executeImpactAnalysis(intent.target, query.maxResults, graphSession);
-    return { intent, ...result };
-  }
-
   // Stub for remaining query types (tasks 18-21)
-  const symbols: Symbol[] = [];
-  const relationships: Relationship[] = [];
-  const clusters: Cluster[] = [];
-  const processes: Process[] = [];
+  let symbols: Symbol[] = [];
+  let relationships: Relationship[] = [];
+  let clusters: Cluster[] = [];
+  let processes: Process[] = [];
 
-  if (intent.type === "contextRetrieval") {
-    const node = await findNode(graphSession, intent.target);
+
+  // Route to specific query handler based on intent
+  if (intent.type === "smartSearch") {
+    const { executeSmartSearch } = await import("./smart-search.js");
+    const { generateEmbedding } = await import("../vector/embed.js");
+    const result = await executeSmartSearch(
+      intent.query,
+      query.maxResults,
+      vectorPool,
+      graphSession,
+      generateEmbedding,
+    );
+    symbols = result.symbols;
+    clusters = result.clusters;
+    processes = result.processes;
+  } else if (intent.type === "impactAnalysis" || intent.type === "contextRetrieval") {
+    // Stub implementation for other query types (tasks 17, 19, 20, 21)
+    const target = intent.type === "impactAnalysis" ? intent.target : intent.target;
+    const node = await findNode(graphSession, target);
     if (node) {
       symbols.push({
         id: node.id,
@@ -97,7 +108,6 @@ async function executeQueryInternal(
       });
     }
   }
-
   // Enforce maxResults limit (Req 9.6)
   const limitedSymbols = symbols.slice(0, query.maxResults);
 
