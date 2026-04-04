@@ -13,12 +13,22 @@
  *   When confidence >= 0.90, at least one symbol must be returned.
  *   Validates: Requirements 9.7, 21.3, 21.4
  */
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import * as fc from "fast-check";
 import { parseQueryIntent } from "./parse-intent.js";
 import { executeQuery } from "./execute-query.js";
 import { formatResponse } from "./format-response.js";
 import type { Query, QueryResult } from "../types/index.js";
+
+// ─── Mocks ────────────────────────────────────────────────────────────────────
+
+// Mock the embedding module to avoid OpenAI API calls
+vi.mock("../vector/embed.js", () => ({
+  generateEmbedding: vi.fn(async () => ({
+    vector: new Array(3072).fill(0),
+    dimensions: 3072,
+  })),
+}));
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 

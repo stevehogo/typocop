@@ -62,24 +62,35 @@ export async function executeQuery(
 
 async function executeQueryInternal(
   query: Query,
-  _vectorPool: Pool,
+  vectorPool: Pool,
   graphSession: Session,
 ): Promise<QueryResult> {
   const { intent, confidence: intentConfidence } = parseQueryIntent(query.text);
 
-  // Stub implementation — actual query logic will be in tasks 17-21
-  // For now, return minimal valid result
-  const symbols: Symbol[] = [];
-  const relationships: Relationship[] = [];
-  const clusters: Cluster[] = [];
-  const processes: Process[] = [];
+  let symbols: Symbol[] = [];
+  let relationships: Relationship[] = [];
+  let clusters: Cluster[] = [];
+  let processes: Process[] = [];
 
-  // Try to find a symbol if intent has a target
-  if (intent.type === "impactAnalysis" || intent.type === "contextRetrieval") {
+  // Route to specific query handler based on intent
+  if (intent.type === "smartSearch") {
+    const { executeSmartSearch } = await import("./smart-search.js");
+    const { generateEmbedding } = await import("../vector/embed.js");
+    const result = await executeSmartSearch(
+      intent.query,
+      query.maxResults,
+      vectorPool,
+      graphSession,
+      generateEmbedding,
+    );
+    symbols = result.symbols;
+    clusters = result.clusters;
+    processes = result.processes;
+  } else if (intent.type === "impactAnalysis" || intent.type === "contextRetrieval") {
+    // Stub implementation for other query types (tasks 17, 19, 20, 21)
     const target = intent.type === "impactAnalysis" ? intent.target : intent.target;
     const node = await findNode(graphSession, target);
     if (node) {
-      // Convert GraphNode to Symbol (stub)
       symbols.push({
         id: node.id,
         name: node.properties["name"] ?? node.id,
