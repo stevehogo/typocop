@@ -34,8 +34,8 @@ Part of the [Implementation Plan](./tasks.md).
     - **Property 11: High Confidence Completeness** - Verify confidence >= 0.90 implies symbols exist
     - **Validates: Requirements 9.4, 9.6, 9.7, 21.2, 21.3, 21.4**
 
-- [ ] 17. Implement impact analysis queries
-  - [ ] 17.1 Implement impact analysis logic
+- [x] 17. Implement impact analysis queries
+  - [x] 17.1 Implement impact analysis logic
     - _Skills: `typescript-expert`, `architecture`_
     - Identify target symbol from query
     - Find all direct and transitive dependents using graph traversal
@@ -43,7 +43,7 @@ Part of the [Implementation Plan](./tasks.md).
     - Calculate risk level based on affected count and component criticality
     - _Requirements: 10.1, 10.2, 10.3, 10.8_
 
-  - [ ]* 17.2 Write property test for risk level consistency
+  - [x] 17.2 Write property test for risk level consistency
     - _Skills: `testing-patterns`, `tdd-workflow`_
     - **Property 12: Risk Level Consistency** - Verify risk level matches affected symbol count thresholds
     - **Validates: Requirements 10.4, 10.5, 10.6, 10.7**

@@ -6,9 +6,9 @@ import type { Pool } from "pg";
 import type { Session } from "neo4j-driver";
 import type { Query, QueryResult, QueryIntent, Symbol, Relationship, Cluster, Process, RiskLevel } from "../types/index.js";
 import { QUERY_TIMEOUT_MS } from "../utils/limits.js";
-import { semanticSearch } from "../vector/search.js";
-import { findNode, findDependents } from "../graph/query.js";
+import { findNode } from "../graph/query.js";
 import { parseQueryIntent } from "./parse-intent.js";
+import { executeImpactAnalysis } from "./impact-analysis.js";
 
 /**
  * Calculate risk level based on affected symbol count and criticality.
@@ -67,19 +67,20 @@ async function executeQueryInternal(
 ): Promise<QueryResult> {
   const { intent, confidence: intentConfidence } = parseQueryIntent(query.text);
 
-  // Stub implementation — actual query logic will be in tasks 17-21
-  // For now, return minimal valid result
+  if (intent.type === "impactAnalysis") {
+    const result = await executeImpactAnalysis(intent.target, query.maxResults, graphSession);
+    return { intent, ...result };
+  }
+
+  // Stub for remaining query types (tasks 18-21)
   const symbols: Symbol[] = [];
   const relationships: Relationship[] = [];
   const clusters: Cluster[] = [];
   const processes: Process[] = [];
 
-  // Try to find a symbol if intent has a target
-  if (intent.type === "impactAnalysis" || intent.type === "contextRetrieval") {
-    const target = intent.type === "impactAnalysis" ? intent.target : intent.target;
-    const node = await findNode(graphSession, target);
+  if (intent.type === "contextRetrieval") {
+    const node = await findNode(graphSession, intent.target);
     if (node) {
-      // Convert GraphNode to Symbol (stub)
       symbols.push({
         id: node.id,
         name: node.properties["name"] ?? node.id,
@@ -102,7 +103,7 @@ async function executeQueryInternal(
 
   const confidence = Math.max(
     calculateConfidence(limitedSymbols, relationships, intent),
-    intentConfidence * 0.8, // Intent confidence contributes
+    intentConfidence * 0.8,
   );
 
   const riskLevel = calculateRiskLevel(limitedSymbols.length, limitedSymbols);

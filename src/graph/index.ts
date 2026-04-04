@@ -5,4 +5,4 @@
 export type { GraphNode, GraphEdge } from "./connection.js";
 export { createDriver, withRetry } from "./connection.js";
 export { storeNodes, storeEdges } from "./store.js";
-export { findNode, findDependents, findDependencies, traversePath } from "./query.js";
+export { findNode, findDependents, findDependencies, traversePath, findProcessesBySymbol, findClustersBySymbol } from "./query.js";

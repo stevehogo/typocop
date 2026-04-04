@@ -49,6 +49,36 @@ export async function findDependencies(session: Session, symbolId: string): Prom
 }
 
 /**
+ * Find all Process nodes that contain the given symbol as a step.
+ * Requirements: 10.3, 12.4
+ */
+export async function findProcessesBySymbol(session: Session, symbolId: string): Promise<GraphNode[]> {
+  const result = await session.run(
+    `MATCH (p:Process)-[:HAS_STEP]->(s {id: $id}) RETURN DISTINCT p`,
+    { id: symbolId },
+  );
+  return result.records.map((r) => {
+    const n = r.get("p") as { labels: string[]; properties: Record<string, string> };
+    return { id: n.properties["id"] ?? "", labels: n.labels, properties: n.properties };
+  });
+}
+
+/**
+ * Find all Cluster nodes that contain the given symbol.
+ * Requirements: 12.5
+ */
+export async function findClustersBySymbol(session: Session, symbolId: string): Promise<GraphNode[]> {
+  const result = await session.run(
+    `MATCH (c:Cluster)-[:CONTAINS]->(s {id: $id}) RETURN DISTINCT c`,
+    { id: symbolId },
+  );
+  return result.records.map((r) => {
+    const n = r.get("c") as { labels: string[]; properties: Record<string, string> };
+    return { id: n.properties["id"] ?? "", labels: n.labels, properties: n.properties };
+  });
+}
+
+/**
  * Find all paths between two symbols up to MAX_TRAVERSAL_DEPTH hops.
  * Requirements: 16.6, 16.7, 23.4
  */

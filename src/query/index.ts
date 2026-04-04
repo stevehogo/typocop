@@ -5,3 +5,4 @@
 export { parseQueryIntent } from "./parse-intent.js";
 export { executeQuery } from "./execute-query.js";
 export { formatResponse } from "./format-response.js";
+export { executeImpactAnalysis, calculateImpactRisk } from "./impact-analysis.js";
