@@ -12,7 +12,8 @@ export async function initParser(language: Language): Promise<Parser> {
   return parser;
 }
 
-async function loadGrammar(language: Language): Promise<unknown> {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function loadGrammar(language: Language): Promise<any> {
   switch (language) {
     case "typescript": {
       const mod = await import("tree-sitter-typescript");

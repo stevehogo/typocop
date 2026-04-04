@@ -8,7 +8,7 @@
  * - fileIndex: Map<filePath, Map<name, Symbol>> — O(1) exact lookup per file
  * - globalIndex: Map<name, Symbol[]> — fuzzy/global lookup across all files
  */
-import type { Symbol } from "../types/index.js";
+import type { Symbol } from "../../types/index.js";
 
 export interface SymbolTable {
   /** Register a symbol into both indexes. */

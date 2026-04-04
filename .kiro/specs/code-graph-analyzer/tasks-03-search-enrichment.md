@@ -4,8 +4,8 @@ Part of the [Implementation Plan](./tasks.md).
 
 ## Tasks
 
-- [ ] 11. Implement Phase 6: Search index building
-  - [ ] 11.1 Implement embedding generation
+- [x] 11. Implement Phase 6: Search index building
+  - [x] 11.1 Implement embedding generation
     - _Skills: `typescript-expert`, `error-handling-patterns`_
     - Implement formatSymbolForEmbedding function
     - Implement formatClusterForEmbedding function
@@ -13,7 +13,7 @@ Part of the [Implementation Plan](./tasks.md).
     - Add fallback handling for unavailable embedding service
     - _Requirements: 3.6, 8.1, 8.2, 8.3, 8.6_
 
-  - [ ] 11.2 Implement keyword indexing
+  - [x] 11.2 Implement keyword indexing
     - _Skills: `typescript-expert`, `clean-code`_
     - Implement extractKeywords function for symbols
     - Build keyword-to-symbol mappings

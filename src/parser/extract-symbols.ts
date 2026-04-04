@@ -103,11 +103,12 @@ export function extractSymbolsWithQueries(
   parser: Parser,
 ): Symbol[] {
   const queryString = LANGUAGE_QUERIES[language];
-  const lang = parser.getLanguage();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const lang = parser.getLanguage() as any;
 
   let query: Parser.Query;
   try {
-    query = lang.query(queryString);
+    query = lang.query(queryString) as Parser.Query;
   } catch (err) {
     console.warn(`[parser] Warning: failed to compile query for ${language}: ${String(err)}`);
     return extractSymbols(ast, filePath);
