@@ -57,8 +57,8 @@ Part of the [Implementation Plan](./tasks.md).
     - Order process steps sequentially
     - _Requirements: 11.1, 11.2, 11.3, 11.4, 11.5_
 
-- [ ] 19. Implement pre-commit check queries
-  - [ ] 19.1 Implement pre-commit check logic
+- [-] 19. Implement pre-commit check queries
+  - [x] 19.1 Implement pre-commit check logic
     - _Skills: `typescript-expert`, `architecture`_
     - Identify all symbols defined in the changed files
     - Find all direct and transitive dependents of those symbols using graph traversal
@@ -67,8 +67,8 @@ Part of the [Implementation Plan](./tasks.md).
     - Generate recommendations for which flows to test
     - _Requirements: 11b.1, 11b.2, 11b.3, 11b.4, 11b.5_
 
-- [ ] 20. Implement context retrieval queries
-  - [ ] 20.1 Implement 360° context retrieval
+- [x] 20. Implement context retrieval queries
+  - [x] 20.1 Implement 360° context retrieval
     - _Skills: `typescript-expert`, `clean-code`_
     - Identify target symbol
     - Find all callers using findDependents

@@ -99,35 +99,16 @@ async function executeQueryInternal(
     };
   }
 
-  // Stub for remaining query types (tasks 19, 20, 21)
+  if (intent.type === "preCommitCheck") {
+    const { executePreCommitCheck } = await import("./pre-commit-check.js");
+    const result = await executePreCommitCheck(intent.changedFiles, query.maxResults, graphSession);
+    return { intent, ...result };
+  }
+
   if (intent.type === "contextRetrieval") {
-    const node = await findNode(graphSession, intent.target);
-    if (node) {
-      const symbol: Symbol = {
-        id: node.id,
-        name: node.properties["name"] ?? node.id,
-        kind: "function",
-        location: {
-          filePath: node.properties["filePath"] ?? "",
-          startLine: parseInt(node.properties["startLine"] ?? "0"),
-          startColumn: 0,
-          endLine: parseInt(node.properties["endLine"] ?? "0"),
-          endColumn: 0,
-        },
-        visibility: "public",
-        modifiers: [],
-      };
-      return {
-        intent,
-        symbols: [symbol],
-        relationships: [],
-        clusters: [],
-        processes: [],
-        confidence: 0.75,
-        riskLevel: "low",
-        affectedFlows: [],
-      };
-    }
+    const { executeContextRetrieval } = await import("./context-retrieval.js");
+    const result = await executeContextRetrieval(intent.target, query.maxResults, graphSession);
+    return { intent, ...result };
   }
 
   // Fallback for unimplemented query types
