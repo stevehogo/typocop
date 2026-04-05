@@ -38,13 +38,20 @@ graph TD
 
 ## Integration with Phase 3
 
+`resolveReferences` (at `indexer/resolution/index.ts:305`) gains an optional `repoRoot?`
+parameter. When present it calls `loadLanguageConfigs(repoRoot)` and passes the result
+directly into `resolveHints` as a parameter. `createResolutionContext` signature is
+**unchanged** — it takes no arguments and `LanguageConfigs` is never stored on the context.
+
 ```mermaid
 sequenceDiagram
+    participant PL as pipeline.ts
     participant P3 as resolveReferences
     participant LC as language-config.ts
     participant FS as node:fs/promises
-    participant RC as ResolutionContext
+    participant RH as resolveHints
 
+    PL->>P3: resolveReferences(symbols, hints, sourcePath)
     P3->>LC: loadLanguageConfigs(repoRoot)
     LC->>FS: readFile(tsconfig.json)
     LC->>FS: readFile(composer.json)
@@ -52,9 +59,9 @@ sequenceDiagram
     LC->>FS: readdir(repoRoot) [BFS for .csproj]
     LC->>FS: readdir(Sources/) [SPM targets]
     LC-->>P3: LanguageConfigs
-    P3->>RC: createResolutionContext(symbolTable, languageConfigs)
-    RC-->>P3: context
-    P3->>P3: resolveHints(hints, symbols, context)
+    P3->>RH: resolveHints(hints, symbols, languageConfigs)
+    RH-->>P3: Relationship[]
+    P3-->>PL: Relationship[]
 ```
 
 ## Components and Interfaces
