@@ -58,14 +58,33 @@ export const detectLanguageFromPath = (filePath: string): Language | undefined =
 const READ_CONCURRENCY = 32;
 
 /**
+ * Progress callback invoked after each file is stat-checked.
+ * @param scanned - monotonically increasing count of files processed so far
+ * @param total   - total candidate paths collected before stat phase
+ * @param filePath - relative path of the file just processed
+ */
+export type WalkProgressCallback = (
+  scanned: number,
+  total: number,
+  filePath: string
+) => void;
+
+/**
  * Phase 1 — Walk the file tree and return FileNode[] (path + size + language).
  * No file content is loaded into memory.
  * Files larger than MAX_FILE_SIZE or with unrecognised extensions are skipped.
+ * Symlinks are skipped — entry.isFile() and entry.isDirectory() both return
+ * false for symlinks, so they fall through without being collected.
  */
-export const walkFileTree = async (rootPath: string): Promise<FileNode[]> => {
+export const walkFileTree = async (
+  rootPath: string,
+  onProgress?: WalkProgressCallback
+): Promise<FileNode[]> => {
   const relativePaths: string[] = [];
 
-  // Recursive directory scan — collect relative paths only
+  // Recursive directory scan — collect relative paths only.
+  // Symlinks are implicitly skipped: isDirectory() and isFile() both return
+  // false for symlinks, so neither branch is taken.
   const collect = async (dir: string): Promise<void> => {
     let entries;
     try {
@@ -86,36 +105,41 @@ export const walkFileTree = async (rootPath: string): Promise<FileNode[]> => {
       } else if (entry.isFile()) {
         relativePaths.push(relativePath);
       }
+      // symlinks: isDirectory() and isFile() are both false → skipped here
     }
   };
 
   await collect(rootPath);
 
-  // Stat files in batches — skip oversized and unrecognised files
+  const total = relativePaths.length;
   const fileNodes: FileNode[] = [];
   let skippedLarge = 0;
+  let scanned = 0;
 
   for (let i = 0; i < relativePaths.length; i += READ_CONCURRENCY) {
     const batch = relativePaths.slice(i, i + READ_CONCURRENCY);
     const results = await Promise.allSettled(
       batch.map(async (relativePath) => {
         const language = detectLanguageFromPath(relativePath);
-        if (!language) return null; // skip unrecognised extensions
+        if (!language) return { node: null, relativePath };
 
         const fullPath = path.join(rootPath, relativePath);
         const stat = await fs.stat(fullPath);
-        if (stat.size > MAX_FILE_SIZE) return "large" as const;
+        if (stat.size > MAX_FILE_SIZE) return { node: "large" as const, relativePath };
 
-        return { path: relativePath, size: stat.size, language } satisfies FileNode;
+        return { node: { path: relativePath, size: stat.size, language } satisfies FileNode, relativePath };
       })
     );
 
     for (const result of results) {
       if (result.status === "fulfilled") {
-        if (result.value === "large") {
+        const { node, relativePath } = result.value;
+        scanned++;
+        onProgress?.(scanned, total, relativePath);
+        if (node === "large") {
           skippedLarge++;
-        } else if (result.value !== null) {
-          fileNodes.push(result.value);
+        } else if (node !== null) {
+          fileNodes.push(node);
         }
       }
     }

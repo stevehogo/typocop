@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import * as fc from "fast-check";
 import * as fs from "fs/promises";
 import * as path from "path";
 import { walkFileTree, readFileContents, detectLanguageFromPath } from "./index.js";
@@ -238,3 +239,127 @@ describe("readFileContents", () => {
     expect(result.size).toBe(0);
   });
 });
+
+// ─── Task 2: Symlink safety ───────────────────────────────────────────────────
+
+describe("walkFileTree: symlink skipping", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("skips symlink dirents — isFile() and isDirectory() both return false", async () => {
+    const symlinkDirent = {
+      name: "link.ts",
+      isDirectory: () => false,
+      isFile: () => false,       // symlink — neither file nor dir
+      isSymbolicLink: () => true,
+      isBlockDevice: () => false,
+      isCharacterDevice: () => false,
+      isFIFO: () => false,
+      isSocket: () => false,
+      path: "",
+    };
+    vi.mocked(fs.readdir).mockResolvedValue([symlinkDirent] as never);
+
+    const result = await walkFileTree("/repo");
+
+    expect(result).toHaveLength(0);
+    expect(fs.stat).not.toHaveBeenCalled();
+  });
+});
+
+// ─── Task 1: onProgress callback ─────────────────────────────────────────────
+
+describe("walkFileTree: onProgress callback", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("invokes callback with monotonically increasing scanned, final scanned === total", async () => {
+    vi.mocked(fs.readdir).mockImplementation(async (dir) => {
+      if (dir === "/repo") {
+        return [
+          makeDirent("a.ts", false),
+          makeDirent("b.ts", false),
+          makeDirent("c.ts", false),
+        ] as never;
+      }
+      return [] as never;
+    });
+    vi.mocked(fs.stat).mockResolvedValue(makeStat(512));
+
+    const calls: Array<{ scanned: number; total: number }> = [];
+    await walkFileTree("/repo", (scanned, total, _filePath) => {
+      calls.push({ scanned, total });
+    });
+
+    expect(calls).toHaveLength(3);
+    expect(calls.map((c) => c.scanned)).toEqual([1, 2, 3]);
+    expect(calls.every((c) => c.total === 3)).toBe(true);
+  });
+
+  it("never invokes callback when directory is empty", async () => {
+    vi.mocked(fs.readdir).mockResolvedValue([]);
+    const cb = vi.fn();
+
+    await walkFileTree("/repo", cb);
+
+    expect(cb).not.toHaveBeenCalled();
+  });
+});
+
+// ─── Task 3: Property tests ───────────────────────────────────────────────────
+
+describe("Property: size gate — no FileNode has size > MAX_FILE_SIZE", () => {
+  it("holds for any combination of file sizes", async () => {
+    await fc.assert(
+      fc.asyncProperty(
+        fc.array(fc.integer({ min: 1, max: MAX_FILE_SIZE * 2 }), { minLength: 1, maxLength: 10 }),
+        async (sizes) => {
+          vi.clearAllMocks();
+          const names = sizes.map((_, i) => `file${i}.ts`);
+          vi.mocked(fs.readdir).mockImplementation(async (dir) => {
+            if (dir === "/repo") return names.map((n) => makeDirent(n, false)) as never;
+            return [] as never;
+          });
+          vi.mocked(fs.stat).mockImplementation(async (p) => {
+            const idx = names.findIndex((n) => String(p).endsWith(n));
+            return makeStat(sizes[idx] ?? 0);
+          });
+
+          const result = await walkFileTree("/repo");
+          return result.every((node) => node.size <= MAX_FILE_SIZE);
+        }
+      ),
+      { numRuns: 50 }
+    );
+  });
+});
+
+describe("Property: readFileContents isolation — result contains only successful reads", () => {
+  it("holds for any subset of failing paths", async () => {
+    await fc.assert(
+      fc.asyncProperty(
+        fc.uniqueArray(fc.stringMatching(/^[a-z0-9]{1,8}$/), { minLength: 1, maxLength: 10 }),
+        fc.array(fc.boolean(), { minLength: 1, maxLength: 10 }),
+        async (names, shouldFail) => {
+          vi.clearAllMocks();
+          const paths = names.map((n, i) => `${n}${i}.ts`);
+          const failSet = new Set(paths.filter((_, i) => shouldFail[i] ?? false));
+
+          vi.mocked(fs.readFile).mockImplementation(async (p) => {
+            const rel = path.relative("/repo", String(p));
+            if (failSet.has(rel)) throw new Error("ENOENT");
+            return "content";
+          });
+
+          const result = await readFileContents("/repo", paths);
+          const expectedSize = paths.filter((p) => !failSet.has(p)).length;
+          return result.size === expectedSize;
+        }
+      ),
+      { numRuns: 50 }
+    );
+  });
+});
+
+// ─── Integration smoke test: walkFileTree with real filesystem ────────────────
+// NOTE: This test is in a separate file (index.integration.test.ts) because
+// vi.mock("fs/promises") at the top of this file affects all tests here.
+// See: src/indexer/structure/index.integration.test.ts

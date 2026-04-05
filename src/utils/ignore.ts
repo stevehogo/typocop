@@ -1,7 +1,7 @@
 // Ported from legacy-parser/parser/ignore-service.ts
 // Comprehensive ignore rules for file tree walking
 
-const DEFAULT_IGNORE_LIST = new Set([
+export const DEFAULT_IGNORE_LIST: ReadonlySet<string> = new Set([
   // Version Control
   ".git", ".svn", ".hg", ".bzr",
 
@@ -23,7 +23,7 @@ const DEFAULT_IGNORE_LIST = new Set([
 
   // Test & Coverage
   "coverage", ".nyc_output", "htmlcov", ".coverage",
-  "__mocks__", ".jest",
+  "__tests__", "__mocks__", ".jest",
 
   // Logs & Temp
   "logs", "log", "tmp", "temp", "cache", ".cache", ".tmp", ".temp",
@@ -36,7 +36,7 @@ const DEFAULT_IGNORE_LIST = new Set([
   "fixtures", "snapshots", "__snapshots__",
 ]);
 
-const IGNORED_EXTENSIONS = new Set([
+const IGNORED_EXTENSIONS: ReadonlySet<string> = new Set([
   // Images
   ".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico", ".webp",
   ".bmp", ".tiff", ".tif", ".psd", ".ai", ".sketch", ".fig", ".xd",
@@ -83,7 +83,7 @@ const IGNORED_EXTENSIONS = new Set([
   ".bin", ".dat", ".data", ".raw", ".iso", ".img", ".dmg",
 ]);
 
-const IGNORED_FILES = new Set([
+const IGNORED_FILES: ReadonlySet<string> = new Set([
   "package-lock.json", "yarn.lock", "pnpm-lock.yaml",
   "composer.lock", "Gemfile.lock", "poetry.lock",
   "Cargo.lock", "go.sum",
@@ -98,6 +98,8 @@ const IGNORED_FILES = new Set([
   ".env", ".env.local", ".env.development",
   ".env.production", ".env.test", ".env.example",
 ]);
+
+export { IGNORED_EXTENSIONS, IGNORED_FILES };
 
 /**
  * Returns true if the given file path should be excluded from indexing.
