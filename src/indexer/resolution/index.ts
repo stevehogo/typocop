@@ -9,6 +9,7 @@
 import type { Symbol, Relationship, RelationType } from "../../types/index.js";
 import type { RawRelationshipHint } from "../parsing/index.js";
 import { buildSymbolTable } from "./symbol-table.js";
+import { createResolutionContext } from "./resolution-context.js";
 
 // ─── Symbol map ───────────────────────────────────────────────────────────────
 
@@ -188,7 +189,12 @@ export function resolveHints(
   symbols: Symbol[],
 ): Relationship[] {
   const symbolMap = buildSymbolMap(symbols);
-  const symbolTable = buildSymbolTable(symbols);
+
+  // Build resolution context and populate symbol table
+  const ctx = createResolutionContext();
+  for (const sym of symbols) {
+    ctx.symbols.add(sym.location.filePath, sym.name, sym.id, sym.kind);
+  }
 
   const fileSymbols = new Map<string, Symbol[]>();
   for (const sym of symbols) {
@@ -204,44 +210,64 @@ export function resolveHints(
     if (!seen.has(rel.id)) { seen.add(rel.id); relationships.push(rel); }
   };
 
+  // Group hints by source file so we can enable per-file cache
+  const hintsByFile = new Map<string, RawRelationshipHint[]>();
   for (const hint of hints) {
-    switch (hint.kind) {
-      case "import": {
-        const sourceId = `${hint.sourceFile}:import:${hint.startLine}`;
-        const segments = hint.targetName.split("/");
-        const lastName = segments[segments.length - 1];
-        const target = (symbolMap.get(lastName) ?? symbolMap.get(hint.targetName))?.[0];
-        if (target) {
-          add({ id: relId("imports", sourceId, target.id), source: sourceId, target: target.id, relType: "imports", metadata: {} });
-        } else {
-          add({ id: relId("imports", sourceId, `unresolved:${hint.targetName}`), source: sourceId, target: `unresolved:${hint.targetName}`, relType: "imports", metadata: { unresolved: "true" } });
+    const list = hintsByFile.get(hint.sourceFile) ?? [];
+    list.push(hint);
+    hintsByFile.set(hint.sourceFile, list);
+  }
+
+  for (const [sourceFile, fileHints] of hintsByFile) {
+    ctx.enableCache(sourceFile);
+
+    for (const hint of fileHints) {
+      switch (hint.kind) {
+        case "import": {
+          const sourceId = `${hint.sourceFile}:import:${hint.startLine}`;
+          const segments = hint.targetName.split("/");
+          const lastName = segments[segments.length - 1];
+          // Use resolution context for same-file tier, fall back to symbolMap
+          const ctxResult = ctx.resolve(lastName ?? hint.targetName, hint.sourceFile);
+          const target = ctxResult
+            ? symbolMap.get(ctxResult.candidates[0].nodeId) ?.[0]
+              ?? (symbolMap.get(lastName) ?? symbolMap.get(hint.targetName))?.[0]
+            : (symbolMap.get(lastName) ?? symbolMap.get(hint.targetName))?.[0];
+          if (target) {
+            add({ id: relId("imports", sourceId, target.id), source: sourceId, target: target.id, relType: "imports", metadata: {} });
+          } else {
+            add({ id: relId("imports", sourceId, `unresolved:${hint.targetName}`), source: sourceId, target: `unresolved:${hint.targetName}`, relType: "imports", metadata: { unresolved: "true" } });
+          }
+          break;
         }
-        break;
-      }
-      case "call": {
-        const fileSym = fileSymbols.get(hint.sourceFile);
-        const caller = fileSym?.find((s) => s.location.startLine <= hint.startLine && s.location.endLine >= hint.startLine);
-        if (!caller) break;
-        const sameFileId = symbolTable.lookupExact(hint.sourceFile, hint.targetName);
-        const sameFile = sameFileId ? (symbolMap.get(hint.targetName) ?? []).find((s) => s.id === sameFileId) : undefined;
-        const target = (sameFile && sameFile.id !== caller.id) ? sameFile
-          : (symbolMap.get(hint.targetName) ?? []).find((s) => s.id !== caller.id);
-        if (target) add({ id: relId("calls", caller.id, target.id), source: caller.id, target: target.id, relType: "calls", metadata: {} });
-        break;
-      }
-      case "inherits":
-      case "implements": {
-        if (!hint.childSymbolId) break;
-        const childCandidates = symbolMap.get(hint.childSymbolId) ?? [];
-        const child = childCandidates.find((s) => s.location.filePath === hint.sourceFile) ?? childCandidates[0];
-        if (!child) break;
-        const parent = (symbolMap.get(hint.targetName) ?? []).find((s) => s.id !== child.id);
-        if (!parent) break;
-        const relType: RelationType = hint.kind === "inherits" ? "inherits" : "implements";
-        add({ id: relId(relType, child.id, parent.id), source: child.id, target: parent.id, relType, metadata: {} });
-        break;
+        case "call": {
+          const fileSym = fileSymbols.get(hint.sourceFile);
+          const caller = fileSym?.find((s) => s.location.startLine <= hint.startLine && s.location.endLine >= hint.startLine);
+          if (!caller) break;
+          const ctxResult = ctx.resolve(hint.targetName, hint.sourceFile);
+          const resolvedId = ctxResult?.candidates[0]?.nodeId;
+          const sameFile = resolvedId ? (symbolMap.get(hint.targetName) ?? []).find((s) => s.id === resolvedId) : undefined;
+          const target = (sameFile && sameFile.id !== caller.id) ? sameFile
+            : (symbolMap.get(hint.targetName) ?? []).find((s) => s.id !== caller.id);
+          if (target) add({ id: relId("calls", caller.id, target.id), source: caller.id, target: target.id, relType: "calls", metadata: {} });
+          break;
+        }
+        case "inherits":
+        case "implements": {
+          if (!hint.childSymbolId) break;
+          const childCandidates = symbolMap.get(hint.childSymbolId) ?? [];
+          const child = childCandidates.find((s) => s.location.filePath === hint.sourceFile) ?? childCandidates[0];
+          if (!child) break;
+          const parent = (symbolMap.get(hint.targetName) ?? []).find((s) => s.id !== child.id);
+          if (!parent) break;
+          const relType: RelationType = hint.kind === "inherits" ? "inherits" : "implements";
+          add({ id: relId(relType, child.id, parent.id), source: child.id, target: parent.id, relType, metadata: {} });
+          break;
+        }
       }
     }
+
+    ctx.clearCache();
   }
 
   return relationships;

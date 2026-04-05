@@ -15,7 +15,7 @@
         "POSTGRES_USER": "postgres",
         "POSTGRES_PASSWORD": "password"
       },
-      "disabled": true,
+      "disabled": false,
       "autoApprove": [
         "get_symbol_context",
         "get_symbol_context",
