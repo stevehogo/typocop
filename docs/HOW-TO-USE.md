@@ -32,18 +32,28 @@ docker compose ps   # both should show "healthy"
 
 ## 2. Configure Environment
 
-Create a `.env` file in the project root (never commit this):
+Copy `.env.example` to `.env` and fill in your values (never commit `.env`):
+
+```bash
+cp .env.example .env
+```
 
 ```bash
 NEO4J_URI=bolt://localhost:8687
 NEO4J_USER=neo4j
 NEO4J_PASSWORD=password
 
-POSTGRES_URI=postgresql://postgres:password@localhost:8432/typocop
+POSTGRES_HOST=localhost
+POSTGRES_PORT=8432
+POSTGRES_DB=typocop
+POSTGRES_USER=postgres
+POSTGRES_PASSWORD=password
 
 OPENAI_API_KEY=sk-...        # required for semantic search + AI enrichment
 MCP_AUTH_TOKEN=your-token    # required for MCP server authentication
 ```
+
+Alternatively, pass a `.env` file at runtime with the `-e` flag (see CLI Reference below).
 
 ---
 
@@ -58,28 +68,48 @@ pnpm build
 
 ## 4. CLI Reference
 
-All commands run via:
+After a global install (`pnpm add -g typocop`) the commands are available directly:
 
 ```bash
-node dist/cli/index.js <command> [options]
+typocop <command> [options]
+typocop-mcp [options]
 ```
+
+Without a global install, run via the compiled entry point:
+
+```bash
+node dist/cli/main.js <command> [options]
+```
+
+### Global `-e` / `--env` flag
+
+Both `typocop` and `typocop-mcp` accept a global `-e` flag to load a `.env` file before any command runs:
+
+```bash
+typocop -e .env.production parse -p ./src
+typocop-mcp -e .env.staging
+```
+
+If the path does not exist the process exits immediately with an error.
 
 ### `parse` — Index a codebase
 
 ```bash
-node dist/cli/index.js parse --path <dir> --lang <language> [--verbose]
+typocop parse -p <dir> [-l <language>] [-v]
 ```
 
-| Flag | Description |
-|------|-------------|
-| `--path` | Root directory to index |
-| `--lang` | Language: `typescript`, `javascript`, `php`, `python`, `java`, `go`, `rust`, `c`, `cpp`, `csharp`, `ruby`, `swift` |
-| `--verbose` | Show per-file progress |
+| Flag | Short | Description |
+|------|-------|-------------|
+| `--path <dir>` | `-p` | Root directory to index (required) |
+| `--lang <language>` | `-l` | Language — auto-detected from file extensions if omitted |
+| `--verbose` | `-v` | Show per-file progress |
+
+Supported languages: `typescript`, `javascript`, `php`, `python`, `java`, `go`, `rust`, `c`, `cpp`, `csharp`, `ruby`, `swift`
 
 ### `status` — Check index state
 
 ```bash
-node dist/cli/index.js status
+typocop status
 ```
 
 Shows symbol count, relationship count, cluster count, and last indexed timestamp.
@@ -87,8 +117,12 @@ Shows symbol count, relationship count, cluster count, and last indexed timestam
 ### `reindex` — Re-run the full pipeline
 
 ```bash
-node dist/cli/index.js reindex
+typocop reindex -d <db-path>
 ```
+
+| Flag | Short | Description |
+|------|-------|-------------|
+| `--db <path>` | `-d` | Path to the existing database (required) |
 
 Clears the existing graph and re-indexes from scratch. Use after large refactors.
 
@@ -101,7 +135,14 @@ The MCP server exposes Typocop's query engine to AI editors (Kiro, Claude, Curso
 ### Start the server
 
 ```bash
-node dist/mcp/index.js
+# After global install
+typocop-mcp
+
+# Or directly
+node dist/mcp/main.js
+
+# With a specific .env file
+typocop-mcp -e .env.production
 ```
 
 ### Configure in your editor
@@ -112,13 +153,32 @@ Add to `.kiro/settings/mcp.json` (or your editor's MCP config):
 {
   "mcpServers": {
     "code-graph-analyzer": {
+      "command": "typocop-mcp",
+      "args": ["-e", "/path/to/.env"],
+      "disabled": false,
+      "autoApprove": []
+    }
+  }
+}
+```
+
+Or without a global install:
+
+```json
+{
+  "mcpServers": {
+    "code-graph-analyzer": {
       "command": "node",
-      "args": ["dist/mcp/index.js"],
+      "args": ["dist/mcp/main.js"],
       "env": {
         "NEO4J_URI": "bolt://localhost:8687",
         "NEO4J_USER": "neo4j",
         "NEO4J_PASSWORD": "password",
-        "POSTGRES_URI": "postgresql://postgres:password@localhost:8432/typocop",
+        "POSTGRES_HOST": "localhost",
+        "POSTGRES_PORT": "8432",
+        "POSTGRES_DB": "typocop",
+        "POSTGRES_USER": "postgres",
+        "POSTGRES_PASSWORD": "password",
         "OPENAI_API_KEY": "${OPENAI_API_KEY}",
         "MCP_AUTH_TOKEN": "${MCP_AUTH_TOKEN}"
       },
@@ -148,11 +208,11 @@ Every tool response includes a `confidence` score (target ≥ 0.90) and a `summa
 ### Scenario A: Index a NestJS project and find the auth flow
 
 ```bash
-# 1. Index the project
-node dist/cli/index.js parse --path ./src --lang typescript --verbose
+# 1. Index the project (language auto-detected)
+typocop parse -p ./src -v
 
 # 2. Check it worked
-node dist/cli/index.js status
+typocop status
 
 # 3. In your AI editor, ask via MCP:
 # "Trace the data flow for the login endpoint"
@@ -163,7 +223,7 @@ node dist/cli/index.js status
 
 ```bash
 # Index the app directory
-node dist/cli/index.js parse --path ./app --lang php --verbose
+typocop parse -p ./app -l php -v
 
 # In your AI editor:
 # "What breaks if I change UserRepository?"
@@ -230,4 +290,4 @@ pnpm vitest --run --coverage
 
 **MCP server not connecting**
 - Confirm `MCP_AUTH_TOKEN` matches in both `.env` and your editor's MCP config
-- Run `node dist/mcp/index.js` directly and check for startup errors
+- Run `node dist/mcp/main.js` directly and check for startup errors

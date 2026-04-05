@@ -1,4 +1,5 @@
 import { readFile, readdir } from "node:fs/promises";
+import type { Dirent } from "node:fs";
 import { join, relative, basename } from "node:path";
 
 /** TypeScript path alias config parsed from tsconfig.json */
@@ -169,20 +170,21 @@ export async function loadCSharpProjectConfig(repoRoot: string): Promise<readonl
       if (dirsVisited >= MAX_DIRS) break;
       dirsVisited++;
 
-      let entries: Awaited<ReturnType<typeof readdir>>;
+      let entries: Dirent[];
       try {
-        entries = await readdir(dir, { withFileTypes: true });
+        entries = await readdir(dir, { withFileTypes: true }) as Dirent[];
       } catch {
         continue;
       }
 
       for (const dirent of entries) {
+        const name = String(dirent.name);
         if (dirent.isDirectory()) {
-          if (!SKIP_DIRS.has(dirent.name) && depth < MAX_DEPTH) {
-            queue.push({ dir: join(dir, dirent.name), depth: depth + 1 });
+          if (!SKIP_DIRS.has(name) && depth < MAX_DEPTH) {
+            queue.push({ dir: join(dir, name), depth: depth + 1 });
           }
-        } else if (dirent.isFile() && dirent.name.endsWith(".csproj")) {
-          const filePath = join(dir, dirent.name);
+        } else if (dirent.isFile() && name.endsWith(".csproj")) {
+          const filePath = join(dir, name);
           let content: string;
           try {
             content = await readFile(filePath, "utf-8");
@@ -190,7 +192,7 @@ export async function loadCSharpProjectConfig(repoRoot: string): Promise<readonl
             continue;
           }
           const match = content.match(CSPROJ_NAMESPACE_RE);
-          const rootNamespace = match?.[1] ?? basename(dirent.name, ".csproj");
+          const rootNamespace = match?.[1] ?? basename(name, ".csproj");
           const projectDir = relative(repoRoot, dir).replace(/\\/g, "/");
           results.push({ rootNamespace, projectDir });
         }
@@ -210,16 +212,17 @@ export async function loadSwiftPackageConfig(repoRoot: string): Promise<SwiftPac
     const targets = new Map<string, string>();
 
     for (const sourceDir of SWIFT_SOURCE_DIRS) {
-      let entries: Awaited<ReturnType<typeof readdir>>;
+      let entries: Dirent[];
       try {
-        entries = await readdir(join(repoRoot, sourceDir), { withFileTypes: true });
+        entries = await readdir(join(repoRoot, sourceDir), { withFileTypes: true }) as Dirent[];
       } catch {
         continue;
       }
 
       for (const entry of entries) {
         if (entry.isDirectory()) {
-          targets.set(entry.name, `${sourceDir}/${entry.name}`);
+          const name = String(entry.name);
+          targets.set(name, `${sourceDir}/${name}`);
         }
       }
     }

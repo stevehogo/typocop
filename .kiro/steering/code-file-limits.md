@@ -26,12 +26,12 @@ src/query/format-result.ts        ← result formatting
 
 ```
 // Too big — split it
-src/indexer/phase4-clustering.ts  (280 lines)
+src/indexer/clustering.ts  (280 lines)
 
 // After split
-src/indexer/phase4-clustering.ts          ← pipeline entry point
-src/indexer/phase4-louvain.ts             ← Louvain algorithm
-src/indexer/phase4-cluster-enrichment.ts  ← AI enrichment
+src/indexer/clustering.ts          ← pipeline entry point
+src/indexer/louvain.ts             ← Louvain algorithm
+src/indexer/cluster-enrichment.ts  ← AI enrichment
 ```
 
 ## Splitting guidelines

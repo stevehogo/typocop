@@ -5,11 +5,11 @@ fileMatchPattern: ".kiro/specs/**"
 
 # Spec File Size Limits
 
-## Rule: No spec file should exceed 500 lines
+## Rule: No spec file should exceed 150 lines
 
-When creating or updating spec files (`requirements.md`, `design.md`, `tasks.md`, or any design sub-document), each file must stay under 500 lines.
+When creating or updating spec files (`requirements.md`, `design.md`, `tasks.md`, or any design sub-document), each file must stay under 150 lines.
 
-## When a file would exceed 500 lines
+## When a file would exceed 150 lines
 
 Split it into focused sub-files using a naming convention:
 
@@ -43,4 +43,4 @@ Part of the [Code Graph Analyzer Design](./design.md).
 
 ## Enforcement
 
-Before writing or appending to any spec file, estimate the resulting line count. If it would exceed 500 lines, split first, then write.
+Before writing or appending to any spec file, estimate the resulting line count. If it would exceed 150 lines, split first, then write.
