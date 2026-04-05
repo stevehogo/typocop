@@ -10,8 +10,11 @@ import type { GraphNode } from "../graph/connection.js";
 // ─── Mock Setup ───────────────────────────────────────────────────────────────
 
 function createMockSession(): Session {
+  const runFn = vi.fn();
   return {
-    run: vi.fn(),
+    run: runFn,
+    executeRead: vi.fn(async (work: (tx: { run: typeof runFn }) => Promise<unknown>) => work({ run: runFn })),
+    executeWrite: vi.fn(async (work: (tx: { run: typeof runFn }) => Promise<unknown>) => work({ run: runFn })),
   } as unknown as Session;
 }
 

@@ -3,13 +3,14 @@
  * Requirements: 15.3, 15.4, 15.5, 15.7
  */
 import type { Pool } from "pg";
-import type { Session } from "neo4j-driver";
+import type { Driver } from "neo4j-driver";
 import type { MCPRequest, MCPResponse, MCPError } from "./types.js";
 import type { AuthConfig } from "./auth.js";
 import { MCPValidationError, MCPAuthenticationError } from "./types.js";
 import { validateMCPRequest, validateToolParams } from "./validation.js";
 import { validateAuthToken, extractAuthToken } from "./auth.js";
 import { executeTool } from "./tools.js";
+import { SessionManager } from "./session-manager.js";
 
 /**
  * Connection state for MCP server.
@@ -18,6 +19,7 @@ export interface ConnectionState {
   readonly sessionId: string;
   readonly connectedAt: Date;
   authenticated: boolean;
+  readonly sessionManager: SessionManager;
 }
 
 /**
@@ -25,7 +27,7 @@ export interface ConnectionState {
  */
 export interface MCPContext {
   readonly vectorPool: Pool;
-  readonly graphSession: Session;
+  readonly graphDriver: Driver;
   readonly authConfig: AuthConfig;
   readonly connectionStates: Map<string, ConnectionState>;
 }
@@ -38,6 +40,7 @@ export function createConnectionState(sessionId: string): ConnectionState {
     sessionId,
     connectedAt: new Date(),
     authenticated: false,
+    sessionManager: new SessionManager(),
   };
 }
 
@@ -75,7 +78,8 @@ export async function handleMCPRequest(
       request.method,
       request.params,
       context.vectorPool,
-      context.graphSession,
+      context.graphDriver,
+      state.sessionManager,
     );
 
     return {

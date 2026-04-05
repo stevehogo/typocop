@@ -22,12 +22,14 @@ async function fetchClustersForSymbols(
 ): Promise<Cluster[]> {
   if (symbolIds.length === 0) return [];
 
-  const result = await session.run(
-    `MATCH (c:Cluster)
-     WHERE any(sid IN c.symbols WHERE sid IN $symbolIds)
-     RETURN c.id AS id, c.name AS name, c.symbols AS symbols,
-            c.confidence AS confidence, c.category AS category`,
-    { symbolIds },
+  const result = await session.executeRead((tx) =>
+    tx.run(
+      `MATCH (c:Cluster)
+       WHERE any(sid IN c.symbols WHERE sid IN $symbolIds)
+       RETURN c.id AS id, c.name AS name, c.symbols AS symbols,
+              c.confidence AS confidence, c.category AS category`,
+      { symbolIds },
+    ),
   );
 
   return result.records.map((r) => ({

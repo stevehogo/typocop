@@ -20,11 +20,17 @@ import { withRetry } from "./connection.js";
 /** Build a mock Session that captures the last Cypher query run. */
 function mockSession(returnRecords: unknown[] = []) {
   const calls: string[] = [];
+  const runFn = vi.fn(async (query: string) => {
+    calls.push(query);
+    return { records: returnRecords };
+  });
+  const txFn = vi.fn(async (work: (tx: { run: typeof runFn }) => Promise<unknown>) => {
+    return work({ run: runFn });
+  });
   const session = {
-    run: vi.fn(async (query: string) => {
-      calls.push(query);
-      return { records: returnRecords };
-    }),
+    run: runFn,
+    executeRead: txFn,
+    executeWrite: txFn,
     _calls: calls,
   };
   return session;
@@ -63,8 +69,11 @@ describe("Graph traversal depth limit (Property 18)", () => {
     await fc.assert(
       fc.asyncProperty(fc.string({ minLength: 1 }), async (symbolId) => {
         const calls: string[] = [];
+        const runFn = vi.fn(async (query: string) => { calls.push(query); return { records: [] }; });
         const session = {
-          run: vi.fn(async (query: string) => { calls.push(query); return { records: [] }; }),
+          run: runFn,
+          executeRead: vi.fn(async (work: (tx: { run: typeof runFn }) => Promise<unknown>) => work({ run: runFn })),
+          executeWrite: vi.fn(async (work: (tx: { run: typeof runFn }) => Promise<unknown>) => work({ run: runFn })),
         };
         await findDependents(session as never, symbolId);
         return (calls[0] ?? "").includes(`${MAX_TRAVERSAL_DEPTH}`);

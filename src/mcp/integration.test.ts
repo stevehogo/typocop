@@ -2,9 +2,9 @@
  * Integration tests for MCP server.
  * Tests the complete flow from request to response.
  */
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import type { Pool } from "pg";
-import type { Session } from "neo4j-driver";
+import type { Driver } from "neo4j-driver";
 import { handleMCPRequest } from "./handler.js";
 import type { MCPContext } from "./handler.js";
 import { createAuthConfig } from "./auth.js";
@@ -14,12 +14,21 @@ describe("MCP Server Integration", () => {
   let mockContext: MCPContext;
 
   beforeEach(() => {
+    const runFn = vi.fn(async () => ({ records: [] }));
+    const mockSession = {
+      run: runFn,
+      executeRead: vi.fn(async (work: (tx: { run: typeof runFn }) => Promise<unknown>) => work({ run: runFn })),
+      executeWrite: vi.fn(async (work: (tx: { run: typeof runFn }) => Promise<unknown>) => work({ run: runFn })),
+      close: vi.fn(async () => {}),
+    };
+    const mockDriver = {
+      session: vi.fn(() => mockSession),
+    } as unknown as Driver;
+
     mockContext = {
       vectorPool: {} as Pool,
-      graphSession: {
-        run: async () => ({ records: [] }),
-      } as unknown as Session,
-      authConfig: createAuthConfig(["test-token"], false), // Disable auth for integration tests
+      graphDriver: mockDriver,
+      authConfig: createAuthConfig(["test-token"], false),
       connectionStates: new Map(),
     };
   });

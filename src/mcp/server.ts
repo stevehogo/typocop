@@ -10,7 +10,8 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { createMCPServer, registerTools, registerPrompts } from "./registration.js";
 import { executeTool } from "./tools.js";
-import { createDriver } from "../graph/connection.js";
+import { SessionManager } from "./session-manager.js";
+import { createDriver, type Driver } from "../graph/connection.js";
 import { createPool } from "../vector/connection.js";
 
 /**
@@ -43,19 +44,22 @@ export async function startMCPServer(): Promise<void> {
   // Create database connections
   const driver = await createDriver(config.neo4j.uri, config.neo4j.user, config.neo4j.password);
   const pool = await createPool(config.postgres);
-  
+
+  // Session manager serializes Neo4j session access and cleans up on disconnect
+  const sessionManager = new SessionManager();
+
   // Create MCP server
   const server = createMCPServer();
   
   // Register tool call handler
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
-    const session = driver.session();
     try {
       const result = await executeTool(
         request.params.name,
         request.params.arguments || {},
         pool,
-        session,
+        driver,
+        sessionManager,
       );
       
       return {
@@ -79,12 +83,19 @@ export async function startMCPServer(): Promise<void> {
         isError: true,
       };
     } finally {
-      await session.close();
+      // sessions are managed per-query inside each tool function
     }
   });
   
   // Start server with stdio transport
   const transport = new StdioServerTransport();
+
+  // Close all tracked sessions when the transport disconnects to prevent
+  // zombie transactions on the next reconnect. (Requirements: 2.2, 2.3, 2.4)
+  transport.onclose = async () => {
+    await sessionManager.closeAll();
+  };
+
   await server.connect(transport);
   
   console.error("MCP server started");

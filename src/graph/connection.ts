@@ -4,6 +4,8 @@
  */
 import neo4j, { type Driver, type Session } from "neo4j-driver";
 
+export type { Driver };
+
 export interface GraphNode {
   readonly id: string;
   readonly labels: string[];

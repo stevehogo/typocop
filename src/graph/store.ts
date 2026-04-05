@@ -17,18 +17,22 @@ export async function storeNodes(session: Session, nodes: GraphNode[]): Promise<
   const BATCH = 500;
   for (let i = 0; i < nodes.length; i += BATCH) {
     const batch = nodes.slice(i, i + BATCH);
-    await session.run(
-      `UNWIND $nodes AS n
-       CALL apoc.merge.node(n.labels, {id: n.id}, n.properties) YIELD node
-       RETURN count(node)`,
-      { nodes: batch.map((n) => ({ id: n.id, labels: n.labels, properties: { ...n.properties, id: n.id } })) },
+    await session.executeWrite((tx) =>
+      tx.run(
+        `UNWIND $nodes AS n
+         CALL apoc.merge.node(n.labels, {id: n.id}, n.properties) YIELD node
+         RETURN count(node)`,
+        { nodes: batch.map((n) => ({ id: n.id, labels: n.labels, properties: { ...n.properties, id: n.id } })) },
+      )
     ).catch(async () => {
       // Fallback without APOC: iterate individually
       for (const n of batch) {
         const label = n.labels[0] ?? "Symbol";
-        await session.run(
-          `MERGE (x:${label} {id: $id}) SET x += $props`,
-          { id: n.id, props: { ...n.properties, id: n.id } },
+        await session.executeWrite((tx) =>
+          tx.run(
+            `MERGE (x:${label} {id: $id}) SET x += $props`,
+            { id: n.id, props: { ...n.properties, id: n.id } },
+          )
         );
       }
     });
@@ -46,11 +50,13 @@ export async function storeEdges(session: Session, edges: GraphEdge[]): Promise<
   for (let i = 0; i < edges.length; i += BATCH) {
     const batch = edges.slice(i, i + BATCH);
     for (const edge of batch) {
-      await session.run(
-        `MATCH (a {id: $src}), (b {id: $tgt})
-         MERGE (a)-[r:${edge.relType}]->(b)
-         SET r += $props`,
-        { src: edge.source, tgt: edge.target, props: edge.properties },
+      await session.executeWrite((tx) =>
+        tx.run(
+          `MATCH (a {id: $src}), (b {id: $tgt})
+           MERGE (a)-[r:${edge.relType}]->(b)
+           SET r += $props`,
+          { src: edge.source, tgt: edge.target, props: edge.properties },
+        )
       );
     }
   }

@@ -20,9 +20,8 @@ function rowToNode(record: Record<string, unknown>): GraphNode {
  * Find a single node by ID or name. Target: <100ms (Req 16.3, 20.5).
  */
 export async function findNode(session: Session, idOrName: string): Promise<GraphNode | null> {
-  const result = await session.run(
-    `MATCH (n) WHERE n.id = $val OR n.name = $val RETURN n LIMIT 1`,
-    { val: idOrName },
+  const result = await session.executeRead((tx) =>
+    tx.run(`MATCH (n) WHERE n.id = $val OR n.name = $val RETURN n LIMIT 1`, { val: idOrName }),
   );
   if (result.records.length === 0) return null;
   return rowToNode(result.records[0].toObject());
@@ -33,9 +32,11 @@ export async function findNode(session: Session, idOrName: string): Promise<Grap
  * Enforces MAX_TRAVERSAL_DEPTH (Req 16.4, 16.7, 23.4).
  */
 export async function findDependents(session: Session, symbolId: string): Promise<GraphNode[]> {
-  const result = await session.run(
-    `MATCH (n)-[*1..${MAX_TRAVERSAL_DEPTH}]->(t) WHERE t.id = $val OR t.name = $val RETURN DISTINCT n`,
-    { val: symbolId },
+  const result = await session.executeRead((tx) =>
+    tx.run(
+      `MATCH (n)-[*1..${MAX_TRAVERSAL_DEPTH}]->(t) WHERE t.id = $val OR t.name = $val RETURN DISTINCT n`,
+      { val: symbolId },
+    ),
   );
   return result.records.map((r) => rowToNode(r.toObject()));
 }
@@ -45,9 +46,11 @@ export async function findDependents(session: Session, symbolId: string): Promis
  * Enforces MAX_TRAVERSAL_DEPTH (Req 16.5, 16.7, 23.4).
  */
 export async function findDependencies(session: Session, symbolId: string): Promise<GraphNode[]> {
-  const result = await session.run(
-    `MATCH (s)-[*1..${MAX_TRAVERSAL_DEPTH}]->(n) WHERE s.id = $val OR s.name = $val RETURN DISTINCT n`,
-    { val: symbolId },
+  const result = await session.executeRead((tx) =>
+    tx.run(
+      `MATCH (s)-[*1..${MAX_TRAVERSAL_DEPTH}]->(n) WHERE s.id = $val OR s.name = $val RETURN DISTINCT n`,
+      { val: symbolId },
+    ),
   );
   return result.records.map((r) => rowToNode(r.toObject()));
 }
@@ -57,9 +60,11 @@ export async function findDependencies(session: Session, symbolId: string): Prom
  * Requirements: 10.3, 12.4
  */
 export async function findProcessesBySymbol(session: Session, symbolId: string): Promise<GraphNode[]> {
-  const result = await session.run(
-    `MATCH (p:Process)-[:HAS_STEP]->(s) WHERE s.id = $val OR s.name = $val RETURN DISTINCT p`,
-    { val: symbolId },
+  const result = await session.executeRead((tx) =>
+    tx.run(
+      `MATCH (p:Process)-[:HAS_STEP]->(s) WHERE s.id = $val OR s.name = $val RETURN DISTINCT p`,
+      { val: symbolId },
+    ),
   );
   return result.records.map((r) => {
     const n = r.get("p") as { labels: string[]; properties: Record<string, string> };
@@ -73,11 +78,13 @@ export async function findProcessesBySymbol(session: Session, symbolId: string):
  * Requirements: 2.1
  */
 export async function findProcessSteps(session: Session, processId: string): Promise<ProcessStep[]> {
-  const result = await session.run(
-    `MATCH (p:Process {id: $processId})-[r:HAS_STEP]->(s)
-     RETURN s.id AS symbolId, r.order AS order, s.name AS description
-     ORDER BY r.order ASC`,
-    { processId },
+  const result = await session.executeRead((tx) =>
+    tx.run(
+      `MATCH (p:Process {id: $processId})-[r:HAS_STEP]->(s)
+       RETURN s.id AS symbolId, r.order AS order, s.name AS description
+       ORDER BY r.order ASC`,
+      { processId },
+    ),
   );
   if (result.records.length === 0) return [];
   return result.records.map((record) => ({
@@ -92,9 +99,11 @@ export async function findProcessSteps(session: Session, processId: string): Pro
  * Requirements: 12.5
  */
 export async function findClustersBySymbol(session: Session, symbolId: string): Promise<GraphNode[]> {
-  const result = await session.run(
-    `MATCH (c:Cluster)-[:CONTAINS]->(s) WHERE s.id = $val OR s.name = $val RETURN DISTINCT c`,
-    { val: symbolId },
+  const result = await session.executeRead((tx) =>
+    tx.run(
+      `MATCH (c:Cluster)-[:CONTAINS]->(s) WHERE s.id = $val OR s.name = $val RETURN DISTINCT c`,
+      { val: symbolId },
+    ),
   );
   return result.records.map((r) => {
     const n = r.get("c") as { labels: string[]; properties: Record<string, string> };
@@ -111,10 +120,12 @@ export async function traversePath(
   from: string,
   to: string,
 ): Promise<GraphEdge[][]> {
-  const result = await session.run(
-    `MATCH p = (a {id: $from})-[*1..${MAX_TRAVERSAL_DEPTH}]->(b {id: $to})
-     RETURN relationships(p) AS rels`,
-    { from, to },
+  const result = await session.executeRead((tx) =>
+    tx.run(
+      `MATCH p = (a {id: $from})-[*1..${MAX_TRAVERSAL_DEPTH}]->(b {id: $to})
+       RETURN relationships(p) AS rels`,
+      { from, to },
+    ),
   );
 
   return result.records.map((record) => {

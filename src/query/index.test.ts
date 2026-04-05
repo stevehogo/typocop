@@ -37,7 +37,12 @@ function mockVectorPool() {
 }
 
 function mockGraphSession() {
-  return { run: vi.fn(async () => ({ records: [] })) };
+  const runFn = vi.fn(async () => ({ records: [] }));
+  return {
+    run: runFn,
+    executeRead: vi.fn(async (work: (tx: { run: typeof runFn }) => Promise<unknown>) => work({ run: runFn })),
+    executeWrite: vi.fn(async (work: (tx: { run: typeof runFn }) => Promise<unknown>) => work({ run: runFn })),
+  };
 }
 
 // ─── Property 9: Query Result Limit ──────────────────────────────────────────

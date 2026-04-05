@@ -3,12 +3,13 @@
  * Requirements: 15.1, 15.2, 15.5, 15.6, 15.8
  */
 import type { Pool } from "pg";
-import type { Session } from "neo4j-driver";
+import type { Driver } from "neo4j-driver";
 import type { MCPToolResponse, QueryResult } from "../types/index.js";
 import { executeQuery } from "../query/execute-query.js";
 import { executeContextRetrieval } from "../query/context-retrieval.js";
 import { executeImpactAnalysis } from "../query/impact-analysis.js";
 import { executeDataFlowTrace } from "../query/data-flow-trace.js";
+import { SessionManager } from "./session-manager.js";
 
 /**
  * Default maximum results for queries.
@@ -62,18 +63,21 @@ function formatMCPResponse(result: PartialQueryResult, summary: string): MCPTool
 async function executeGetSymbolContext(
   params: Record<string, unknown>,
   _vectorPool: Pool,
-  graphSession: Session,
+  driver: Driver,
+  sessionManager: SessionManager,
 ): Promise<MCPToolResponse> {
   const symbolName = params.symbolName as string;
   const maxResults = (params.maxResults as number) || DEFAULT_MAX_RESULTS;
-
-  const result = await executeContextRetrieval(symbolName, maxResults, graphSession);
-
-  const summary = `Found ${result.symbols.length} related symbols, ` +
-    `${result.clusters.length} clusters, and ${result.processes.length} processes ` +
-    `for symbol '${symbolName}'. Confidence: ${(result.confidence * 100).toFixed(0)}%.`;
-
-  return formatMCPResponse(result, summary);
+  const session = await sessionManager.acquire(driver);
+  try {
+    const result = await executeContextRetrieval(symbolName, maxResults, session);
+    const summary = `Found ${result.symbols.length} related symbols, ` +
+      `${result.clusters.length} clusters, and ${result.processes.length} processes ` +
+      `for symbol '${symbolName}'. Confidence: ${(result.confidence * 100).toFixed(0)}%.`;
+    return formatMCPResponse(result, summary);
+  } finally {
+    await sessionManager.release(session);
+  }
 }
 
 /**
@@ -83,20 +87,22 @@ async function executeGetSymbolContext(
 async function executeFindDependents(
   params: Record<string, unknown>,
   _vectorPool: Pool,
-  graphSession: Session,
+  driver: Driver,
+  sessionManager: SessionManager,
 ): Promise<MCPToolResponse> {
   const symbolName = params.symbolName as string;
   const maxResults = (params.maxResults as number) || DEFAULT_MAX_RESULTS;
-
-  // Use impact analysis to find dependents
-  const result = await executeImpactAnalysis(symbolName, maxResults, graphSession);
-
-  const summary = `Found ${result.symbols.length} dependents of '${symbolName}'. ` +
-    `Risk level: ${result.riskLevel.toUpperCase()}. ` +
-    `Affected flows: ${result.affectedFlows.length}. ` +
-    `Confidence: ${(result.confidence * 100).toFixed(0)}%.`;
-
-  return formatMCPResponse(result, summary);
+  const session = await sessionManager.acquire(driver);
+  try {
+    const result = await executeImpactAnalysis(symbolName, maxResults, session);
+    const summary = `Found ${result.symbols.length} dependents of '${symbolName}'. ` +
+      `Risk level: ${result.riskLevel.toUpperCase()}. ` +
+      `Affected flows: ${result.affectedFlows.length}. ` +
+      `Confidence: ${(result.confidence * 100).toFixed(0)}%.`;
+    return formatMCPResponse(result, summary);
+  } finally {
+    await sessionManager.release(session);
+  }
 }
 
 /**
@@ -106,18 +112,21 @@ async function executeFindDependents(
 async function executeTraceDataFlow(
   params: Record<string, unknown>,
   _vectorPool: Pool,
-  graphSession: Session,
+  driver: Driver,
+  sessionManager: SessionManager,
 ): Promise<MCPToolResponse> {
   const entryPoint = params.entryPoint as string;
   const maxResults = (params.maxResults as number) || DEFAULT_MAX_RESULTS;
-
-  const result = await executeDataFlowTrace(entryPoint, maxResults, graphSession);
-
-  const summary = `Traced data flow from '${entryPoint}' through ${result.processes.length} processes. ` +
-    `Found ${result.symbols.length} symbols in the flow. ` +
-    `Confidence: ${(result.confidence * 100).toFixed(0)}%.`;
-
-  return formatMCPResponse(result, summary);
+  const session = await sessionManager.acquire(driver);
+  try {
+    const result = await executeDataFlowTrace(entryPoint, maxResults, session);
+    const summary = `Traced data flow from '${entryPoint}' through ${result.processes.length} processes. ` +
+      `Found ${result.symbols.length} symbols in the flow. ` +
+      `Confidence: ${(result.confidence * 100).toFixed(0)}%.`;
+    return formatMCPResponse(result, summary);
+  } finally {
+    await sessionManager.release(session);
+  }
 }
 
 /**
@@ -127,21 +136,24 @@ async function executeTraceDataFlow(
 async function executeImpactAnalysisTool(
   params: Record<string, unknown>,
   _vectorPool: Pool,
-  graphSession: Session,
+  driver: Driver,
+  sessionManager: SessionManager,
 ): Promise<MCPToolResponse> {
   const symbolName = params.symbolName as string;
   const changeType = (params.changeType as string) || "modify";
   const maxResults = (params.maxResults as number) || DEFAULT_MAX_RESULTS;
-
-  const result = await executeImpactAnalysis(symbolName, maxResults, graphSession);
-
-  const summary = `Impact analysis for ${changeType} of '${symbolName}': ` +
-    `${result.symbols.length} affected symbols, ` +
-    `${result.affectedFlows.length} affected flows. ` +
-    `Risk: ${result.riskLevel.toUpperCase()}. ` +
-    `Confidence: ${(result.confidence * 100).toFixed(0)}%.`;
-
-  return formatMCPResponse(result, summary);
+  const session = await sessionManager.acquire(driver);
+  try {
+    const result = await executeImpactAnalysis(symbolName, maxResults, session);
+    const summary = `Impact analysis for ${changeType} of '${symbolName}': ` +
+      `${result.symbols.length} affected symbols, ` +
+      `${result.affectedFlows.length} affected flows. ` +
+      `Risk: ${result.riskLevel.toUpperCase()}. ` +
+      `Confidence: ${(result.confidence * 100).toFixed(0)}%.`;
+    return formatMCPResponse(result, summary);
+  } finally {
+    await sessionManager.release(session);
+  }
 }
 
 /**
@@ -152,21 +164,18 @@ export async function executeTool(
   toolName: string,
   params: Record<string, unknown>,
   vectorPool: Pool,
-  graphSession: Session,
+  driver: Driver,
+  sessionManager: SessionManager,
 ): Promise<MCPToolResponse> {
   switch (toolName) {
     case "get_symbol_context":
-      return executeGetSymbolContext(params, vectorPool, graphSession);
-
+      return executeGetSymbolContext(params, vectorPool, driver, sessionManager);
     case "find_dependents":
-      return executeFindDependents(params, vectorPool, graphSession);
-
+      return executeFindDependents(params, vectorPool, driver, sessionManager);
     case "trace_data_flow":
-      return executeTraceDataFlow(params, vectorPool, graphSession);
-
+      return executeTraceDataFlow(params, vectorPool, driver, sessionManager);
     case "impact_analysis":
-      return executeImpactAnalysisTool(params, vectorPool, graphSession);
-
+      return executeImpactAnalysisTool(params, vectorPool, driver, sessionManager);
     default:
       throw new Error(`Unknown tool: ${toolName}`);
   }
