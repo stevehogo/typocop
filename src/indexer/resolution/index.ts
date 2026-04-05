@@ -10,6 +10,7 @@ import type { Symbol, Relationship, RelationType } from "../../types/index.js";
 import type { RawRelationshipHint } from "../parsing/index.js";
 import { buildSymbolTable } from "./symbol-table.js";
 import { createResolutionContext } from "./resolution-context.js";
+import { loadLanguageConfigs, type LanguageConfigs } from "../language-config.js";
 
 // ─── Symbol map ───────────────────────────────────────────────────────────────
 
@@ -184,9 +185,47 @@ export function resolveImplementations(
 
 // ─── Hint-based resolution (used by pipeline) ────────────────────────────────
 
+/**
+ * Attempt to resolve an import path using language config aliases/namespaces.
+ * Returns the resolved path segment, or null if no alias matched.
+ */
+function resolveAlias(importPath: string, configs: LanguageConfigs): string | null {
+  // TypeScript path aliases: e.g. "@/" -> "src/"
+  if (configs.tsconfig) {
+    for (const [alias, target] of configs.tsconfig.aliases) {
+      if (importPath.startsWith(alias)) {
+        return target + importPath.slice(alias.length);
+      }
+    }
+  }
+  // PHP PSR-4 namespaces: e.g. "App\" -> "app/"
+  if (configs.composer) {
+    const normalized = importPath.replace(/\\/g, "\\");
+    for (const [ns, dir] of configs.composer.psr4) {
+      if (normalized.startsWith(ns)) {
+        return dir + "/" + normalized.slice(ns.length).replace(/\\/g, "/");
+      }
+    }
+  }
+  // Go module path: strip module prefix to get relative path
+  if (configs.goModule) {
+    const prefix = configs.goModule.modulePath + "/";
+    if (importPath.startsWith(prefix)) {
+      return importPath.slice(prefix.length);
+    }
+  }
+  // Swift SPM targets
+  if (configs.swift) {
+    const target = configs.swift.targets.get(importPath);
+    if (target !== undefined) return target;
+  }
+  return null;
+}
+
 export function resolveHints(
   hints: RawRelationshipHint[],
   symbols: Symbol[],
+  languageConfigs?: LanguageConfigs,
 ): Relationship[] {
   const symbolMap = buildSymbolMap(symbols);
 
@@ -227,12 +266,25 @@ export function resolveHints(
           const sourceId = `${hint.sourceFile}:import:${hint.startLine}`;
           const segments = hint.targetName.split("/");
           const lastName = segments[segments.length - 1];
+
+          // Attempt alias/namespace resolution via language configs before symbolMap lookup
+          let resolvedTargetName = hint.targetName;
+          if (languageConfigs) {
+            const aliasResolved = resolveAlias(hint.targetName, languageConfigs);
+            if (aliasResolved !== null) resolvedTargetName = aliasResolved;
+          }
+
+          const resolvedSegments = resolvedTargetName.split("/");
+          const resolvedLastName = resolvedSegments[resolvedSegments.length - 1];
+
           // Use resolution context for same-file tier, fall back to symbolMap
-          const ctxResult = ctx.resolve(lastName ?? hint.targetName, hint.sourceFile);
+          const ctxResult = ctx.resolve(resolvedLastName ?? resolvedTargetName, hint.sourceFile);
           const target = ctxResult
-            ? symbolMap.get(ctxResult.candidates[0].nodeId) ?.[0]
+            ? symbolMap.get(ctxResult.candidates[0].nodeId)?.[0]
+              ?? (symbolMap.get(resolvedLastName) ?? symbolMap.get(resolvedTargetName))?.[0]
               ?? (symbolMap.get(lastName) ?? symbolMap.get(hint.targetName))?.[0]
-            : (symbolMap.get(lastName) ?? symbolMap.get(hint.targetName))?.[0];
+            : (symbolMap.get(resolvedLastName) ?? symbolMap.get(resolvedTargetName))?.[0]
+              ?? (symbolMap.get(lastName) ?? symbolMap.get(hint.targetName))?.[0];
           if (target) {
             add({ id: relId("imports", sourceId, target.id), source: sourceId, target: target.id, relType: "imports", metadata: {} });
           } else {
@@ -282,14 +334,21 @@ export function resolveHints(
  * resolution. Falls back to signature-based resolution when hints are absent
  * (supports legacy test usage with symbols only).
  *
- * Requirements: 3.3, 5.1–5.7
+ * When `repoRoot` is provided and hints are non-empty, language configs are
+ * loaded concurrently before hint resolution to enable alias/namespace lookup.
+ *
+ * Requirements: 3.3, 5.1–5.7, 6.1, 6.5
  */
-export function resolveReferences(
+export async function resolveReferences(
   symbols: Symbol[],
   hints?: RawRelationshipHint[],
-): Relationship[] {
+  repoRoot?: string,
+): Promise<Relationship[]> {
   if (hints && hints.length > 0) {
-    return resolveHints(hints, symbols);
+    const languageConfigs = repoRoot
+      ? await loadLanguageConfigs(repoRoot)
+      : undefined;
+    return resolveHints(hints, symbols, languageConfigs);
   }
 
   // Legacy path: derive relationships from symbol kinds and signatures

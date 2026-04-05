@@ -320,4 +320,42 @@ describe("loadTsconfigPaths — property tests", () => {
       { numRuns: 100 },
     );
   });
+
+  it("Property 2: alias values never end with '*' after normalisation", async () => {
+    await fc.assert(
+      fc.asyncProperty(
+        fc.dictionary(
+          fc.oneof(
+            fc.string({ minLength: 1 }).map((s) => `@${s}/*`),
+            fc.string({ minLength: 1 }).map((s) => `@${s}`),
+          ),
+          fc.array(
+            fc.oneof(
+              fc.string({ minLength: 1 }).map((s) => `${s}/*`),
+              fc.string({ minLength: 1 }),
+            ),
+            { minLength: 1, maxLength: 3 },
+          ),
+          { minKeys: 1, maxKeys: 10 },
+        ),
+        async (paths) => {
+          mockReadFile.mockReset();
+          mockReadFile.mockResolvedValueOnce(
+            JSON.stringify({ compilerOptions: { paths } }),
+          );
+
+          const result = await loadTsconfigPaths("/repo");
+
+          if (result !== null) {
+            for (const value of result.aliases.values()) {
+              expect(value.endsWith("*")).toBe(false);
+            }
+          }
+        },
+      ),
+      { numRuns: 100 },
+    );
+  });
 });
+
+// Composer and Go tests are in language-config-composer-go.test.ts

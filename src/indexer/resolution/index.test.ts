@@ -421,7 +421,7 @@ describe("resolveImplementations", () => {
 // ─── resolveReferences (pipeline entry point) ─────────────────────────────────
 
 describe("resolveReferences", () => {
-  it("combines all relationship types from a mixed symbol set", () => {
+  it("combines all relationship types from a mixed symbol set", async () => {
     // Arrange
     const base = makeSymbol({ id: "b1", name: "Base", kind: "class" });
     const iface = makeSymbol({ id: "i1", name: "IBase", kind: "interface" });
@@ -433,7 +433,7 @@ describe("resolveReferences", () => {
     });
     const imp = makeSymbol({ id: "im1", name: "Base", kind: "import" });
     // Act
-    const rels = resolveReferences([base, iface, child, imp]);
+    const rels = await resolveReferences([base, iface, child, imp]);
     // Assert — should have: 1 inherits + 1 implements + 1 imports
     const types = rels.map((r) => r.relType);
     expect(types).toContain("inherits");
@@ -441,9 +441,9 @@ describe("resolveReferences", () => {
     expect(types).toContain("imports");
   });
 
-  it("returns empty array for empty symbol list", () => {
+  it("returns empty array for empty symbol list", async () => {
     // Arrange + Act + Assert
-    expect(resolveReferences([])).toHaveLength(0);
+    expect(await resolveReferences([])).toHaveLength(0);
   });
 });
 
@@ -455,10 +455,10 @@ describe("resolveReferences", () => {
 describe("Property 2: Relationship Validity", () => {
   it(
     "all resolved relationships reference symbol IDs that exist in the symbol set",
-    () => {
+    async () => {
       const RESOLVABLE_KINDS: SymbolKind[] = ["function", "method", "class", "interface", "import"];
-      fc.assert(
-        fc.property(
+      await fc.assert(
+        fc.asyncProperty(
           // Generate a list of unique symbols with kinds our resolver handles
           fc.uniqueArray(
             symbolArbitrary().chain((s) =>
@@ -466,9 +466,9 @@ describe("Property 2: Relationship Validity", () => {
             ),
             { minLength: 0, maxLength: 20, selector: (s) => s.id },
           ),
-          (symbols) => {
+          async (symbols) => {
             const knownIds = new Set(symbols.map((s) => s.id));
-            const relationships = resolveReferences(symbols);
+            const relationships = await resolveReferences(symbols);
 
             for (const rel of relationships) {
               // Source must ALWAYS be a known symbol (Req 5.5)
@@ -487,18 +487,18 @@ describe("Property 2: Relationship Validity", () => {
     },
   );
 
-  it("relationship IDs are unique within a resolved set", () => {
+  it("relationship IDs are unique within a resolved set", async () => {
     const RESOLVABLE_KINDS: SymbolKind[] = ["function", "class", "interface", "import"];
-    fc.assert(
-      fc.property(
+    await fc.assert(
+      fc.asyncProperty(
         fc.uniqueArray(
           symbolArbitrary().chain((s) =>
             fc.constantFrom(...RESOLVABLE_KINDS).map((kind) => ({ ...s, kind }))
           ),
           { minLength: 0, maxLength: 20, selector: (s) => s.id },
         ),
-        (symbols) => {
-          const relationships = resolveReferences(symbols);
+        async (symbols) => {
+          const relationships = await resolveReferences(symbols);
           const ids = relationships.map((r) => r.id);
           return new Set(ids).size === ids.length;
         },
@@ -511,7 +511,7 @@ describe("Property 2: Relationship Validity", () => {
 // ─── Same-file tier resolution (via resolveReferences) ───────────────────────
 
 describe("resolveImport: same-file tier resolution", () => {
-  it("prefers same-file symbol over global match when names collide", () => {
+  it("prefers same-file symbol over global match when names collide", async () => {
     // Arrange — two symbols with same name in different files
     const sameFileTarget = makeSymbol({
       id: "local",
@@ -532,7 +532,7 @@ describe("resolveImport: same-file tier resolution", () => {
       location: { filePath: "src/test.ts", startLine: 1, startColumn: 0, endLine: 1, endColumn: 0 },
     });
     // Act — resolveReferences uses SymbolTable internally for same-file tier
-    const rels = resolveReferences([sameFileTarget, globalTarget, importSym]);
+    const rels = await resolveReferences([sameFileTarget, globalTarget, importSym]);
     const importRel = rels.find((r) => r.source === "i1");
     // Assert — should resolve to the same-file symbol
     expect(importRel?.target).toBe("local");

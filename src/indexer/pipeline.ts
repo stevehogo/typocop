@@ -147,7 +147,7 @@ export async function runIndexingPipeline(config: PipelineConfig): Promise<Pipel
   if (verbose) console.log("[pipeline] Starting Phase 3: Resolution");
   
   // Phase 3: Resolve references (Req 3.3)
-  const relationships = resolveReferences(symbols, hints);
+  const relationships = await resolveReferences(symbols, hints, sourcePath);
   if (verbose) console.log(`[pipeline] Phase 3 complete: ${relationships.length} relationships resolved`);
 
   if (verbose) console.log("[pipeline] Starting Phase 4: Clustering");
