@@ -1,11 +1,16 @@
 import { describe, it, expect, vi } from "vitest";
 import { parseArgs } from "./parser.js";
 import * as fs from "fs";
+import * as languageModule from "../parser/language.js";
 
 vi.mock("fs");
+vi.mock("../parser/language.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof languageModule>();
+  return { ...actual, detectDirectoryLanguage: vi.fn() };
+});
 
 describe("parseArgs", () => {
-  it("parses the parse command with valid arguments", () => {
+  it("parses the parse command with explicit --lang", () => {
     vi.mocked(fs.existsSync).mockReturnValue(true);
     const args = ["node", "typocop", "parse", "-p", "./src", "-l", "typescript", "-v"];
     const command = parseArgs(args);
@@ -19,6 +24,32 @@ describe("parseArgs", () => {
         verbose: true,
       },
     });
+  });
+
+  it("auto-detects language when --lang is omitted", () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(languageModule.detectDirectoryLanguage).mockReturnValue("python");
+
+    const args = ["node", "typocop", "parse", "-p", "./src"];
+    const command = parseArgs(args);
+
+    expect(command).toEqual({
+      type: "parse",
+      config: {
+        sourcePath: "./src",
+        language: "python",
+        outputPath: undefined,
+        verbose: false,
+      },
+    });
+  });
+
+  it("throws when --lang is omitted and detection fails", () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(languageModule.detectDirectoryLanguage).mockReturnValue(null);
+
+    const args = ["node", "typocop", "parse", "-p", "./src"];
+    expect(() => parseArgs(args)).toThrow("Could not auto-detect language");
   });
 
   it("throws error for unsupported language", () => {
@@ -37,7 +68,7 @@ describe("parseArgs", () => {
     vi.mocked(fs.existsSync).mockReturnValue(true);
     const args = ["node", "typocop", "reindex", "-d", "./db"];
     const command = parseArgs(args);
-    
+
     expect(command).toEqual({
       type: "reindex",
       dbPath: "./db",
@@ -47,14 +78,7 @@ describe("parseArgs", () => {
   it("parses the status command", () => {
     const args = ["node", "typocop", "status"];
     const command = parseArgs(args);
-    
-    expect(command).toEqual({
-      type: "status",
-    });
-  });
 
-  it("throws error when missing required options", () => {
-    const args = ["node", "typocop", "parse", "-p", "./src"];
-    expect(() => parseArgs(args)).toThrow(); // Should throw commander error for missing -l
+    expect(command).toEqual({ type: "status" });
   });
 });

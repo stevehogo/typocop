@@ -1,6 +1,7 @@
 import { Command, CommanderError } from "commander";
 import * as fs from "fs";
 import { Language } from "../types/index.js";
+import { detectDirectoryLanguage } from "../parser/language.js";
 
 export interface CLIConfig {
   sourcePath: string;
@@ -40,19 +41,33 @@ export function parseArgs(rawArgs: string[]): CLICommand {
     .command("parse")
     .description("Parse source code and build knowledge graph")
     .requiredOption("-p, --path <path>", "Source directory path to parse")
-    .requiredOption("-l, --lang <language>", "Programming language of the source code")
+    .option("-l, --lang <language>", "Programming language (auto-detected if omitted)")
     .option("-o, --out <path>", "Output database path")
     .option("-v, --verbose", "Enable verbose logging", false)
     .action((options) => {
       if (!fs.existsSync(options.path)) {
         throw new CLIValidationError(`Source path does not exist: ${options.path}`);
       }
-      
-      const lang = options.lang.toLowerCase() as Language;
-      if (!supportedLanguages.includes(lang)) {
-        throw new CLIValidationError(`Unsupported language '${options.lang}'`);
+
+      let lang: Language;
+
+      if (options.lang) {
+        const candidate = options.lang.toLowerCase() as Language;
+        if (!supportedLanguages.includes(candidate)) {
+          throw new CLIValidationError(`Unsupported language '${options.lang}'. Supported: ${supportedLanguages.join(", ")}`);
+        }
+        lang = candidate;
+      } else {
+        const detected = detectDirectoryLanguage(options.path);
+        if (!detected) {
+          throw new CLIValidationError(
+            `Could not auto-detect language in '${options.path}'. Use --lang to specify one explicitly.`
+          );
+        }
+        console.log(`Auto-detected language: ${detected}`);
+        lang = detected;
       }
-      
+
       parsedCommand = {
         type: "parse",
         config: {
