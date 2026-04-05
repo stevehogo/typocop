@@ -122,7 +122,7 @@
   - _Expected_Behavior: _resolveRelease is always set by the time the caller can invoke release()_
   - _Requirements: 2.5_
 
-- [-] 9. Fix `closeAll()` to unblock pending acquires before resetting queue
+- [x] 9. Fix `closeAll()` to unblock pending acquires before resetting queue
   _Skills: `typescript-expert`, `nodejs-best-practices`, `error-handling-patterns`
   - Before resetting `_queue`, call `_resolveRelease()` for every session in `_sessions` that has one set
   - Ensure waiters blocked on the old `_queue` promise are unblocked even when `closeAll()` force-closes their session
@@ -132,33 +132,33 @@
   - _Expected_Behavior: all pending acquire() waiters are unblocked before queue is reset_
   - _Requirements: 2.7_
 
-- [ ] 10. Fix multi-transaction session reuse in query functions
+- [x] 10. Fix multi-transaction session reuse in query functions
   _Skills: `typescript-expert`, `nodejs-best-practices`, `clean-code`, `architecture`
-  - [ ] 10.1 Refactor `executeContextRetrieval` in `src/query/context-retrieval.ts` to consolidate all 5 `session.executeRead()` calls into a single managed transaction block
+  - [x] 10.1 Refactor `executeContextRetrieval` in `src/query/context-retrieval.ts` to consolidate all 5 `session.executeRead()` calls into a single managed transaction block
     - Run `findNode`, `findDependents`, `findDependencies`, `findProcessesBySymbol`, `findClustersBySymbol` inside one `session.executeRead((tx) => ...)` callback
     - Update `src/graph/query.ts` functions to accept a `ManagedTransaction` parameter instead of `Session` where needed, or inline the Cypher into the single transaction block
     - _Requirements: 2.6_
-  - [ ] 10.2 Audit `executeImpactAnalysis` and `executeDataFlowTrace` for the same multi-`executeRead` pattern and apply the same consolidation
+  - [x] 10.2 Audit `executeImpactAnalysis` and `executeDataFlowTrace` for the same multi-`executeRead` pattern and apply the same consolidation
     - _Requirements: 2.6_
 
-- [ ] 11. Add regression tests for race condition and multi-transaction scenarios
+- [x] 11. Add regression tests for race condition and multi-transaction scenarios
   _Skills: `testing-patterns`, `tdd-workflow`, `typescript-expert`
-  - [ ] 11.1 Write deterministic race condition test for `SessionManager.acquire()`
+  - [x] 11.1 Write deterministic race condition test for `SessionManager.acquire()`
     - Use controlled microtask interleaving: call `release()` before yielding to microtask queue
     - Assert `_resolveRelease` is called on fixed code (queue unblocked)
     - Assert a second `acquire()` resolves after `release()` (serialization preserved)
     - Co-locate in `src/mcp/session-manager.test.ts`
     - _Requirements: 2.5_
-  - [ ] 11.2 Write test for `closeAll()` unblocking pending acquires
+  - [x] 11.2 Write test for `closeAll()` unblocking pending acquires
     - Start an `acquire()`, do NOT release, call `closeAll()`
     - Assert the pending `acquire()` resolves (not hangs) after `closeAll()`
     - _Requirements: 2.7_
-  - [ ] 11.3 Write test for single-transaction consolidation in `executeContextRetrieval`
+  - [x] 11.3 Write test for single-transaction consolidation in `executeContextRetrieval`
     - Mock Neo4j session to throw on second `executeRead()` call
     - Assert fixed code never triggers the second `executeRead()` error
     - _Requirements: 2.6_
 
-- [ ] 12. Checkpoint — run all tests
+- [x] 12. Checkpoint — run all tests
   - Run `pnpm vitest --run --reporter=basic`
   - Ensure all tests pass; ask the user if questions arise
 

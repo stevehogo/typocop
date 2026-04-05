@@ -11,13 +11,14 @@
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import * as fc from "fast-check";
-import type { Session } from "neo4j-driver";
+import type { Session, ManagedTransaction } from "neo4j-driver";
 import { executeContextRetrieval } from "./context-retrieval.js";
 import { executeImpactAnalysis } from "./impact-analysis.js";
 import * as graphQuery from "../graph/query.js";
 import type { GraphNode } from "../graph/connection.js";
 
 // ─── Module mock ─────────────────────────────────────────────────────────────
+// Mock the tx-prefixed variants used by the consolidated transaction approach.
 
 vi.mock("../graph/query.js", () => ({
   findNode: vi.fn(),
@@ -26,6 +27,12 @@ vi.mock("../graph/query.js", () => ({
   findProcessesBySymbol: vi.fn(),
   findClustersBySymbol: vi.fn(),
   findProcessSteps: vi.fn(),
+  txFindNode: vi.fn(),
+  txFindDependents: vi.fn(),
+  txFindDependencies: vi.fn(),
+  txFindProcessesBySymbol: vi.fn(),
+  txFindClustersBySymbol: vi.fn(),
+  txFindProcessSteps: vi.fn(),
 }));
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -62,25 +69,17 @@ function makeSymbolNode(id: string): GraphNode {
 }
 
 /**
- * Build a mock Neo4j session that would return HAS_STEP records for a given
- * process ID if queried. The current graphNodeToProcess never calls session.run,
- * so this mock is never actually invoked — which is exactly the bug.
+ * Build a mock Neo4j session whose executeRead(callback) invokes the callback
+ * with a stub ManagedTransaction. The tx-prefixed graph query functions are
+ * mocked at the module level, so the callback just needs a truthy tx object.
  */
 function makeSessionWithSteps(
-  processId: string,
-  steps: Array<{ symbolId: string; order: number; description: string }>,
+  _processId: string,
+  _steps: Array<{ symbolId: string; order: number; description: string }>,
 ): Session {
-  const records = steps.map((s) => ({
-    get: (key: string) => {
-      if (key === "symbolId") return s.symbolId;
-      if (key === "order") return s.order;
-      if (key === "description") return s.description;
-      return null;
-    },
-  }));
-
+  const mockTx = {} as ManagedTransaction;
   return {
-    run: vi.fn().mockResolvedValue({ records }),
+    executeRead: vi.fn().mockImplementation((cb: (tx: ManagedTransaction) => Promise<unknown>) => cb(mockTx)),
   } as unknown as Session;
 }
 
@@ -111,12 +110,12 @@ describe("Property 1 — Bug Condition: graphNodeToProcess steps always empty (M
 
           const session = makeSessionWithSteps(processId, stepRecords);
 
-          vi.mocked(graphQuery.findNode).mockResolvedValue(targetNode);
-          vi.mocked(graphQuery.findDependents).mockResolvedValue([]);
-          vi.mocked(graphQuery.findDependencies).mockResolvedValue([]);
-          vi.mocked(graphQuery.findProcessesBySymbol).mockResolvedValue([processNode]);
-          vi.mocked(graphQuery.findClustersBySymbol).mockResolvedValue([]);
-          vi.mocked(graphQuery.findProcessSteps).mockResolvedValue(stepRecords);
+          vi.mocked(graphQuery.txFindNode).mockResolvedValue(targetNode);
+          vi.mocked(graphQuery.txFindDependents).mockResolvedValue([]);
+          vi.mocked(graphQuery.txFindDependencies).mockResolvedValue([]);
+          vi.mocked(graphQuery.txFindProcessesBySymbol).mockResolvedValue([processNode]);
+          vi.mocked(graphQuery.txFindClustersBySymbol).mockResolvedValue([]);
+          vi.mocked(graphQuery.txFindProcessSteps).mockResolvedValue(stepRecords);
 
           const result = await executeContextRetrieval("target-sym", 50, session);
 
@@ -138,12 +137,12 @@ describe("Property 1 — Bug Condition: graphNodeToProcess steps always empty (M
     ];
     const session = makeSessionWithSteps("proc-3", steps);
 
-    vi.mocked(graphQuery.findNode).mockResolvedValue(targetNode);
-    vi.mocked(graphQuery.findDependents).mockResolvedValue([]);
-    vi.mocked(graphQuery.findDependencies).mockResolvedValue([]);
-    vi.mocked(graphQuery.findProcessesBySymbol).mockResolvedValue([processNode]);
-    vi.mocked(graphQuery.findClustersBySymbol).mockResolvedValue([]);
-    vi.mocked(graphQuery.findProcessSteps).mockResolvedValue(steps);
+    vi.mocked(graphQuery.txFindNode).mockResolvedValue(targetNode);
+    vi.mocked(graphQuery.txFindDependents).mockResolvedValue([]);
+    vi.mocked(graphQuery.txFindDependencies).mockResolvedValue([]);
+    vi.mocked(graphQuery.txFindProcessesBySymbol).mockResolvedValue([processNode]);
+    vi.mocked(graphQuery.txFindClustersBySymbol).mockResolvedValue([]);
+    vi.mocked(graphQuery.txFindProcessSteps).mockResolvedValue(steps);
 
     const result = await executeContextRetrieval("target-sym", 50, session);
 
@@ -168,13 +167,13 @@ describe("Property 1 — Bug Condition: graphNodeToProcess steps always empty (M
     ];
     const session = makeSessionWithSteps("proc-ord", stepsOutOfOrder);
 
-    vi.mocked(graphQuery.findNode).mockResolvedValue(targetNode);
-    vi.mocked(graphQuery.findDependents).mockResolvedValue([]);
-    vi.mocked(graphQuery.findDependencies).mockResolvedValue([]);
-    vi.mocked(graphQuery.findProcessesBySymbol).mockResolvedValue([processNode]);
-    vi.mocked(graphQuery.findClustersBySymbol).mockResolvedValue([]);
+    vi.mocked(graphQuery.txFindNode).mockResolvedValue(targetNode);
+    vi.mocked(graphQuery.txFindDependents).mockResolvedValue([]);
+    vi.mocked(graphQuery.txFindDependencies).mockResolvedValue([]);
+    vi.mocked(graphQuery.txFindProcessesBySymbol).mockResolvedValue([processNode]);
+    vi.mocked(graphQuery.txFindClustersBySymbol).mockResolvedValue([]);
     // findProcessSteps returns already-ordered results (Cypher ORDER BY r.order ASC)
-    vi.mocked(graphQuery.findProcessSteps).mockResolvedValue(stepsOrdered);
+    vi.mocked(graphQuery.txFindProcessSteps).mockResolvedValue(stepsOrdered);
 
     const result = await executeContextRetrieval("target-sym", 50, session);
 
@@ -191,12 +190,12 @@ describe("Property 1 — Bug Condition: graphNodeToProcess steps always empty (M
     const targetNode = makeSymbolNode("target-sym");
     const session = makeSessionWithSteps("proc-0", []);
 
-    vi.mocked(graphQuery.findNode).mockResolvedValue(targetNode);
-    vi.mocked(graphQuery.findDependents).mockResolvedValue([]);
-    vi.mocked(graphQuery.findDependencies).mockResolvedValue([]);
-    vi.mocked(graphQuery.findProcessesBySymbol).mockResolvedValue([processNode]);
-    vi.mocked(graphQuery.findClustersBySymbol).mockResolvedValue([]);
-    vi.mocked(graphQuery.findProcessSteps).mockResolvedValue([]);
+    vi.mocked(graphQuery.txFindNode).mockResolvedValue(targetNode);
+    vi.mocked(graphQuery.txFindDependents).mockResolvedValue([]);
+    vi.mocked(graphQuery.txFindDependencies).mockResolvedValue([]);
+    vi.mocked(graphQuery.txFindProcessesBySymbol).mockResolvedValue([processNode]);
+    vi.mocked(graphQuery.txFindClustersBySymbol).mockResolvedValue([]);
+    vi.mocked(graphQuery.txFindProcessSteps).mockResolvedValue([]);
 
     const result = await executeContextRetrieval("target-sym", 50, session);
 
@@ -243,12 +242,12 @@ describe("Property 2 — Preservation: non-process fields unchanged (MUST PASS o
             })),
           );
 
-          vi.mocked(graphQuery.findNode).mockResolvedValue(targetNode);
-          vi.mocked(graphQuery.findDependents).mockResolvedValue([]);
-          vi.mocked(graphQuery.findDependencies).mockResolvedValue([]);
-          vi.mocked(graphQuery.findProcessesBySymbol).mockResolvedValue([processNode]);
-          vi.mocked(graphQuery.findClustersBySymbol).mockResolvedValue([]);
-          vi.mocked(graphQuery.findProcessSteps).mockResolvedValue([]);
+          vi.mocked(graphQuery.txFindNode).mockResolvedValue(targetNode);
+          vi.mocked(graphQuery.txFindDependents).mockResolvedValue([]);
+          vi.mocked(graphQuery.txFindDependencies).mockResolvedValue([]);
+          vi.mocked(graphQuery.txFindProcessesBySymbol).mockResolvedValue([processNode]);
+          vi.mocked(graphQuery.txFindClustersBySymbol).mockResolvedValue([]);
+          vi.mocked(graphQuery.txFindProcessSteps).mockResolvedValue([]);
 
           const result = await executeContextRetrieval(symbolName, 50, session);
 
@@ -270,12 +269,12 @@ describe("Property 2 — Preservation: non-process fields unchanged (MUST PASS o
           const processNode = makeProcessNode("proc-risk", stepCount);
           const session = makeSessionWithSteps("proc-risk", []);
 
-          vi.mocked(graphQuery.findNode).mockResolvedValue(targetNode);
-          vi.mocked(graphQuery.findDependents).mockResolvedValue([]);
-          vi.mocked(graphQuery.findDependencies).mockResolvedValue([]);
-          vi.mocked(graphQuery.findProcessesBySymbol).mockResolvedValue([processNode]);
-          vi.mocked(graphQuery.findClustersBySymbol).mockResolvedValue([]);
-          vi.mocked(graphQuery.findProcessSteps).mockResolvedValue([]);
+          vi.mocked(graphQuery.txFindNode).mockResolvedValue(targetNode);
+          vi.mocked(graphQuery.txFindDependents).mockResolvedValue([]);
+          vi.mocked(graphQuery.txFindDependencies).mockResolvedValue([]);
+          vi.mocked(graphQuery.txFindProcessesBySymbol).mockResolvedValue([processNode]);
+          vi.mocked(graphQuery.txFindClustersBySymbol).mockResolvedValue([]);
+          vi.mocked(graphQuery.txFindProcessSteps).mockResolvedValue([]);
 
           const result = await executeContextRetrieval("target-sym", 50, session);
 
@@ -292,13 +291,16 @@ describe("Property 2 — Preservation: non-process fields unchanged (MUST PASS o
         fc.string({ minLength: 1, maxLength: 20 }),
         async (symbolName) => {
           const targetNode = makeSymbolNode(symbolName);
-          const session = {} as Session;
+          const mockTx = {} as ManagedTransaction;
+          const session = {
+            executeRead: vi.fn().mockImplementation((cb: (tx: ManagedTransaction) => Promise<unknown>) => cb(mockTx)),
+          } as unknown as Session;
 
-          vi.mocked(graphQuery.findNode).mockResolvedValue(targetNode);
-          vi.mocked(graphQuery.findDependents).mockResolvedValue([]);
-          vi.mocked(graphQuery.findDependencies).mockResolvedValue([]);
-          vi.mocked(graphQuery.findProcessesBySymbol).mockResolvedValue([]);
-          vi.mocked(graphQuery.findClustersBySymbol).mockResolvedValue([]);
+          vi.mocked(graphQuery.txFindNode).mockResolvedValue(targetNode);
+          vi.mocked(graphQuery.txFindDependents).mockResolvedValue([]);
+          vi.mocked(graphQuery.txFindDependencies).mockResolvedValue([]);
+          vi.mocked(graphQuery.txFindProcessesBySymbol).mockResolvedValue([]);
+          vi.mocked(graphQuery.txFindClustersBySymbol).mockResolvedValue([]);
 
           const result = await executeContextRetrieval(symbolName, 50, session);
 
@@ -314,12 +316,12 @@ describe("Property 2 — Preservation: non-process fields unchanged (MUST PASS o
     const processNode = makeProcessNode("proc-conf", 2);
     const session = makeSessionWithSteps("proc-conf", []);
 
-    vi.mocked(graphQuery.findNode).mockResolvedValue(targetNode);
-    vi.mocked(graphQuery.findDependents).mockResolvedValue([]);
-    vi.mocked(graphQuery.findDependencies).mockResolvedValue([]);
-    vi.mocked(graphQuery.findProcessesBySymbol).mockResolvedValue([processNode]);
-    vi.mocked(graphQuery.findClustersBySymbol).mockResolvedValue([]);
-    vi.mocked(graphQuery.findProcessSteps).mockResolvedValue([]);
+    vi.mocked(graphQuery.txFindNode).mockResolvedValue(targetNode);
+    vi.mocked(graphQuery.txFindDependents).mockResolvedValue([]);
+    vi.mocked(graphQuery.txFindDependencies).mockResolvedValue([]);
+    vi.mocked(graphQuery.txFindProcessesBySymbol).mockResolvedValue([processNode]);
+    vi.mocked(graphQuery.txFindClustersBySymbol).mockResolvedValue([]);
+    vi.mocked(graphQuery.txFindProcessSteps).mockResolvedValue([]);
 
     const result = await executeContextRetrieval("target-sym", 50, session);
 
@@ -350,11 +352,11 @@ describe("Property 2 — Preservation (executeImpactAnalysis): non-process field
           const processNode = makeProcessNode("proc-ia", stepCount);
           const session = makeSessionWithSteps("proc-ia", []);
 
-          vi.mocked(graphQuery.findNode).mockResolvedValue(targetNode);
-          vi.mocked(graphQuery.findDependents).mockResolvedValue(depNodes);
-          vi.mocked(graphQuery.findProcessesBySymbol).mockResolvedValue([processNode]);
-          vi.mocked(graphQuery.findClustersBySymbol).mockResolvedValue([]);
-          vi.mocked(graphQuery.findProcessSteps).mockResolvedValue([]);
+          vi.mocked(graphQuery.txFindNode).mockResolvedValue(targetNode);
+          vi.mocked(graphQuery.txFindDependents).mockResolvedValue(depNodes);
+          vi.mocked(graphQuery.txFindProcessesBySymbol).mockResolvedValue([processNode]);
+          vi.mocked(graphQuery.txFindClustersBySymbol).mockResolvedValue([]);
+          vi.mocked(graphQuery.txFindProcessSteps).mockResolvedValue([]);
 
           const result = await executeImpactAnalysis(targetName, 50, session);
 
@@ -378,11 +380,11 @@ describe("Property 2 — Preservation (executeImpactAnalysis): non-process field
           const processNode = makeProcessNode("proc-risk-ia", stepCount);
           const session = makeSessionWithSteps("proc-risk-ia", []);
 
-          vi.mocked(graphQuery.findNode).mockResolvedValue(targetNode);
-          vi.mocked(graphQuery.findDependents).mockResolvedValue(depNodes);
-          vi.mocked(graphQuery.findProcessesBySymbol).mockResolvedValue([processNode]);
-          vi.mocked(graphQuery.findClustersBySymbol).mockResolvedValue([]);
-          vi.mocked(graphQuery.findProcessSteps).mockResolvedValue([]);
+          vi.mocked(graphQuery.txFindNode).mockResolvedValue(targetNode);
+          vi.mocked(graphQuery.txFindDependents).mockResolvedValue(depNodes);
+          vi.mocked(graphQuery.txFindProcessesBySymbol).mockResolvedValue([processNode]);
+          vi.mocked(graphQuery.txFindClustersBySymbol).mockResolvedValue([]);
+          vi.mocked(graphQuery.txFindProcessSteps).mockResolvedValue([]);
 
           const result = await executeImpactAnalysis("target-ia", 50, session);
 
@@ -400,12 +402,15 @@ describe("Property 2 — Preservation (executeImpactAnalysis): non-process field
         fc.string({ minLength: 1, maxLength: 20 }),
         async (targetName) => {
           const targetNode = makeSymbolNode(targetName);
-          const session = {} as Session;
+          const mockTx = {} as ManagedTransaction;
+          const session = {
+            executeRead: vi.fn().mockImplementation((cb: (tx: ManagedTransaction) => Promise<unknown>) => cb(mockTx)),
+          } as unknown as Session;
 
-          vi.mocked(graphQuery.findNode).mockResolvedValue(targetNode);
-          vi.mocked(graphQuery.findDependents).mockResolvedValue([]);
-          vi.mocked(graphQuery.findProcessesBySymbol).mockResolvedValue([]);
-          vi.mocked(graphQuery.findClustersBySymbol).mockResolvedValue([]);
+          vi.mocked(graphQuery.txFindNode).mockResolvedValue(targetNode);
+          vi.mocked(graphQuery.txFindDependents).mockResolvedValue([]);
+          vi.mocked(graphQuery.txFindProcessesBySymbol).mockResolvedValue([]);
+          vi.mocked(graphQuery.txFindClustersBySymbol).mockResolvedValue([]);
 
           const result = await executeImpactAnalysis(targetName, 50, session);
 
@@ -422,11 +427,11 @@ describe("Property 2 — Preservation (executeImpactAnalysis): non-process field
     const processNode = makeProcessNode("proc-flow", 2);
     const session = makeSessionWithSteps("proc-flow", []);
 
-    vi.mocked(graphQuery.findNode).mockResolvedValue(targetNode);
-    vi.mocked(graphQuery.findDependents).mockResolvedValue([]);
-    vi.mocked(graphQuery.findProcessesBySymbol).mockResolvedValue([processNode]);
-    vi.mocked(graphQuery.findClustersBySymbol).mockResolvedValue([]);
-    vi.mocked(graphQuery.findProcessSteps).mockResolvedValue([]);
+    vi.mocked(graphQuery.txFindNode).mockResolvedValue(targetNode);
+    vi.mocked(graphQuery.txFindDependents).mockResolvedValue([]);
+    vi.mocked(graphQuery.txFindProcessesBySymbol).mockResolvedValue([processNode]);
+    vi.mocked(graphQuery.txFindClustersBySymbol).mockResolvedValue([]);
+    vi.mocked(graphQuery.txFindProcessSteps).mockResolvedValue([]);
 
     const result = await executeImpactAnalysis("target-ia", 50, session);
 
@@ -444,11 +449,11 @@ describe("Property 2 — Preservation (executeImpactAnalysis): non-process field
     const processNode = makeProcessNode("proc-cl", 3);
     const session = makeSessionWithSteps("proc-cl", []);
 
-    vi.mocked(graphQuery.findNode).mockResolvedValue(targetNode);
-    vi.mocked(graphQuery.findDependents).mockResolvedValue([]);
-    vi.mocked(graphQuery.findProcessesBySymbol).mockResolvedValue([processNode]);
-    vi.mocked(graphQuery.findClustersBySymbol).mockResolvedValue([clusterNode]);
-    vi.mocked(graphQuery.findProcessSteps).mockResolvedValue([]);
+    vi.mocked(graphQuery.txFindNode).mockResolvedValue(targetNode);
+    vi.mocked(graphQuery.txFindDependents).mockResolvedValue([]);
+    vi.mocked(graphQuery.txFindProcessesBySymbol).mockResolvedValue([processNode]);
+    vi.mocked(graphQuery.txFindClustersBySymbol).mockResolvedValue([clusterNode]);
+    vi.mocked(graphQuery.txFindProcessSteps).mockResolvedValue([]);
 
     const result = await executeImpactAnalysis("target-ia", 50, session);
 

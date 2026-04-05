@@ -2,7 +2,7 @@
  * Graph database query operations.
  * Requirements: 16.3, 16.4, 16.5, 16.6, 16.7, 20.5, 23.4
  */
-import type { Session } from "neo4j-driver";
+import type { Session, ManagedTransaction } from "neo4j-driver";
 import type { GraphNode, GraphEdge } from "./connection.js";
 import type { ProcessStep } from "../types/index.js";
 import { MAX_TRAVERSAL_DEPTH } from "../utils/limits.js";
@@ -14,6 +14,92 @@ function rowToNode(record: Record<string, unknown>): GraphNode {
     labels: n.labels,
     properties: n.properties,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Transaction-scoped variants — accept a ManagedTransaction so all reads for
+// a single tool call can be consolidated into one session.executeRead() block.
+// Requirements: 2.6
+// ---------------------------------------------------------------------------
+
+/**
+ * Find a single node by ID or name within an existing managed transaction.
+ */
+export async function txFindNode(tx: ManagedTransaction, idOrName: string): Promise<GraphNode | null> {
+  const result = await tx.run(
+    `MATCH (n) WHERE n.id = $val OR n.name = $val RETURN n LIMIT 1`,
+    { val: idOrName },
+  );
+  if (result.records.length === 0) return null;
+  return rowToNode(result.records[0].toObject());
+}
+
+/**
+ * Find all nodes that depend on the target symbol within an existing managed transaction.
+ */
+export async function txFindDependents(tx: ManagedTransaction, symbolId: string): Promise<GraphNode[]> {
+  const result = await tx.run(
+    `MATCH (n)-[*1..${MAX_TRAVERSAL_DEPTH}]->(t) WHERE t.id = $val OR t.name = $val RETURN DISTINCT n`,
+    { val: symbolId },
+  );
+  return result.records.map((r) => rowToNode(r.toObject()));
+}
+
+/**
+ * Find all nodes that the target symbol depends on within an existing managed transaction.
+ */
+export async function txFindDependencies(tx: ManagedTransaction, symbolId: string): Promise<GraphNode[]> {
+  const result = await tx.run(
+    `MATCH (s)-[*1..${MAX_TRAVERSAL_DEPTH}]->(n) WHERE s.id = $val OR s.name = $val RETURN DISTINCT n`,
+    { val: symbolId },
+  );
+  return result.records.map((r) => rowToNode(r.toObject()));
+}
+
+/**
+ * Find all Process nodes containing the symbol within an existing managed transaction.
+ */
+export async function txFindProcessesBySymbol(tx: ManagedTransaction, symbolId: string): Promise<GraphNode[]> {
+  const result = await tx.run(
+    `MATCH (p:Process)-[:HAS_STEP]->(s) WHERE s.id = $val OR s.name = $val RETURN DISTINCT p`,
+    { val: symbolId },
+  );
+  return result.records.map((r) => {
+    const n = r.get("p") as { labels: string[]; properties: Record<string, string> };
+    return { id: n.properties["id"] ?? "", labels: n.labels, properties: n.properties };
+  });
+}
+
+/**
+ * Find all Cluster nodes containing the symbol within an existing managed transaction.
+ */
+export async function txFindClustersBySymbol(tx: ManagedTransaction, symbolId: string): Promise<GraphNode[]> {
+  const result = await tx.run(
+    `MATCH (c:Cluster)-[:CONTAINS]->(s) WHERE s.id = $val OR s.name = $val RETURN DISTINCT c`,
+    { val: symbolId },
+  );
+  return result.records.map((r) => {
+    const n = r.get("c") as { labels: string[]; properties: Record<string, string> };
+    return { id: n.properties["id"] ?? "", labels: n.labels, properties: n.properties };
+  });
+}
+
+/**
+ * Find all ProcessStep records for a process within an existing managed transaction.
+ */
+export async function txFindProcessSteps(tx: ManagedTransaction, processId: string): Promise<ProcessStep[]> {
+  const result = await tx.run(
+    `MATCH (p:Process {id: $processId})-[r:HAS_STEP]->(s)
+     RETURN s.id AS symbolId, r.order AS order, s.name AS description
+     ORDER BY r.order ASC`,
+    { processId },
+  );
+  if (result.records.length === 0) return [];
+  return result.records.map((record) => ({
+    order: record.get("order") as number,
+    symbolId: record.get("symbolId") as string,
+    description: (record.get("description") as string | null) ?? "",
+  }));
 }
 
 /**

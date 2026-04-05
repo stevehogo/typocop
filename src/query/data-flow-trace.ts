@@ -2,9 +2,9 @@
  * Data flow tracing query logic.
  * Requirements: 13.1, 13.2, 13.3, 13.4, 13.5, 13.6, 13.7
  */
-import type { Session } from "neo4j-driver";
-import type { Symbol, Relationship, Cluster, Process, QueryResult, SymbolKind, Visibility, ClusterCategory } from "../types/index.js";
-import { findNode, findDependencies } from "../graph/query.js";
+import type { Session, ManagedTransaction } from "neo4j-driver";
+import type { Symbol, Relationship, QueryResult, SymbolKind, Visibility } from "../types/index.js";
+import { txFindNode, txFindDependencies } from "../graph/query.js";
 import type { GraphNode } from "../graph/connection.js";
 
 /** Layer classification patterns */
@@ -51,84 +51,87 @@ function graphNodeToSymbol(node: GraphNode): Symbol {
 
 /**
  * Execute a data flow tracing query.
+ * All graph reads are consolidated into a single session.executeRead() transaction
+ * to prevent "open transaction" errors in Neo4j driver v5+. (Req 2.6)
+ *
  * Traces from API endpoint through controllers, services, repositories to database models.
- * Requirements: 13.1, 13.2, 13.3, 13.4, 13.5, 13.6, 13.7
+ * Requirements: 13.1, 13.2, 13.3, 13.4, 13.5, 13.6, 13.7, 2.6
  */
 export async function executeDataFlowTrace(
   entryPoint: string,
   maxResults: number,
   graphSession: Session,
 ): Promise<Pick<QueryResult, "symbols" | "relationships" | "clusters" | "processes" | "confidence" | "riskLevel" | "affectedFlows">> {
-  // Req 13.1 — identify entry point symbol
-  const entryNode = await findNode(graphSession, entryPoint);
-  if (!entryNode) {
+  return graphSession.executeRead(async (tx: ManagedTransaction) => {
+    // Req 13.1 — identify entry point symbol
+    const entryNode = await txFindNode(tx, entryPoint);
+    if (!entryNode) {
+      return {
+        symbols: [],
+        relationships: [],
+        clusters: [],
+        processes: [],
+        confidence: 0.5,
+        riskLevel: "low" as const,
+        affectedFlows: [],
+      };
+    }
+
+    // Req 13.2-13.5 — trace through all dependencies
+    const dependencyNodes = await txFindDependencies(tx, entryPoint);
+
+    // Classify nodes by layer
+    const layeredNodes = new Map<string, GraphNode[]>();
+    layeredNodes.set("api", [entryNode]);
+
+    for (const node of dependencyNodes) {
+      const layer = classifyLayer(node);
+      if (!layeredNodes.has(layer)) {
+        layeredNodes.set(layer, []);
+      }
+      layeredNodes.get(layer)!.push(node);
+    }
+
+    // Build ordered path: API → Controller → Service → Repository → Model
+    const orderedLayers = ["api", "controller", "service", "repository", "model"];
+    const pathSymbols: Symbol[] = [];
+    const relationships: Relationship[] = [];
+
+    for (const layer of orderedLayers) {
+      const nodes = layeredNodes.get(layer) ?? [];
+      pathSymbols.push(...nodes.map(graphNodeToSymbol));
+    }
+
+    // Build relationships between consecutive symbols
+    for (let i = 0; i < pathSymbols.length - 1; i++) {
+      relationships.push({
+        id: `${pathSymbols[i].id}->calls->${pathSymbols[i + 1].id}`,
+        source: pathSymbols[i].id,
+        target: pathSymbols[i + 1].id,
+        relType: "calls" as const,
+        metadata: {},
+      });
+    }
+
+    // Req 13.6 — return complete path
+    const allSymbols = pathSymbols.slice(0, maxResults);
+
+    // Req 13.7 — check for Full tracing (API + Controller + DB)
+    const hasApi = (layeredNodes.get("api") ?? []).length > 0;
+    const hasController = (layeredNodes.get("controller") ?? []).length > 0;
+    const hasModel = (layeredNodes.get("model") ?? []).length > 0;
+    const isFullTrace = hasApi && hasController && hasModel;
+
+    const confidence = isFullTrace ? 0.92 : pathSymbols.length > 1 ? 0.75 : 0.60;
+
     return {
-      symbols: [],
-      relationships: [],
+      symbols: allSymbols,
+      relationships,
       clusters: [],
       processes: [],
-      confidence: 0.5,
-      riskLevel: "low",
-      affectedFlows: [],
+      confidence,
+      riskLevel: "low" as const,
+      affectedFlows: orderedLayers.filter((l) => (layeredNodes.get(l) ?? []).length > 0),
     };
-  }
-
-  const entrySymbol = graphNodeToSymbol(entryNode);
-
-  // Req 13.2-13.5 — trace through all dependencies
-  const dependencyNodes = await findDependencies(graphSession, entryPoint);
-  
-  // Classify nodes by layer
-  const layeredNodes = new Map<string, GraphNode[]>();
-  layeredNodes.set("api", [entryNode]);
-  
-  for (const node of dependencyNodes) {
-    const layer = classifyLayer(node);
-    if (!layeredNodes.has(layer)) {
-      layeredNodes.set(layer, []);
-    }
-    layeredNodes.get(layer)!.push(node);
-  }
-
-  // Build ordered path: API → Controller → Service → Repository → Model
-  const orderedLayers = ["api", "controller", "service", "repository", "model"];
-  const pathSymbols: Symbol[] = [];
-  const relationships: Relationship[] = [];
-
-  for (const layer of orderedLayers) {
-    const nodes = layeredNodes.get(layer) ?? [];
-    pathSymbols.push(...nodes.map(graphNodeToSymbol));
-  }
-
-  // Build relationships between consecutive symbols
-  for (let i = 0; i < pathSymbols.length - 1; i++) {
-    relationships.push({
-      id: `${pathSymbols[i].id}->calls->${pathSymbols[i + 1].id}`,
-      source: pathSymbols[i].id,
-      target: pathSymbols[i + 1].id,
-      relType: "calls",
-      metadata: {},
-    });
-  }
-
-  // Req 13.6 — return complete path
-  const allSymbols = pathSymbols.slice(0, maxResults);
-  
-  // Req 13.7 — check for Full tracing (API + Controller + DB)
-  const hasApi = layeredNodes.has("api") && layeredNodes.get("api")!.length > 0;
-  const hasController = layeredNodes.has("controller") && layeredNodes.get("controller")!.length > 0;
-  const hasModel = layeredNodes.has("model") && layeredNodes.get("model")!.length > 0;
-  const isFullTrace = hasApi && hasController && hasModel;
-
-  const confidence = isFullTrace ? 0.92 : (pathSymbols.length > 1 ? 0.75 : 0.60);
-
-  return {
-    symbols: allSymbols,
-    relationships,
-    clusters: [],
-    processes: [],
-    confidence,
-    riskLevel: "low", // Data flow tracing is informational
-    affectedFlows: orderedLayers.filter((l) => layeredNodes.has(l) && layeredNodes.get(l)!.length > 0),
-  };
+  });
 }

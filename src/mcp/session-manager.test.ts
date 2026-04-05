@@ -349,3 +349,206 @@ describe("SessionManager — property-based tests", () => {
     );
   });
 });
+
+// ---------------------------------------------------------------------------
+// Regression Tests — Race Condition and Multi-Transaction Scenarios
+// Requirements: 2.5, 2.6, 2.7
+// ---------------------------------------------------------------------------
+
+describe("SessionManager — regression: _resolveRelease race condition (Req 2.5)", () => {
+  // -------------------------------------------------------------------------
+  // 11.1 Deterministic race condition test for acquire()
+  //
+  // The bug: if release() is called before the async .then() microtask that
+  // attaches _resolveRelease fires, _resolveRelease is undefined and the queue
+  // is permanently blocked.
+  //
+  // The fix: _resolveRelease is attached synchronously inside _queue.then()
+  // before the session is returned, so release() always finds it set.
+  //
+  // Strategy: acquire a session, then immediately call release() *before*
+  // yielding to the microtask queue (using Promise.resolve().then() to
+  // schedule the release in the same microtask batch). A second acquire()
+  // must resolve — proving the queue was unblocked.
+  // -------------------------------------------------------------------------
+
+  it("second acquire() resolves after release() called before microtask yield (serialization preserved)", async () => {
+    const session1 = makeMockSession();
+    const session2 = makeMockSession();
+    const driver = {
+      session: vi
+        .fn()
+        .mockReturnValueOnce(session1)
+        .mockReturnValueOnce(session2),
+    } as unknown as Driver;
+
+    const manager = new SessionManager();
+
+    // Acquire the first session
+    const s1 = await manager.acquire(driver);
+    expect(manager.openCount()).toBe(1);
+
+    // Start the second acquire BEFORE releasing — it must queue up
+    const acquire2 = manager.acquire(driver);
+
+    // Release s1 synchronously (no await on the release itself yet) and
+    // immediately schedule a microtask to verify acquire2 resolves.
+    // This exercises the window where release() fires before any additional
+    // microtask scheduling could attach _resolveRelease.
+    const releaseAndCheck = Promise.resolve()
+      .then(() => manager.release(s1))
+      .then(async () => {
+        // After release, acquire2 must resolve promptly
+        const s2 = await acquire2;
+        expect(s2).toBe(session2);
+        expect(manager.openCount()).toBe(1);
+        await manager.release(s2);
+        expect(manager.openCount()).toBe(0);
+      });
+
+    await releaseAndCheck;
+  });
+
+  it("_resolveRelease is set by the time the caller can invoke release() (no undefined resolver)", async () => {
+    const session = makeMockSession();
+    const driver = makeMockDriver(session);
+    const manager = new SessionManager();
+
+    const s = await manager.acquire(driver);
+
+    // _resolveRelease must be attached synchronously — verify it is defined
+    // on the session object before any additional microtask fires.
+    const resolver = (s as Session & { _resolveRelease?: () => void })
+      ._resolveRelease;
+    expect(resolver).toBeDefined();
+    expect(typeof resolver).toBe("function");
+
+    await manager.release(s);
+  });
+
+  it("queue remains unblocked after rapid acquire → release → acquire cycle", async () => {
+    const sessions = [makeMockSession(), makeMockSession(), makeMockSession()];
+    let idx = 0;
+    const driver = {
+      session: vi.fn().mockImplementation(() => sessions[idx++]),
+    } as unknown as Driver;
+
+    const manager = new SessionManager();
+
+    // Three rapid sequential cycles — each release must unblock the next acquire
+    for (let i = 0; i < 3; i++) {
+      const s = await manager.acquire(driver);
+      // Release immediately without any await gap
+      await manager.release(s);
+      expect(manager.openCount()).toBe(0);
+    }
+  });
+});
+
+describe("SessionManager — regression: closeAll() unblocks pending acquires (Req 2.7)", () => {
+  // -------------------------------------------------------------------------
+  // 11.2 closeAll() must unblock any acquire() callers waiting in the queue.
+  //
+  // The bug: closeAll() resets _queue = Promise.resolve() but callers already
+  // waiting on the OLD _queue promise remain blocked forever because
+  // _resolveRelease was never called for the force-closed session.
+  //
+  // The fix: closeAll() calls resolveRelease() for every tracked session
+  // before resetting the queue, so all waiters are unblocked.
+  // -------------------------------------------------------------------------
+
+  it("pending acquire() resolves (does not hang) after closeAll() force-closes the held session", async () => {
+    const session1 = makeMockSession();
+    const session2 = makeMockSession();
+    const driver = {
+      session: vi
+        .fn()
+        .mockReturnValueOnce(session1)
+        .mockReturnValueOnce(session2),
+    } as unknown as Driver;
+
+    const manager = new SessionManager();
+
+    // Acquire session1 — do NOT release it (simulates in-flight call)
+    await manager.acquire(driver);
+    expect(manager.openCount()).toBe(1);
+
+    // Start a second acquire — it queues behind session1
+    const pendingAcquire = manager.acquire(driver);
+
+    // Simulate disconnect: closeAll() must unblock the pending acquire
+    await manager.closeAll();
+
+    // pendingAcquire must resolve (not hang) — race it against a timeout
+    const result = await Promise.race([
+      pendingAcquire.then(() => "resolved"),
+      new Promise<string>((resolve) => setTimeout(() => resolve("timeout"), 100)),
+    ]);
+
+    expect(result).toBe("resolved");
+    // After closeAll the queue is reset; the resolved acquire opened session2
+    // Clean up
+    const s2 = await pendingAcquire;
+    await manager.release(s2);
+  });
+
+  it("multiple pending acquires all resolve (do not hang) after closeAll() unblocks the queue", async () => {
+    // closeAll() calls resolveRelease() on the held session, which unblocks
+    // the first pending acquire. That acquire opens a new session and advances
+    // the queue, which in turn unblocks the next pending acquire, and so on.
+    // Each pending acquire resolves sequentially — none hang forever.
+    const sessions = Array.from({ length: 5 }, () => makeMockSession());
+    let idx = 0;
+    const driver = {
+      session: vi.fn().mockImplementation(() => sessions[idx++]),
+    } as unknown as Driver;
+
+    const manager = new SessionManager();
+
+    // Hold session 0 without releasing
+    await manager.acquire(driver);
+
+    // Queue up 3 more acquires — they are blocked behind session 0
+    const pending = [
+      manager.acquire(driver),
+      manager.acquire(driver),
+      manager.acquire(driver),
+    ];
+
+    // closeAll() unblocks the first pending acquire by calling resolveRelease()
+    await manager.closeAll();
+
+    // Drain the pending acquires sequentially: each one opens a session and
+    // must be released before the next one resolves (serialization preserved).
+    for (const p of pending) {
+      const s = await Promise.race([
+        p,
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("acquire timed out after closeAll")), 200),
+        ),
+      ]);
+      await manager.release(s);
+    }
+
+    expect(manager.openCount()).toBe(0);
+  });
+
+  it("openCount is 0 after closeAll() closes all currently tracked sessions", async () => {
+    // closeAll() clears _sessions before unblocking waiters, so the sessions
+    // that were open at the time of closeAll() are removed from the registry.
+    // Pending acquires that subsequently open new sessions are NOT in scope
+    // for this particular assertion — we verify the tracked set is cleared.
+    const session = makeMockSession();
+    const driver = makeMockDriver(session);
+    const manager = new SessionManager();
+
+    await manager.acquire(driver);
+    expect(manager.openCount()).toBe(1);
+
+    // closeAll() must close the tracked session and clear the registry
+    await manager.closeAll();
+
+    expect(manager.openCount()).toBe(0);
+    expect(session.close).toHaveBeenCalledOnce();
+  });
+});

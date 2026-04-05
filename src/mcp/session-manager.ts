@@ -82,22 +82,29 @@ export class SessionManager {
    * Safe to call with zero open sessions — it is a no-op in that case.
    * Uses Promise.allSettled so a single close() failure does not prevent
    * the remaining sessions from being closed.
+   *
+   * Unblocks all pending acquire() waiters BEFORE closing sessions and
+   * resetting the queue, so no caller hangs after closeAll() returns.
+   * Requirements: 2.7
    */
   public async closeAll(): Promise<void> {
     const sessions = [...this._sessions];
     this._sessions.clear();
 
-    await Promise.allSettled(
-      sessions.map(async (session) => {
-        await session.close();
-        // Unblock any pending acquire() that was waiting on this session.
-        const resolver = (session as Session & { _resolveRelease?: () => void })
-          ._resolveRelease;
-        if (resolver) {
-          resolver();
-        }
-      }),
-    );
+    // Unblock all pending acquire() waiters synchronously before closing
+    // sessions. This ensures waiters are never left blocked on the old _queue
+    // promise regardless of whether session.close() succeeds or rejects.
+    for (const session of sessions) {
+      const resolver = (session as Session & { _resolveRelease?: () => void })
+        ._resolveRelease;
+      if (resolver) {
+        resolver();
+      }
+    }
+
+    // Close all sessions in parallel; allSettled ensures we attempt every
+    // close even if one rejects.
+    await Promise.allSettled(sessions.map((session) => session.close()));
 
     // Reset the queue so subsequent acquire() calls proceed immediately.
     this._queue = Promise.resolve();
