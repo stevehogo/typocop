@@ -1,3 +1,8 @@
+---
+inclusion: fileMatch
+fileMatchPattern: "src/**"
+---
+
 # Coding Standards
 
 ## Language & Runtime

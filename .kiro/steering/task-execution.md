@@ -1,3 +1,8 @@
+---
+inclusion: fileMatch
+fileMatchPattern: "src/**"
+---
+
 # Task Execution Workflow
 
 ## Activating Skills Before Task Execution

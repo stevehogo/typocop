@@ -1,3 +1,8 @@
+---
+inclusion: fileMatch
+fileMatchPattern: ".kiro/specs/**"
+---
+
 # Task Skills Annotation
 
 ## Rule: Annotate every task in tasks.md with a `_Skills` field

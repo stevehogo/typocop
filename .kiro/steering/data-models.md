@@ -1,3 +1,8 @@
+---
+inclusion: fileMatch
+fileMatchPattern: "src/**"
+---
+
 # Data Models
 
 All core types live in `src/types/index.ts`. Never redefine these inline — always import from there.

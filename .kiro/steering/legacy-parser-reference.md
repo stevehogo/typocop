@@ -1,3 +1,8 @@
+---
+inclusion: fileMatch
+fileMatchPattern: "src/parser/**"
+---
+
 # Legacy Parser Reference
 
 The `legacy-parser/` folder is read-only. Use it as a reference — port logic into `src/`, never edit it.

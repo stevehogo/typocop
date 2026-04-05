@@ -1,6 +1,6 @@
 ---
-title: MCP Server Development
-inclusion: always
+inclusion: fileMatch
+fileMatchPattern: "src/mcp/**"
 ---
 
 # MCP Server Development

@@ -1,6 +1,6 @@
 ---
-title: TypeScript Standards
-inclusion: always
+inclusion: fileMatch
+fileMatchPattern: "src/**"
 ---
 
 # TypeScript Standards

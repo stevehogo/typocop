@@ -1,3 +1,8 @@
+---
+inclusion: fileMatch
+fileMatchPattern: "src/parser/**"
+---
+
 # Legacy Parser — Read Only
 
 The `legacy-parser/` folder contains a reference implementation of a code parser.

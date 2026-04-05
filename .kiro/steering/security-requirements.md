@@ -1,6 +1,6 @@
 ---
-title: Security Requirements
-inclusion: always
+inclusion: fileMatch
+fileMatchPattern: "src/**"
 ---
 
 # Security Requirements

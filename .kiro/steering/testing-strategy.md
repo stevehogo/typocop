@@ -1,3 +1,8 @@
+---
+inclusion: fileMatch
+fileMatchPattern: "src/**"
+---
+
 # Testing Strategy
 
 ## Testing Stack

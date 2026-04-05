@@ -1,6 +1,5 @@
 ---
-title: Git Workflow
-inclusion: always
+inclusion: manual
 ---
 
 # Git Workflow

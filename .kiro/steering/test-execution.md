@@ -1,6 +1,6 @@
 ---
-title: Test Execution Guidelines
-inclusion: always
+inclusion: fileMatch
+fileMatchPattern: "src/**"
 ---
 
 # Test Execution Guidelines
