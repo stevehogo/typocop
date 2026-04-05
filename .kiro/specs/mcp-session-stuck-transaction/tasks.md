@@ -111,7 +111,7 @@
   - Run `pnpm vitest --run --reporter=basic`
   - Ensure all tests pass; ask the user if questions arise
 
-- [-] 8. Fix `SessionManager.acquire()` race condition — synchronous `_resolveRelease` attachment
+- [x] 8. Fix `SessionManager.acquire()` race condition — synchronous `_resolveRelease` attachment
   _Skills: `typescript-expert`, `nodejs-best-practices`, `clean-code`
   - Move `_resolveRelease` attachment inside the `_queue.then()` callback, before returning the session
   - Create `nextQueue` promise before chaining so `resolveRelease` is captured in closure
@@ -122,7 +122,7 @@
   - _Expected_Behavior: _resolveRelease is always set by the time the caller can invoke release()_
   - _Requirements: 2.5_
 
-- [ ] 9. Fix `closeAll()` to unblock pending acquires before resetting queue
+- [-] 9. Fix `closeAll()` to unblock pending acquires before resetting queue
   _Skills: `typescript-expert`, `nodejs-best-practices`, `error-handling-patterns`
   - Before resetting `_queue`, call `_resolveRelease()` for every session in `_sessions` that has one set
   - Ensure waiters blocked on the old `_queue` promise are unblocked even when `closeAll()` force-closes their session

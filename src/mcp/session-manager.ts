@@ -36,23 +36,25 @@ export class SessionManager {
   public acquire(driver: Driver): Promise<Session> {
     let resolveRelease!: () => void;
 
-    // Chain onto the queue so the next acquire() waits for this one's release.
-    const acquired = this._queue.then(() => {
-      const session = driver.session();
-      this._sessions.add(session);
-      return session;
-    });
-
-    // The next acquire() will wait until resolveRelease() is called.
-    this._queue = new Promise<void>((resolve) => {
+    // Build nextQueue before chaining so resolveRelease is captured in the
+    // closure and available synchronously inside the _queue.then() callback.
+    const nextQueue = new Promise<void>((resolve) => {
       resolveRelease = resolve;
     });
 
-    // Attach the resolver to the session so release() can unblock the queue.
-    acquired.then((session) => {
+    // Chain onto the queue so the next acquire() waits for this one's release.
+    // _resolveRelease is attached synchronously here — before the returned
+    // promise resolves — so release() can never observe it as undefined.
+    const acquired = this._queue.then(() => {
+      const session = driver.session();
+      this._sessions.add(session);
       (session as Session & { _resolveRelease: () => void })._resolveRelease =
         resolveRelease;
+      return session;
     });
+
+    // Advance the queue synchronously so subsequent acquire() calls chain here.
+    this._queue = nextQueue;
 
     return acquired;
   }
