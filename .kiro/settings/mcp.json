@@ -1,0 +1,27 @@
+{
+  "mcpServers": {
+    "typocop": {
+      "command": "node",
+      "args": [
+        "/home/citado/typocop/dist/mcp/server.js"
+      ],
+      "env": {
+        "NEO4J_URI": "bolt://localhost:8687",
+        "NEO4J_USER": "neo4j",
+        "NEO4J_PASSWORD": "password",
+        "POSTGRES_HOST": "localhost",
+        "POSTGRES_PORT": "8432",
+        "POSTGRES_DB": "typocop",
+        "POSTGRES_USER": "postgres",
+        "POSTGRES_PASSWORD": "password"
+      },
+      "disabled": false,
+      "autoApprove": [
+        "get_symbol_context",
+        "get_symbol_context",
+        "impact_analysis",
+        "trace_data_flow"
+      ]
+    }
+  }
+}

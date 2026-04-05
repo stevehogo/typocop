@@ -273,9 +273,9 @@ async function storeInDatabases(
   // Create cluster membership edges
   const clusterEdges: GraphEdge[] = clusters.flatMap((c) =>
     c.symbols.map((symbolId) => ({
-      source: symbolId,
-      target: c.id,
-      relType: "BELONGS_TO",
+      source: c.id,
+      target: symbolId,
+      relType: "CONTAINS",
       properties: {},
     }))
   );
@@ -283,9 +283,9 @@ async function storeInDatabases(
   // Create process step edges
   const processEdges: GraphEdge[] = processes.flatMap((p) =>
     p.steps.map((step) => ({
-      source: step.symbolId,
-      target: p.id,
-      relType: "PART_OF",
+      source: p.id,
+      target: step.symbolId,
+      relType: "HAS_STEP",
       properties: { order: String(step.order) },
     }))
   );
