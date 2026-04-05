@@ -143,6 +143,16 @@ describe("executePreCommitCheck - integration", () => {
       ],
     } as never);
 
+    // Mock: findProcessSteps for p1 (called by graphNodeToProcess)
+    vi.mocked(mockSession.run).mockResolvedValueOnce({
+      records: [],
+    } as never);
+
+    // Mock: findProcessSteps for p2 (called by graphNodeToProcess)
+    vi.mocked(mockSession.run).mockResolvedValueOnce({
+      records: [],
+    } as never);
+
     // Mock: find clusters for s1
     vi.mocked(mockSession.run).mockResolvedValueOnce({
       records: [],

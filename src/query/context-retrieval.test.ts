@@ -16,6 +16,7 @@ vi.mock("../graph/query.js", () => ({
   findDependencies: vi.fn(),
   findProcessesBySymbol: vi.fn(),
   findClustersBySymbol: vi.fn(),
+  findProcessSteps: vi.fn().mockResolvedValue([]),
 }));
 
 // ─── Test Data ────────────────────────────────────────────────────────────────

@@ -3,9 +3,10 @@
  * Requirements: 12.1, 12.2, 12.3, 12.4, 12.5, 12.6
  */
 import type { Session } from "neo4j-driver";
-import type { Symbol, Relationship, Cluster, Process, QueryResult, ClusterCategory, SymbolKind, Visibility } from "../types/index.js";
+import type { Symbol, Relationship, QueryResult, SymbolKind, Visibility } from "../types/index.js";
 import { findNode, findDependents, findDependencies, findProcessesBySymbol, findClustersBySymbol } from "../graph/query.js";
 import type { GraphNode } from "../graph/connection.js";
+import { graphNodeToProcess, graphNodeToCluster } from "./process-helpers.js";
 
 function graphNodeToSymbol(node: GraphNode): Symbol {
   const p = node.properties;
@@ -26,31 +27,9 @@ function graphNodeToSymbol(node: GraphNode): Symbol {
   };
 }
 
-function graphNodeToProcess(node: GraphNode): Process {
-  const p = node.properties;
-  return {
-    id: node.id,
-    name: p["name"] ?? node.id,
-    entryPoint: p["entryPoint"] ?? "",
-    steps: [],
-    dataFlow: [],
-  };
-}
-
-function graphNodeToCluster(node: GraphNode): Cluster {
-  const p = node.properties;
-  return {
-    id: node.id,
-    name: p["name"] ?? node.id,
-    symbols: [],
-    confidence: parseFloat(p["confidence"] ?? "0.8"),
-    category: (p["category"] ?? "unknown") as ClusterCategory,
-  };
-}
-
 /**
  * Execute a context retrieval query - provides 360° view of a symbol.
- * 
+ *
  * Steps:
  * 1. Identify target symbol (Req 12.1)
  * 2. Find all callers using findDependents (Req 12.2)
@@ -58,7 +37,7 @@ function graphNodeToCluster(node: GraphNode): Cluster {
  * 4. Find all processes containing the symbol (Req 12.4)
  * 5. Find all clusters containing the symbol (Req 12.5)
  * 6. Return complete context (Req 12.6)
- * 
+ *
  * Requirements: 12.1, 12.2, 12.3, 12.4, 12.5, 12.6
  */
 export async function executeContextRetrieval(
@@ -92,7 +71,7 @@ export async function executeContextRetrieval(
 
   // Req 12.4 — find all processes containing the symbol
   const processNodes = await findProcessesBySymbol(graphSession, target);
-  const processes = processNodes.map(graphNodeToProcess);
+  const processes = await Promise.all(processNodes.map((n) => graphNodeToProcess(n, graphSession)));
 
   // Req 12.5 — find all clusters containing the symbol
   const clusterNodes = await findClustersBySymbol(graphSession, target);

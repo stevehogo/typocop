@@ -3,9 +3,10 @@
  * Requirements: 11b.1, 11b.2, 11b.3, 11b.4, 11b.5
  */
 import type { Session } from "neo4j-driver";
-import type { Symbol, Relationship, Cluster, Process, QueryResult, RiskLevel, ClusterCategory, SymbolKind, Visibility } from "../types/index.js";
+import type { Symbol, Relationship, Process, QueryResult, RiskLevel, SymbolKind, Visibility } from "../types/index.js";
 import { findDependents, findProcessesBySymbol, findClustersBySymbol } from "../graph/query.js";
 import type { GraphNode } from "../graph/connection.js";
+import { graphNodeToProcess, graphNodeToCluster } from "./process-helpers.js";
 
 /** Core component name patterns that elevate risk to CRITICAL. */
 const CORE_COMPONENT_PATTERNS = [
@@ -44,28 +45,6 @@ function graphNodeToSymbol(node: GraphNode): Symbol {
     signature: p["signature"],
     visibility: (p["visibility"] ?? "public") as Visibility,
     modifiers: [],
-  };
-}
-
-function graphNodeToProcess(node: GraphNode): Process {
-  const p = node.properties;
-  return {
-    id: node.id,
-    name: p["name"] ?? node.id,
-    entryPoint: p["entryPoint"] ?? "",
-    steps: [],
-    dataFlow: [],
-  };
-}
-
-function graphNodeToCluster(node: GraphNode): Cluster {
-  const p = node.properties;
-  return {
-    id: node.id,
-    name: p["name"] ?? node.id,
-    symbols: [],
-    confidence: parseFloat(p["confidence"] ?? "0.8"),
-    category: (p["category"] ?? "unknown") as ClusterCategory,
   };
 }
 
@@ -203,7 +182,7 @@ export async function executePreCommitCheck(
     }
   }
 
-  const processes = allProcessNodes.map(graphNodeToProcess);
+  const processes = await Promise.all(allProcessNodes.map((n) => graphNodeToProcess(n, graphSession)));
 
   // Collect clusters for context
   const allClusterNodes: GraphNode[] = [];

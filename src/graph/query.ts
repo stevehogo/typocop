@@ -4,6 +4,7 @@
  */
 import type { Session } from "neo4j-driver";
 import type { GraphNode, GraphEdge } from "./connection.js";
+import type { ProcessStep } from "../types/index.js";
 import { MAX_TRAVERSAL_DEPTH } from "../utils/limits.js";
 
 function rowToNode(record: Record<string, unknown>): GraphNode {
@@ -64,6 +65,26 @@ export async function findProcessesBySymbol(session: Session, symbolId: string):
     const n = r.get("p") as { labels: string[]; properties: Record<string, string> };
     return { id: n.properties["id"] ?? "", labels: n.labels, properties: n.properties };
   });
+}
+
+/**
+ * Find all ProcessStep records for a given process by querying HAS_STEP edges.
+ * Returns steps ordered ascending by the `order` relationship property.
+ * Requirements: 2.1
+ */
+export async function findProcessSteps(session: Session, processId: string): Promise<ProcessStep[]> {
+  const result = await session.run(
+    `MATCH (p:Process {id: $processId})-[r:HAS_STEP]->(s)
+     RETURN s.id AS symbolId, r.order AS order, s.name AS description
+     ORDER BY r.order ASC`,
+    { processId },
+  );
+  if (result.records.length === 0) return [];
+  return result.records.map((record) => ({
+    order: record.get("order") as number,
+    symbolId: record.get("symbolId") as string,
+    description: (record.get("description") as string | null) ?? "",
+  }));
 }
 
 /**
