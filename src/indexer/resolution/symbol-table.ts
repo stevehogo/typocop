@@ -1,61 +1,75 @@
 /**
  * Symbol Table — two-index design for O(1) lookups.
  *
- * Ported from legacy-parser/parser/ingestion/symbol-table.ts.
- * Adjusted to reference our Symbol type from src/types/index.ts.
- *
- * Two indexes:
- * - fileIndex: Map<filePath, Map<name, Symbol>> — O(1) exact lookup per file
- * - globalIndex: Map<name, Symbol[]> — fuzzy/global lookup across all files
+ * Two indexes (same SymbolDefinition object reference — zero extra memory):
+ * - fileIndex: Map<filePath, Map<name, SymbolDefinition>> — O(1) exact lookup per file
+ * - globalIndex: Map<name, SymbolDefinition[]> — global lookup across all files
  */
 import type { Symbol } from "../../types/index.js";
 
+export interface SymbolDefinition {
+  /** References Symbol.id from src/types/index.ts */
+  readonly nodeId: string;
+  readonly filePath: string;
+  /** SymbolKind string — 'function', 'class', 'method', etc. */
+  readonly type: string;
+  readonly parameterCount?: number;
+  /** Raw return type text extracted from AST (e.g. 'User', 'Promise<User>') */
+  readonly returnType?: string;
+  /** Links Method/Constructor to owning Class/Struct nodeId */
+  readonly ownerId?: string;
+}
+
 export interface SymbolTable {
-  /** Register a symbol into both indexes. */
-  add(symbol: Symbol): void;
+  add(
+    filePath: string,
+    name: string,
+    nodeId: string,
+    type: string,
+    metadata?: { parameterCount?: number; returnType?: string; ownerId?: string }
+  ): void;
 
-  /** High confidence: look up a symbol by exact name within a specific file. */
-  lookupExact(filePath: string, name: string): Symbol | undefined;
+  /** O(1) exact lookup — returns nodeId only. Confidence 0.95. */
+  lookupExact(filePath: string, name: string): string | undefined;
 
-  /** Low confidence: look up all symbols with a given name across all files. */
-  lookupFuzzy(name: string): Symbol[];
+  /** O(1) exact lookup — returns full definition. Confidence 0.95. */
+  lookupExactFull(filePath: string, name: string): SymbolDefinition | undefined;
 
-  /** Debugging: see how many symbols are tracked. */
+  /** Global lookup — returns all definitions with this name. Confidence 0.50. */
+  lookupFuzzy(name: string): SymbolDefinition[];
+
   getStats(): { fileCount: number; globalSymbolCount: number };
-
-  /** Clear all indexes. */
   clear(): void;
 }
 
 export function createSymbolTable(): SymbolTable {
-  // File-specific index: filePath → (name → Symbol)
-  const fileIndex = new Map<string, Map<string, Symbol>>();
+  const fileIndex = new Map<string, Map<string, SymbolDefinition>>();
+  const globalIndex = new Map<string, SymbolDefinition[]>();
 
-  // Global reverse index: name → Symbol[]
-  const globalIndex = new Map<string, Symbol[]>();
+  const add = (
+    filePath: string,
+    name: string,
+    nodeId: string,
+    type: string,
+    metadata?: { parameterCount?: number; returnType?: string; ownerId?: string }
+  ): void => {
+    const def: SymbolDefinition = { nodeId, filePath, type, ...metadata };
 
-  const add = (symbol: Symbol): void => {
-    const { filePath } = symbol.location;
+    if (!fileIndex.has(filePath)) fileIndex.set(filePath, new Map());
+    fileIndex.get(filePath)!.set(name, def);
 
-    // Add to file index
-    if (!fileIndex.has(filePath)) {
-      fileIndex.set(filePath, new Map());
-    }
-    fileIndex.get(filePath)!.set(symbol.name, symbol);
-
-    // Add to global index (same object reference — zero extra memory)
-    const existing = globalIndex.get(symbol.name);
-    if (existing) {
-      existing.push(symbol);
-    } else {
-      globalIndex.set(symbol.name, [symbol]);
-    }
+    const existing = globalIndex.get(name);
+    if (existing) existing.push(def);
+    else globalIndex.set(name, [def]);
   };
 
-  const lookupExact = (filePath: string, name: string): Symbol | undefined =>
+  const lookupExact = (filePath: string, name: string): string | undefined =>
+    fileIndex.get(filePath)?.get(name)?.nodeId;
+
+  const lookupExactFull = (filePath: string, name: string): SymbolDefinition | undefined =>
     fileIndex.get(filePath)?.get(name);
 
-  const lookupFuzzy = (name: string): Symbol[] =>
+  const lookupFuzzy = (name: string): SymbolDefinition[] =>
     globalIndex.get(name) ?? [];
 
   const getStats = (): { fileCount: number; globalSymbolCount: number } => ({
@@ -68,7 +82,7 @@ export function createSymbolTable(): SymbolTable {
     globalIndex.clear();
   };
 
-  return { add, lookupExact, lookupFuzzy, getStats, clear };
+  return { add, lookupExact, lookupExactFull, lookupFuzzy, getStats, clear };
 }
 
 /**
@@ -78,7 +92,7 @@ export function createSymbolTable(): SymbolTable {
 export function buildSymbolTable(symbols: Symbol[]): SymbolTable {
   const table = createSymbolTable();
   for (const sym of symbols) {
-    table.add(sym);
+    table.add(sym.location.filePath, sym.name, sym.id, sym.kind);
   }
   return table;
 }

@@ -56,8 +56,11 @@ export function resolveImport(
   symbolTable?: ReturnType<typeof buildSymbolTable>,
 ): Symbol | undefined {
   if (symbolTable) {
-    const sameFile = symbolTable.lookupExact(importSym.location.filePath, importSym.name);
-    if (sameFile && sameFile.id !== importSym.id) return sameFile;
+    const sameFileId = symbolTable.lookupExact(importSym.location.filePath, importSym.name);
+    if (sameFileId && sameFileId !== importSym.id) {
+      const sameFile = (symbolMap.get(importSym.name) ?? []).find((s) => s.id === sameFileId);
+      if (sameFile) return sameFile;
+    }
   }
 
   const exact = symbolMap.get(importSym.name);
@@ -219,7 +222,8 @@ export function resolveHints(
         const fileSym = fileSymbols.get(hint.sourceFile);
         const caller = fileSym?.find((s) => s.location.startLine <= hint.startLine && s.location.endLine >= hint.startLine);
         if (!caller) break;
-        const sameFile = symbolTable.lookupExact(hint.sourceFile, hint.targetName);
+        const sameFileId = symbolTable.lookupExact(hint.sourceFile, hint.targetName);
+        const sameFile = sameFileId ? (symbolMap.get(hint.targetName) ?? []).find((s) => s.id === sameFileId) : undefined;
         const target = (sameFile && sameFile.id !== caller.id) ? sameFile
           : (symbolMap.get(hint.targetName) ?? []).find((s) => s.id !== caller.id);
         if (target) add({ id: relId("calls", caller.id, target.id), source: caller.id, target: target.id, relType: "calls", metadata: {} });

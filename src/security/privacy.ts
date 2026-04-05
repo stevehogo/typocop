@@ -104,16 +104,16 @@ export function containsSourceCode(text: string): boolean {
   // Check for common source code patterns
   // These patterns look for multi-line code blocks, not just isolated syntax
   const sourceCodePatterns = [
-    /function\s+\w+\s*\([^)]*\)\s*\{[\s\S]{10,}/,  // function definitions with body
-    /class\s+\w+\s*\{[\s\S]{10,}/,                  // class definitions with body
-    /const\s+\w+\s*=\s*\([^)]*\)\s*=>\s*\{/,        // arrow functions with block
-    /if\s*\([^)]+\)\s*\{[\s\S]{5,}/,                // if statements with body
-    /for\s*\([^)]+\)\s*\{[\s\S]{5,}/,               // for loops with body
-    /while\s*\([^)]+\)\s*\{[\s\S]{5,}/,             // while loops with body
-    /import\s+.*\s+from\s+['"`]/,                   // import statements
-    /require\s*\(['"`][^'"`]+['"`]\)/,              // require statements
-    /\breturn\s+[^;]+;/,                            // return statements
-    /\bthrow\s+new\s+\w+/,                          // throw statements
+    /function\s+\w+\s*\([^)]*\)\s*\{\s*\n[\s\S]{5,}/,  // function definitions with body
+    /class\s+\w+\s*\{\s*\n[\s\S]{5,}/,                  // class definitions with body
+    /const\s+\w+\s*=\s*\([^)]*\)\s*=>\s*\{/,            // arrow functions with block
+    /if\s*\([^)]+\)\s*\{\s*\n[\s\S]{5,}/,               // if statements with body
+    /for\s*\([^)]+\)\s*\{\s*\n[\s\S]{5,}/,              // for loops with body
+    /while\s*\([^)]+\)\s*\{\s*\n[\s\S]{5,}/,            // while loops with body
+    /import\s+.*\s+from\s+['"`]/,                        // import statements
+    /require\s*\(['"`][^'"`]+['"`]\)/,                   // require statements
+    /\breturn\s+[^;]+;/,                                 // return statements
+    /\bthrow\s+new\s+\w+/,                               // throw statements
   ];
 
   return sourceCodePatterns.some(pattern => pattern.test(text));
