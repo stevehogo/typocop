@@ -47,13 +47,13 @@ pnpm build
 
 Before running the indexer, ensure you have:
 
-1. **Neo4j** running (default: `bolt://localhost:7687`)
+1. **Neo4j** running (default: `bolt://localhost:8687`)
 2. **PostgreSQL with pgvector** extension enabled (default: `postgresql://localhost:5432/typocop`)
 3. **OpenAI API key** (optional, for AI enrichment features)
 
 Set environment variables:
 ```bash
-export NEO4J_URI=bolt://localhost:7687
+export NEO4J_URI=bolt://localhost:8687
 export NEO4J_USER=neo4j
 export NEO4J_PASSWORD=your-password
 export POSTGRES_URI=postgresql://localhost:5432/typocop

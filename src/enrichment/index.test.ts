@@ -16,7 +16,7 @@ import type { Symbol } from "../types/index.js";
 
 const defaultConfig: EnrichmentConfig = {
   embeddingModel: "text-embedding-3-large",
-  dimensions: 3072,
+  dimensions: 1536,
   enableIntentClassification: true,
   enableSideEffectAnalysis: true,
   enableTypeInference: true,

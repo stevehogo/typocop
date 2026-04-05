@@ -14,6 +14,33 @@ vi.mock("ora", () => {
   return { default: vi.fn(() => oraMock) };
 });
 
+vi.mock("../graph/connection.js", () => ({
+  createDriver: vi.fn().mockResolvedValue({
+    session: vi.fn().mockReturnValue({
+      run: vi.fn().mockResolvedValue({ records: [] }),
+      close: vi.fn().mockResolvedValue(undefined),
+    }),
+    close: vi.fn().mockResolvedValue(undefined),
+  }),
+}));
+
+vi.mock("../vector/connection.js", () => ({
+  createPool: vi.fn().mockResolvedValue({
+    end: vi.fn().mockResolvedValue(undefined),
+  }),
+  initVectorStore: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock("../indexer/pipeline.js", () => ({
+  runIndexingPipeline: vi.fn().mockResolvedValue({
+    symbols: [],
+    relationships: [],
+    clusters: [],
+    processes: [],
+    skippedFiles: 0,
+  }),
+}));
+
 describe("executeCLI", () => {
   afterEach(() => {
     vi.restoreAllMocks();

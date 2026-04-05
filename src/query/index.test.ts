@@ -25,8 +25,8 @@ import type { Query, QueryResult } from "../types/index.js";
 // Mock the embedding module to avoid OpenAI API calls
 vi.mock("../vector/embed.js", () => ({
   generateEmbedding: vi.fn(async () => ({
-    vector: new Array(3072).fill(0),
-    dimensions: 3072,
+    vector: new Array(1536).fill(0),
+    dimensions: 1536,
   })),
 }));
 

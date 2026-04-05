@@ -17,7 +17,7 @@ import { createPool } from "../vector/connection.js";
  * Get database configuration from environment variables.
  */
 function getDatabaseConfig() {
-  const neo4jUri = process.env.NEO4J_URI || "bolt://localhost:7687";
+  const neo4jUri = process.env.NEO4J_URI || "bolt://localhost:8687";
   const neo4jUser = process.env.NEO4J_USER || "neo4j";
   const neo4jPassword = process.env.NEO4J_PASSWORD || "password";
   

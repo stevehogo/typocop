@@ -6,7 +6,7 @@ import type { Symbol } from "../types/index.js";
 
 export interface EnrichmentConfig {
   readonly embeddingModel: string;          // "text-embedding-3-large"
-  readonly dimensions: number;              // 3072
+  readonly dimensions: number;              // 1536
   readonly enableIntentClassification: boolean;
   readonly enableSideEffectAnalysis: boolean;
   readonly enableTypeInference: boolean;

@@ -30,3 +30,7 @@ lerna-debug.log*
 *.sqlite
 *.db
 legacy-parser/
+
+# Local database storage
+.db-storages/
+.kiro/~hooks~/

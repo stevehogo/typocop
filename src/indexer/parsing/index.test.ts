@@ -53,24 +53,21 @@ describe("generateSymbolId", () => {
 describe("extractAllSymbols", () => {
   it("returns empty array for empty file list", async () => {
     const result = await extractAllSymbols([]);
-    expect(result).toEqual([]);
+    expect(result.symbols).toEqual([]);
   });
 
   it("skips files with unsupported language gracefully", async () => {
-    // A FileNode pointing to a non-existent file — should skip without throwing
     const fileNodes: FileNode[] = [
       { path: "/nonexistent/file.ts", size: 100, language: "typescript" },
     ];
-    // Should not throw — just return empty (parse error is caught and skipped)
     const result = await extractAllSymbols(fileNodes);
-    expect(Array.isArray(result)).toBe(true);
+    expect(Array.isArray(result.symbols)).toBe(true);
   });
 
   it("returns symbols with unique IDs for real source files", async () => {
-    // Use the actual source files in this project as test input
     const { walkFileTree } = await import("../structure/index.js");
     const fileNodes = await walkFileTree("src");
-    const symbols = await extractAllSymbols(fileNodes);
+    const { symbols } = await extractAllSymbols(fileNodes, process.cwd());
 
     const ids = symbols.map((s) => s.id);
     const uniqueIds = new Set(ids);

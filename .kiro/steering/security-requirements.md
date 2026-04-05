@@ -158,7 +158,7 @@ Store database credentials in environment variables, never in code:
 
 ```bash
 # .env (never commit this file)
-NEO4J_URI=bolt://localhost:7687
+NEO4J_URI=bolt://localhost:8687
 NEO4J_USER=neo4j
 NEO4J_PASSWORD=your-secure-password
 POSTGRES_URI=postgresql://localhost:5432/typocop

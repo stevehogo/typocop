@@ -1,5 +1,6 @@
 // Phase 6: Embedding generation for symbols and clusters
-// Calls OpenAI text-embedding-3-large (3072 dimensions)
+// Calls OpenAI text-embedding-3-large with 1536 dimensions (reduced from 3072
+// to stay within pgvector's 2000-dimension index limit while preserving quality).
 // Requirements: 22.1, 22.2 - Only symbol signatures are sent, never full code
 
 import OpenAI from "openai";
@@ -9,10 +10,10 @@ import { verifyEmbeddingText } from "../../security/privacy.js";
 export interface EmbeddingConfig {
   readonly apiKey: string;
   readonly model: string;       // "text-embedding-3-large"
-  readonly dimensions: number;  // 3072
+  readonly dimensions: number;  // 1536
 }
 
-const EMBEDDING_DIMENSIONS = 3072;
+const EMBEDDING_DIMENSIONS = 1536;
 
 /**
  * Formats a symbol into a text string suitable for embedding.
@@ -70,7 +71,7 @@ export function formatClusterForEmbedding(cluster: Cluster, symbols: Symbol[]): 
 }
 
 /**
- * Calls the OpenAI embedding API and returns a 3072-dimension Embedding.
+ * Calls the OpenAI embedding API and returns a 1536-dimension Embedding.
  * Returns null if the embedding service is unavailable (caller handles fallback).
  */
 export async function embedText(

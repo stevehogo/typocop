@@ -4,6 +4,23 @@ import type { Language, Symbol, SymbolKind, Visibility, Modifier } from "../type
 import type { ASTNode } from "./ast-node.js";
 import { LANGUAGE_QUERIES } from "./queries.js";
 
+/** Raw relationship hint extracted from AST — resolved into Relationship in Phase 3 */
+export interface RawRelationshipHint {
+  readonly kind: "import" | "call" | "inherits" | "implements";
+  readonly sourceFile: string;
+  /** For imports: the module specifier. For calls/heritage: the target name. */
+  readonly targetName: string;
+  /** For heritage: the name of the child class (used to look up its symbol ID). */
+  readonly childSymbolId?: string;
+  readonly startLine: number;
+}
+
+/** Combined result of query-based extraction */
+export interface ExtractionResult {
+  readonly symbols: Symbol[];
+  readonly hints: RawRelationshipHint[];
+}
+
 /** Map tree-sitter @definition.* capture suffix to SymbolKind */
 const DEFINITION_KIND_MAP: Readonly<Record<string, SymbolKind>> = {
   "definition.class": "class",
@@ -46,10 +63,7 @@ function nodeTypeToKind(nodeType: string): SymbolKind {
 
 /**
  * Extract symbols from an ASTNode tree using structural heuristics.
- * Uses crypto.randomUUID() for unique IDs.
- *
- * This is the primary public API — works with both real and synthetic ASTNodes.
- * Requirements: 2.13, 2.14
+ * Fallback path — used when query compilation fails.
  */
 export function extractSymbols(ast: ASTNode, filePath: string): Symbol[] {
   const symbols: Symbol[] = [];
@@ -92,61 +106,115 @@ function buildSymbol(node: ASTNode, filePath: string): Symbol | null {
 }
 
 /**
- * Extract symbols using tree-sitter queries for accurate, language-aware extraction.
- * Requires a live Parser instance with the correct language set.
- * Used by the indexing pipeline for production extraction.
+ * Extract symbols AND raw relationship hints using tree-sitter queries.
+ * Processes @definition.*, @import, @call, and @heritage captures in one pass.
+ * Requirements: 3.2, 4.1, 4.2, 5.1, 5.2, 5.3, 5.4
  */
 export function extractSymbolsWithQueries(
   ast: ASTNode,
   filePath: string,
   language: Language,
   parser: Parser,
-): Symbol[] {
+): ExtractionResult {
   const queryString = LANGUAGE_QUERIES[language];
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const lang = parser.getLanguage() as any;
+  const lang = parser.getLanguage();
 
   let query: Parser.Query;
   try {
-    query = lang.query(queryString) as Parser.Query;
+    query = new Parser.Query(lang, queryString);
   } catch (err) {
     console.warn(`[parser] Warning: failed to compile query for ${language}: ${String(err)}`);
-    return extractSymbols(ast, filePath);
+    return { symbols: extractSymbols(ast, filePath), hints: [] };
   }
 
   const tree = parser.parse(ast.text);
   const matches = query.matches(tree.rootNode);
+
   const symbols: Symbol[] = [];
+  const hints: RawRelationshipHint[] = [];
 
   for (const match of matches) {
     const nameCapture = match.captures.find((c) => c.name === "name");
     const defCapture = match.captures.find((c) => c.name.startsWith("definition."));
+    const importSourceCapture = match.captures.find((c) => c.name === "import.source");
+    const callNameCapture = match.captures.find((c) => c.name === "call.name");
+    const heritageExtendsCapture = match.captures.find((c) => c.name === "heritage.extends");
+    const heritageImplCapture = match.captures.find((c) => c.name === "heritage.implements");
+    const heritageClassCapture = match.captures.find((c) => c.name === "heritage.class");
 
-    if (!nameCapture || !defCapture) continue;
+    // ── Definition symbols ──────────────────────────────────────────────────
+    if (nameCapture && defCapture) {
+      const name = nameCapture.node.text.trim();
+      if (!name) continue;
 
-    const name = nameCapture.node.text.trim();
-    if (!name) continue;
+      const kind: SymbolKind = DEFINITION_KIND_MAP[defCapture.name] ?? "variable";
+      const defNode = defCapture.node;
 
-    const kind: SymbolKind = DEFINITION_KIND_MAP[defCapture.name] ?? "variable";
-    const defNode = defCapture.node;
+      symbols.push({
+        id: `${filePath}:${name}:${defNode.startPosition.row}`,
+        name,
+        kind,
+        location: {
+          filePath,
+          startLine: defNode.startPosition.row,
+          startColumn: defNode.startPosition.column,
+          endLine: defNode.endPosition.row,
+          endColumn: defNode.endPosition.column,
+        },
+        visibility: inferVisibility(defNode, language),
+        modifiers: inferModifiers(defNode, language),
+      });
+    }
 
-    symbols.push({
-      id: `${filePath}:${name}:${defNode.startPosition.row}`,
-      name,
-      kind,
-      location: {
-        filePath,
-        startLine: defNode.startPosition.row,
-        startColumn: defNode.startPosition.column,
-        endLine: defNode.endPosition.row,
-        endColumn: defNode.endPosition.column,
-      },
-      visibility: inferVisibility(defNode, language),
-      modifiers: inferModifiers(defNode, language),
-    });
+    // ── Import hints ────────────────────────────────────────────────────────
+    if (importSourceCapture) {
+      const raw = importSourceCapture.node.text.replace(/['"]/g, "").trim();
+      if (raw) {
+        hints.push({
+          kind: "import",
+          sourceFile: filePath,
+          targetName: raw,
+          startLine: importSourceCapture.node.startPosition.row,
+        });
+      }
+    }
+
+    // ── Call hints ──────────────────────────────────────────────────────────
+    if (callNameCapture) {
+      const calleeName = callNameCapture.node.text.trim();
+      if (calleeName) {
+        hints.push({
+          kind: "call",
+          sourceFile: filePath,
+          targetName: calleeName,
+          startLine: callNameCapture.node.startPosition.row,
+        });
+      }
+    }
+
+    // ── Heritage hints ──────────────────────────────────────────────────────
+    if (heritageExtendsCapture && heritageClassCapture) {
+      hints.push({
+        kind: "inherits",
+        sourceFile: filePath,
+        targetName: heritageExtendsCapture.node.text.trim(),
+        childSymbolId: heritageClassCapture.node.text.trim(),
+        startLine: heritageExtendsCapture.node.startPosition.row,
+      });
+    }
+
+    if (heritageImplCapture && heritageClassCapture) {
+      hints.push({
+        kind: "implements",
+        sourceFile: filePath,
+        targetName: heritageImplCapture.node.text.trim(),
+        childSymbolId: heritageClassCapture.node.text.trim(),
+        startLine: heritageImplCapture.node.startPosition.row,
+      });
+    }
   }
 
-  return symbols;
+  return { symbols, hints };
 }
 
 function inferVisibility(node: Parser.SyntaxNode, language: Language): Visibility {

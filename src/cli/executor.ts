@@ -26,12 +26,12 @@ export interface GraphStatus {
  * Requirements: 22.1
  */
 function getDatabaseConfig() {
-  const neo4jUri = process.env.NEO4J_URI || "bolt://localhost:7687";
+  const neo4jUri = process.env.NEO4J_URI || "bolt://localhost:8687";
   const neo4jUser = process.env.NEO4J_USER || "neo4j";
   const neo4jPassword = process.env.NEO4J_PASSWORD || "password";
   
   const pgHost = process.env.POSTGRES_HOST || "localhost";
-  const pgPort = parseInt(process.env.POSTGRES_PORT || "5432", 10);
+  const pgPort = parseInt(process.env.POSTGRES_PORT || "8432", 10);
   const pgDatabase = process.env.POSTGRES_DB || "typocop";
   const pgUser = process.env.POSTGRES_USER || "postgres";
   const pgPassword = process.env.POSTGRES_PASSWORD || "password";

@@ -42,7 +42,11 @@ export async function withRetry<T>(fn: () => Promise<T>, maxAttempts = 3): Promi
  */
 export async function createDriver(uri: string, user: string, password: string): Promise<Driver> {
   return withRetry(async () => {
-    const driver = neo4j.driver(uri, neo4j.auth.basic(user, password));
+    const driver = neo4j.driver(uri, neo4j.auth.basic(user, password), {
+      // Neo4j 5 Docker image uses unencrypted Bolt by default.
+      // neo4j-driver 6.x defaults to encrypted — disable to match.
+      encrypted: false,
+    });
     await driver.verifyConnectivity();
     return driver;
   });

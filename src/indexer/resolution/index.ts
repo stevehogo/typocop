@@ -1,84 +1,68 @@
 /**
  * Phase 3: Reference resolution.
  *
- * Resolves imports, function calls, class inheritance, and interface
- * implementations across all extracted symbols, producing Relationship objects.
+ * Resolves raw relationship hints (from Phase 2 AST extraction) into
+ * typed Relationship objects. Also exposes granular helpers for testing.
  *
  * Requirements: 3.3, 5.1, 5.2, 5.3, 5.4, 5.5, 5.6, 5.7
  */
 import type { Symbol, Relationship, RelationType } from "../../types/index.js";
+import type { RawRelationshipHint } from "../parsing/index.js";
 import { buildSymbolTable } from "./symbol-table.js";
 
-// ─── Symbol Map ───────────────────────────────────────────────────────────────
+// ─── Symbol map ───────────────────────────────────────────────────────────────
 
-/**
- * Build a fast name → Symbol[] lookup map.
- * Multiple symbols may share a name (overloads, different files).
- *
- * Requirements: 5.5 — relationships must reference existing symbols.
- */
 export function buildSymbolMap(symbols: Symbol[]): Map<string, Symbol[]> {
   const map = new Map<string, Symbol[]>();
   for (const sym of symbols) {
     const existing = map.get(sym.name);
-    if (existing) {
-      existing.push(sym);
-    } else {
-      map.set(sym.name, [sym]);
-    }
+    if (existing) existing.push(sym);
+    else map.set(sym.name, [sym]);
   }
   return map;
 }
 
-// ─── Relationship ID generation ───────────────────────────────────────────────
+// ─── ID generation ────────────────────────────────────────────────────────────
 
-function generateRelationshipId(
-  relType: RelationType,
-  source: string,
-  target: string,
-): string {
+function relId(relType: RelationType, source: string, target: string): string {
   return `${relType}:${source}->${target}`;
 }
 
-// ─── 7.1 Import resolution ────────────────────────────────────────────────────
+// ─── Granular helpers (used by tests and internally) ─────────────────────────
 
-/**
- * Extract all symbols that represent import statements (kind "import").
- *
- * Requirements: 5.1
- */
 export function findImports(symbols: Symbol[]): Symbol[] {
   return symbols.filter((s) => s.kind === "import");
 }
 
+export function findCalls(symbols: Symbol[]): Symbol[] {
+  return symbols.filter((s) => s.kind === "function" || s.kind === "method");
+}
+
+export function findClasses(symbols: Symbol[]): Symbol[] {
+  return symbols.filter((s) => s.kind === "class");
+}
+
+export function findInterfaces(symbols: Symbol[]): Symbol[] {
+  return symbols.filter((s) => s.kind === "interface");
+}
+
 /**
- * Resolve a single import symbol to its target using a three-tier strategy:
- * 1. Same-file exact lookup via SymbolTable (highest confidence)
- * 2. Global exact name match
- * 3. Last path segment (e.g., "./utils/foo" → "foo")
- *
- * Returns the best-match Symbol, or undefined when unresolvable.
- *
- * Requirements: 5.1, 5.6
+ * Resolve a single import symbol to its target.
+ * Tier 1: same-file exact lookup. Tier 2: global name. Tier 3: last path segment.
  */
 export function resolveImport(
   importSym: Symbol,
   symbolMap: Map<string, Symbol[]>,
   symbolTable?: ReturnType<typeof buildSymbolTable>,
 ): Symbol | undefined {
-  // Tier 1: same-file exact lookup (requires SymbolTable)
   if (symbolTable) {
     const sameFile = symbolTable.lookupExact(importSym.location.filePath, importSym.name);
     if (sameFile && sameFile.id !== importSym.id) return sameFile;
   }
 
-  // Tier 2: global exact name match
   const exact = symbolMap.get(importSym.name);
-  if (exact && exact.length > 0 && exact[0].id !== importSym.id) {
-    return exact[0];
-  }
+  if (exact && exact.length > 0 && exact[0].id !== importSym.id) return exact[0];
 
-  // Tier 3: last path segment (strip quotes)
   const rawName = importSym.name.replace(/['"]/g, "");
   const segments = rawName.split("/");
   const lastName = segments[segments.length - 1];
@@ -90,14 +74,6 @@ export function resolveImport(
   return undefined;
 }
 
-/**
- * Resolve all import relationships for the given symbol set.
- *
- * - Resolved → Relationship with relType "imports", empty metadata
- * - Unresolved → Relationship with metadata { unresolved: "true" } (Req 5.6)
- *
- * Requirements: 5.1, 5.5, 5.6, 5.7
- */
 export function resolveImports(
   symbols: Symbol[],
   symbolMap: Map<string, Symbol[]>,
@@ -108,21 +84,20 @@ export function resolveImports(
 
   for (const importSym of imports) {
     const target = resolveImport(importSym, symbolMap, symbolTable);
-
     if (target) {
       relationships.push({
-        id: generateRelationshipId("imports", importSym.id, target.id),
+        id: relId("imports", importSym.id, target.id),
         source: importSym.id,
         target: target.id,
         relType: "imports",
         metadata: {},
       });
     } else {
-      const unresolvedTargetId = `unresolved:${importSym.name}`;
+      const unresolvedId = `unresolved:${importSym.name}`;
       relationships.push({
-        id: generateRelationshipId("imports", importSym.id, unresolvedTargetId),
+        id: relId("imports", importSym.id, unresolvedId),
         source: importSym.id,
-        target: unresolvedTargetId,
+        target: unresolvedId,
         relType: "imports",
         metadata: { unresolved: "true" },
       });
@@ -132,47 +107,17 @@ export function resolveImports(
   return relationships;
 }
 
-// ─── 7.2 Call resolution ──────────────────────────────────────────────────────
-
-/**
- * Extract function/method symbols as potential call sites.
- *
- * Requirements: 5.2
- */
-export function findCalls(symbols: Symbol[]): Symbol[] {
-  return symbols.filter((s) => s.kind === "function" || s.kind === "method");
-}
-
-/**
- * Resolve a single call symbol to its callee via signature annotation
- * ("calls: targetName").
- *
- * Requirements: 5.2
- */
 export function resolveCall(
   callSym: Symbol,
   symbolMap: Map<string, Symbol[]>,
 ): Symbol | undefined {
   if (!callSym.signature) return undefined;
-
-  const callsMatch = callSym.signature.match(/calls:\s*(\w+)/);
-  if (!callsMatch) return undefined;
-
-  const targetName = callsMatch[1];
-  const targets = symbolMap.get(targetName);
-  if (targets && targets.length > 0 && targets[0].id !== callSym.id) {
-    return targets[0];
-  }
-
-  return undefined;
+  const match = callSym.signature.match(/calls:\s*(\w+)/);
+  if (!match) return undefined;
+  const targets = symbolMap.get(match[1]);
+  return targets?.find((t) => t.id !== callSym.id);
 }
 
-/**
- * Resolve all call relationships across the symbol set.
- * Unresolvable calls are silently skipped.
- *
- * Requirements: 5.2, 5.5
- */
 export function resolveCalls(
   symbols: Symbol[],
   symbolMap: Map<string, Symbol[]>,
@@ -184,129 +129,142 @@ export function resolveCalls(
   for (const callSym of callSymbols) {
     const target = resolveCall(callSym, symbolMap);
     if (!target || target.id === callSym.id) continue;
-
-    const relId = generateRelationshipId("calls", callSym.id, target.id);
-    if (seen.has(relId)) continue;
-    seen.add(relId);
-
-    relationships.push({
-      id: relId,
-      source: callSym.id,
-      target: target.id,
-      relType: "calls",
-      metadata: {},
-    });
+    const id = relId("calls", callSym.id, target.id);
+    if (seen.has(id)) continue;
+    seen.add(id);
+    relationships.push({ id, source: callSym.id, target: target.id, relType: "calls", metadata: {} });
   }
 
   return relationships;
 }
 
-// ─── 7.3 Inheritance and interface resolution ─────────────────────────────────
-
-/** Extract class symbols. Requirements: 5.3 */
-export function findClasses(symbols: Symbol[]): Symbol[] {
-  return symbols.filter((s) => s.kind === "class");
-}
-
-/** Extract interface symbols. Requirements: 5.4 */
-export function findInterfaces(symbols: Symbol[]): Symbol[] {
-  return symbols.filter((s) => s.kind === "interface");
-}
-
-/**
- * Resolve class inheritance via `extends <ParentName>` in signatures.
- *
- * Requirements: 5.3, 5.5
- */
 export function resolveInheritance(
   symbols: Symbol[],
   symbolMap: Map<string, Symbol[]>,
 ): Relationship[] {
-  const classes = findClasses(symbols);
   const relationships: Relationship[] = [];
-
-  for (const cls of classes) {
+  for (const cls of findClasses(symbols)) {
     if (!cls.signature) continue;
-
-    const extendsMatch = cls.signature.match(/\bextends\s+(\w+)/);
-    if (!extendsMatch) continue;
-
-    const parents = symbolMap.get(extendsMatch[1]);
-    if (!parents || parents.length === 0) continue;
-
-    const parent = parents[0];
-    if (parent.id === cls.id) continue;
-
+    const match = cls.signature.match(/\bextends\s+(\w+)/);
+    if (!match) continue;
+    const parent = (symbolMap.get(match[1]) ?? []).find((s) => s.id !== cls.id);
+    if (!parent) continue;
     relationships.push({
-      id: generateRelationshipId("inherits", cls.id, parent.id),
-      source: cls.id,
-      target: parent.id,
-      relType: "inherits",
-      metadata: {},
+      id: relId("inherits", cls.id, parent.id),
+      source: cls.id, target: parent.id, relType: "inherits", metadata: {},
     });
   }
-
   return relationships;
 }
 
-/**
- * Resolve interface implementations via `implements A, B` in signatures.
- *
- * Requirements: 5.4, 5.5
- */
 export function resolveImplementations(
   symbols: Symbol[],
   symbolMap: Map<string, Symbol[]>,
 ): Relationship[] {
-  const classes = findClasses(symbols);
   const relationships: Relationship[] = [];
-
-  for (const cls of classes) {
+  for (const cls of findClasses(symbols)) {
     if (!cls.signature) continue;
-
-    const implementsMatch = cls.signature.match(/\bimplements\s+([\w,\s]+)/);
-    if (!implementsMatch) continue;
-
-    const interfaceNames = implementsMatch[1]
-      .split(",")
-      .map((n) => n.trim())
-      .filter(Boolean);
-
-    for (const ifaceName of interfaceNames) {
-      const targets = symbolMap.get(ifaceName);
-      if (!targets || targets.length === 0) continue;
-
-      const iface = targets[0];
-      if (iface.id === cls.id) continue;
-
+    const match = cls.signature.match(/\bimplements\s+([\w,\s]+)/);
+    if (!match) continue;
+    for (const name of match[1].split(",").map((n) => n.trim()).filter(Boolean)) {
+      const iface = (symbolMap.get(name) ?? []).find((s) => s.id !== cls.id);
+      if (!iface) continue;
       relationships.push({
-        id: generateRelationshipId("implements", cls.id, iface.id),
-        source: cls.id,
-        target: iface.id,
-        relType: "implements",
-        metadata: {},
+        id: relId("implements", cls.id, iface.id),
+        source: cls.id, target: iface.id, relType: "implements", metadata: {},
       });
+    }
+  }
+  return relationships;
+}
+
+// ─── Hint-based resolution (used by pipeline) ────────────────────────────────
+
+export function resolveHints(
+  hints: RawRelationshipHint[],
+  symbols: Symbol[],
+): Relationship[] {
+  const symbolMap = buildSymbolMap(symbols);
+  const symbolTable = buildSymbolTable(symbols);
+
+  const fileSymbols = new Map<string, Symbol[]>();
+  for (const sym of symbols) {
+    const list = fileSymbols.get(sym.location.filePath) ?? [];
+    list.push(sym);
+    fileSymbols.set(sym.location.filePath, list);
+  }
+
+  const relationships: Relationship[] = [];
+  const seen = new Set<string>();
+
+  const add = (rel: Relationship): void => {
+    if (!seen.has(rel.id)) { seen.add(rel.id); relationships.push(rel); }
+  };
+
+  for (const hint of hints) {
+    switch (hint.kind) {
+      case "import": {
+        const sourceId = `${hint.sourceFile}:import:${hint.startLine}`;
+        const segments = hint.targetName.split("/");
+        const lastName = segments[segments.length - 1];
+        const target = (symbolMap.get(lastName) ?? symbolMap.get(hint.targetName))?.[0];
+        if (target) {
+          add({ id: relId("imports", sourceId, target.id), source: sourceId, target: target.id, relType: "imports", metadata: {} });
+        } else {
+          add({ id: relId("imports", sourceId, `unresolved:${hint.targetName}`), source: sourceId, target: `unresolved:${hint.targetName}`, relType: "imports", metadata: { unresolved: "true" } });
+        }
+        break;
+      }
+      case "call": {
+        const fileSym = fileSymbols.get(hint.sourceFile);
+        const caller = fileSym?.find((s) => s.location.startLine <= hint.startLine && s.location.endLine >= hint.startLine);
+        if (!caller) break;
+        const sameFile = symbolTable.lookupExact(hint.sourceFile, hint.targetName);
+        const target = (sameFile && sameFile.id !== caller.id) ? sameFile
+          : (symbolMap.get(hint.targetName) ?? []).find((s) => s.id !== caller.id);
+        if (target) add({ id: relId("calls", caller.id, target.id), source: caller.id, target: target.id, relType: "calls", metadata: {} });
+        break;
+      }
+      case "inherits":
+      case "implements": {
+        if (!hint.childSymbolId) break;
+        const childCandidates = symbolMap.get(hint.childSymbolId) ?? [];
+        const child = childCandidates.find((s) => s.location.filePath === hint.sourceFile) ?? childCandidates[0];
+        if (!child) break;
+        const parent = (symbolMap.get(hint.targetName) ?? []).find((s) => s.id !== child.id);
+        if (!parent) break;
+        const relType: RelationType = hint.kind === "inherits" ? "inherits" : "implements";
+        add({ id: relId(relType, child.id, parent.id), source: child.id, target: parent.id, relType, metadata: {} });
+        break;
+      }
     }
   }
 
   return relationships;
 }
 
-// ─── Phase 3 pipeline entry point ────────────────────────────────────────────
+// ─── Phase 3 entry point ─────────────────────────────────────────────────────
 
 /**
- * Phase 3 — Resolve all cross-symbol references and return Relationship[].
+ * Phase 3 — Resolve all cross-symbol references.
  *
- * Uses SymbolTable internally for same-file tier resolution on imports.
- * All returned relationships reference symbol IDs that exist in the input set,
- * or are flagged `unresolved: "true"` for unresolvable imports (Req 5.6).
+ * Accepts optional hints from Phase 2 AST extraction for richer call/import
+ * resolution. Falls back to signature-based resolution when hints are absent
+ * (supports legacy test usage with symbols only).
  *
  * Requirements: 3.3, 5.1–5.7
  */
-export function resolveReferences(symbols: Symbol[]): Relationship[] {
+export function resolveReferences(
+  symbols: Symbol[],
+  hints?: RawRelationshipHint[],
+): Relationship[] {
+  if (hints && hints.length > 0) {
+    return resolveHints(hints, symbols);
+  }
+
+  // Legacy path: derive relationships from symbol kinds and signatures
   const symbolMap = buildSymbolMap(symbols);
   const symbolTable = buildSymbolTable(symbols);
-
   return [
     ...resolveImports(symbols, symbolMap, symbolTable),
     ...resolveCalls(symbols, symbolMap),

@@ -7,13 +7,13 @@ import { embedText, type EmbeddingConfig } from "../indexer/search/embed.js";
 
 /**
  * Generate embedding for a query string.
- * Uses OpenAI text-embedding-3-large (3072 dimensions).
+ * Uses OpenAI text-embedding-3-large with 1536 dimensions.
  */
 export async function generateEmbedding(query: string): Promise<Embedding> {
   const config: EmbeddingConfig = {
     apiKey: process.env.OPENAI_API_KEY ?? "",
     model: "text-embedding-3-large",
-    dimensions: 3072,
+    dimensions: 1536,
   };
 
   const embedding = await embedText(query, config);

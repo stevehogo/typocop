@@ -89,7 +89,7 @@ After all phases complete, results are stored in two databases:
 - Relationships: CALLS, IMPORTS, INHERITS, IMPLEMENTS, BELONGS_TO, PART_OF
 
 **PostgreSQL with pgvector:**
-- Symbol embeddings (3072 dimensions via OpenAI text-embedding-3-large)
+- Symbol embeddings (1536 dimensions via OpenAI text-embedding-3-large with dimension reduction)
 - Cluster embeddings for semantic search
 - HNSW index for fast similarity search (<100ms target)
 

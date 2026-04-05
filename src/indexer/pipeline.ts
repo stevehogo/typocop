@@ -10,7 +10,7 @@
  * import neo4j from 'neo4j-driver';
  * import { Pool } from 'pg';
  * 
- * const driver = neo4j.driver('bolt://localhost:7687', neo4j.auth.basic('neo4j', 'password'));
+ * const driver = neo4j.driver('bolt://localhost:8687', neo4j.auth.basic('neo4j', 'password'));
  * const session = driver.session();
  * const pool = new Pool({ connectionString: 'postgresql://localhost:5432/typocop' });
  * 
@@ -130,9 +130,9 @@ export async function runIndexingPipeline(config: PipelineConfig): Promise<Pipel
 
   if (verbose) console.log("[pipeline] Starting Phase 2: Parsing");
   
-  // Phase 2: Extract symbols (Req 3.2)
-  const symbols = await extractAllSymbols(fileNodes);
-  if (verbose) console.log(`[pipeline] Phase 2 complete: ${symbols.length} symbols extracted`);
+  // Phase 2: Extract symbols and relationship hints (Req 3.2)
+  const { symbols, hints } = await extractAllSymbols(fileNodes, sourcePath);
+  if (verbose) console.log(`[pipeline] Phase 2 complete: ${symbols.length} symbols extracted, ${hints.length} relationship hints`);
 
   if (symbols.length === 0) {
     return {
@@ -147,7 +147,7 @@ export async function runIndexingPipeline(config: PipelineConfig): Promise<Pipel
   if (verbose) console.log("[pipeline] Starting Phase 3: Resolution");
   
   // Phase 3: Resolve references (Req 3.3)
-  const relationships = resolveReferences(symbols);
+  const relationships = resolveReferences(symbols, hints);
   if (verbose) console.log(`[pipeline] Phase 3 complete: ${relationships.length} relationships resolved`);
 
   if (verbose) console.log("[pipeline] Starting Phase 4: Clustering");

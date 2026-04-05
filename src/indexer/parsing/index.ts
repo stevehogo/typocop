@@ -2,7 +2,7 @@
  * Phase 2: Symbol extraction from ASTs.
  *
  * Processes all FileNodes, parses each file, and extracts Symbol objects
- * with deterministic, globally-unique IDs.
+ * with deterministic IDs plus raw relationship hints for Phase 3.
  *
  * Requirements: 3.2, 4.1, 4.2
  */
@@ -11,18 +11,24 @@ import type { ASTNode } from "../../parser/ast-node.js";
 import type { FileNode } from "../structure/index.js";
 import { initParser } from "../../parser/init.js";
 import { parseFile, ParseError } from "../../parser/parse-file.js";
-import { extractSymbolsWithQueries, extractSymbols } from "../../parser/extract-symbols.js";
+import {
+  extractSymbolsWithQueries,
+  extractSymbols,
+  type RawRelationshipHint,
+} from "../../parser/extract-symbols.js";
 import Parser from "tree-sitter";
+import * as path from "path";
+
+export type { RawRelationshipHint } from "../../parser/extract-symbols.js";
+
+/** Combined output of Phase 2 */
+export interface ParsingResult {
+  readonly symbols: Symbol[];
+  readonly hints: RawRelationshipHint[];
+}
 
 // ─── Symbol ID generation ─────────────────────────────────────────────────────
 
-/**
- * Generate a deterministic, globally-unique symbol ID.
- * Format: `<filePath>:<name>:<startLine>:<startColumn>`
- *
- * This is unique because no two symbols in the same file can share
- * the same name at the same position, and filePath distinguishes files.
- */
 export function generateSymbolId(
   filePath: string,
   name: string,
@@ -32,48 +38,8 @@ export function generateSymbolId(
   return `${filePath}:${name}:${startLine}:${startColumn}`;
 }
 
-// ─── extractSymbolsFromAST ────────────────────────────────────────────────────
-
-/**
- * Recursively walk an ASTNode tree and extract all Symbol objects.
- * Delegates to the parser's extractSymbols for structural heuristics.
- *
- * This is a thin wrapper that ensures IDs are deterministic (not random UUIDs).
- */
-export function extractSymbolsFromAST(
-  ast: ASTNode,
-  filePath: string,
-  language: Language,
-  parser: Parser,
-): Symbol[] {
-  // Use query-based extraction when available (more accurate, deterministic IDs)
-  const raw = extractSymbolsWithQueries(ast, filePath, language, parser);
-
-  if (raw.length > 0) {
-    return deduplicateById(raw);
-  }
-
-  // Fallback: structural heuristic extraction — rewrite IDs to be deterministic
-  const fallback = extractSymbols(ast, filePath);
-  const withDeterministicIds = fallback.map((sym) => ({
-    ...sym,
-    id: generateSymbolId(
-      sym.location.filePath,
-      sym.name,
-      sym.location.startLine,
-      sym.location.startColumn,
-    ),
-  }));
-
-  return deduplicateById(withDeterministicIds);
-}
-
 // ─── Deduplication ────────────────────────────────────────────────────────────
 
-/**
- * Remove duplicate symbols by ID, keeping the first occurrence.
- * Guarantees the output has no duplicate IDs (Req 4.1, 4.3).
- */
 function deduplicateById(symbols: Symbol[]): Symbol[] {
   const seen = new Set<string>();
   const result: Symbol[] = [];
@@ -86,22 +52,23 @@ function deduplicateById(symbols: Symbol[]): Symbol[] {
   return result;
 }
 
-// ─── extractAllSymbols ────────────────────────────────────────────────────────
+// ─── Phase 2 entry point ──────────────────────────────────────────────────────
 
 /**
  * Phase 2 pipeline entry point.
+ * Returns symbols and raw relationship hints extracted from all files.
  *
- * Processes all FileNodes, initialises language parsers on demand,
- * parses each file, and extracts symbols with deterministic unique IDs.
- *
- * Preconditions:  fileNodes contains valid file paths
- * Postconditions: returns all extractable symbols with unique IDs
- * Loop Invariant: allSymbols contains symbols from all processed files so far
+ * @param fileNodes - Files to process (paths relative to rootPath)
+ * @param rootPath  - Root used to resolve paths for I/O (defaults to CWD)
  *
  * Requirements: 3.2, 4.1, 4.2
  */
-export async function extractAllSymbols(fileNodes: FileNode[]): Promise<Symbol[]> {
+export async function extractAllSymbols(
+  fileNodes: FileNode[],
+  rootPath: string = process.cwd(),
+): Promise<ParsingResult> {
   const allSymbols: Symbol[] = [];
+  const allHints: RawRelationshipHint[] = [];
   const parsers = new Map<Language, Parser>();
 
   for (const fileNode of fileNodes) {
@@ -119,22 +86,40 @@ export async function extractAllSymbols(fileNodes: FileNode[]): Promise<Symbol[]
       }
     }
 
+    const fullPath = path.resolve(rootPath, fileNode.path);
+
     let ast: ASTNode;
     try {
-      ast = await parseFile(fileNode.path, fileNode.language, parser);
+      ast = await parseFile(fullPath, fileNode.language, parser);
     } catch (err) {
-      if (err instanceof ParseError) {
-        // Already logged by parseFile — just skip
-      } else {
+      if (!(err instanceof ParseError)) {
         console.warn(`[phase2] Warning: unexpected error parsing ${fileNode.path}`, err);
       }
       continue;
     }
 
-    const symbols = extractSymbolsFromAST(ast, fileNode.path, fileNode.language, parser);
-    allSymbols.push(...symbols);
+    const result = extractSymbolsWithQueries(ast, fileNode.path, fileNode.language, parser);
+
+    if (result.symbols.length > 0) {
+      allSymbols.push(...result.symbols);
+      allHints.push(...result.hints);
+    } else {
+      // Fallback: structural heuristic extraction with deterministic IDs
+      const fallback = extractSymbols(ast, fileNode.path).map((sym) => ({
+        ...sym,
+        id: generateSymbolId(
+          sym.location.filePath,
+          sym.name,
+          sym.location.startLine,
+          sym.location.startColumn,
+        ),
+      }));
+      allSymbols.push(...fallback);
+    }
   }
 
-  // Final deduplication across all files (handles edge cases from parallel paths)
-  return deduplicateById(allSymbols);
+  return {
+    symbols: deduplicateById(allSymbols),
+    hints: allHints,
+  };
 }

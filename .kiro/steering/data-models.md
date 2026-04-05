@@ -179,8 +179,8 @@ interface FrameworkSupport {
 
 ```typescript
 interface Embedding {
-  readonly vector: number[];    // exactly 3072 elements
-  readonly dimensions: number;  // always 3072
+  readonly vector: number[];    // exactly 1536 elements
+  readonly dimensions: number;  // always 1536
 }
 
 interface SearchResult {
@@ -190,4 +190,4 @@ interface SearchResult {
 }
 ```
 
-**Invariants**: `vector.length === 3072`, `dimensions === 3072`, search results ordered by descending `score`.
+**Invariants**: `vector.length === 1536`, `dimensions === 1536`, search results ordered by descending `score`.

@@ -46,6 +46,8 @@ export async function createPool(config: {
 
 /**
  * Initialize pgvector extension and create embeddings table with HNSW index.
+ * Using 1536 dimensions (text-embedding-3-large reduced) to stay within
+ * pgvector's 2000-dimension index limit.
  * Requirements: 17.1, 17.5
  */
 export async function initVectorStore(pool: Pool): Promise<void> {
@@ -53,7 +55,7 @@ export async function initVectorStore(pool: Pool): Promise<void> {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS embeddings (
       symbol_id TEXT PRIMARY KEY,
-      embedding vector(3072),
+      embedding vector(1536),
       metadata JSONB DEFAULT '{}'
     )
   `);

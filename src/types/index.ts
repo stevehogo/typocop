@@ -156,8 +156,8 @@ export interface MCPToolResponse {
 // ─── Search & Embeddings ──────────────────────────────────────────────────────
 
 export interface Embedding {
-  readonly vector: number[];   // exactly 3072 elements
-  readonly dimensions: number; // always 3072
+  readonly vector: number[];   // exactly 1536 elements
+  readonly dimensions: number; // always 1536
 }
 
 export interface SearchResult {

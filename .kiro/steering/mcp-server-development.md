@@ -172,7 +172,7 @@ Users configure the MCP server in `.kiro/settings/mcp.json`:
       "command": "node",
       "args": ["dist/mcp/index.js"],
       "env": {
-        "NEO4J_URI": "bolt://localhost:7687",
+        "NEO4J_URI": "bolt://localhost:8687",
         "NEO4J_USER": "neo4j",
         "NEO4J_PASSWORD": "password",
         "POSTGRES_URI": "postgresql://localhost:5432/typocop",
