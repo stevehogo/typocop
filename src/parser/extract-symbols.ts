@@ -139,7 +139,10 @@ export function extractSymbolsWithQueries(
     const importSourceCapture = match.captures.find((c) => c.name === "import.source");
     const callNameCapture = match.captures.find((c) => c.name === "call.name");
     const heritageExtendsCapture = match.captures.find((c) => c.name === "heritage.extends");
-    const heritageImplCapture = match.captures.find((c) => c.name === "heritage.implements");
+    // heritage.implements (Java/C#/PHP) and heritage.trait (Rust) both produce "implements" hints
+    const heritageImplCapture = match.captures.find(
+      (c) => c.name === "heritage.implements" || c.name === "heritage.trait",
+    );
     const heritageClassCapture = match.captures.find((c) => c.name === "heritage.class");
 
     // ── Definition symbols ──────────────────────────────────────────────────
