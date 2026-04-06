@@ -105,6 +105,18 @@ const TOOL_DEFINITIONS = [
       required: ["symbolName"],
     },
   },
+  {
+    name: "smart_search",
+    description: "Find symbols by natural language query using semantic similarity. Use this when you don't know the exact symbol name.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "Natural language description" },
+        maxResults: { type: "number", description: "Max symbols to return (default: 10)" },
+      },
+      required: ["query"],
+    },
+  },
 ];
 
 /**

@@ -10,6 +10,7 @@ import { executeContextRetrieval } from "../query/context-retrieval.js";
 import { executeImpactAnalysis } from "../query/impact-analysis.js";
 import { executeDataFlowTrace } from "../query/data-flow-trace.js";
 import { SessionManager } from "./session-manager.js";
+import { executeSmartSearchTool } from "./smart-search-tool.js";
 
 /**
  * Default maximum results for queries.
@@ -176,6 +177,8 @@ export async function executeTool(
       return executeTraceDataFlow(params, vectorPool, driver, sessionManager);
     case "impact_analysis":
       return executeImpactAnalysisTool(params, vectorPool, driver, sessionManager);
+    case "smart_search":
+      return executeSmartSearchTool(params, vectorPool, driver, sessionManager);
     default:
       throw new Error(`Unknown tool: ${toolName}`);
   }

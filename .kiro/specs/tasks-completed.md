@@ -10,3 +10,4 @@
 10. two-phase-walker
 11. embeddings-pipeline
 12. parser-syntax-diagnostics
+13. mcp-natural-language-search
