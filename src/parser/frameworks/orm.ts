@@ -7,7 +7,12 @@ import { extractSymbols } from "../extract-symbols.js";
 import { fromSyntaxNode } from "../ast-node.js";
 import fs from "fs/promises";
 import Parser from "tree-sitter";
-import TypeScript from "tree-sitter-typescript";
+import { createRequire } from "node:module";
+const require = createRequire(import.meta.url);
+const TypeScript = require("tree-sitter-typescript") as {
+  typescript: Parser.Language;
+  tsx: Parser.Language;
+};
 
 /**
  * Parse Mongoose schema definitions.

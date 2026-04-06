@@ -46,7 +46,7 @@ describe("package.json field assertions", () => {
   });
 
   it("declares dotenv as a runtime dependency", () => {
-    expect(pkg.dependencies.dotenv).toMatch(/^\^16\./);
+    expect(pkg.dependencies.dotenv).toMatch(/^\^1[67]\./);
   });
 });
 

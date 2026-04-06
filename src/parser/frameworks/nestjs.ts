@@ -8,7 +8,12 @@ import { fromSyntaxNode } from "../ast-node.js";
 import path from "path";
 import fs from "fs/promises";
 import Parser from "tree-sitter";
-import TypeScript from "tree-sitter-typescript";
+import { createRequire } from "node:module";
+const require = createRequire(import.meta.url);
+const TypeScript = require("tree-sitter-typescript") as {
+  typescript: Parser.Language;
+  tsx: Parser.Language;
+};
 
 export const NESTJS_SUPPORT: FrameworkSupport = {
   framework: "NestJS",
@@ -147,9 +152,10 @@ export async function parseNestJSFile(filePath: string): Promise<Symbol[]> {
   }
   
   // Handle TypeScript files
-  if (ext === ".ts") {
+  if (ext === ".ts" || ext === ".tsx") {
     const parser = new Parser();
-    parser.setLanguage(TypeScript.typescript as unknown as Parser.Language);
+    const grammar = ext === ".tsx" ? TypeScript.tsx : TypeScript.typescript;
+    parser.setLanguage(grammar as unknown as Parser.Language);
     
     const results = await Promise.all([
       parseRouteDecorators(filePath, parser),

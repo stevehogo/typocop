@@ -8,3 +8,5 @@
 8. mcp-session-stuck-transaction
 9. process-steps-missing
 10. two-phase-walker
+11. embeddings-pipeline
+12. parser-syntax-diagnostics

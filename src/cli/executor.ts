@@ -13,6 +13,7 @@ export interface IndexingStats {
   clusterCount: number;
   processCount: number;
   skippedFiles: number;
+  embeddingCount: number;
 }
 
 export interface GraphStatus {
@@ -79,6 +80,7 @@ async function executeIndexingPipeline(
         clusterCount: result.clusters.length,
         processCount: result.processes.length,
         skippedFiles: result.skippedFiles,
+        embeddingCount: result.embeddingCount,
       };
     } finally {
       await session.close();
@@ -149,6 +151,7 @@ export async function executeCLI(command: CLICommand): Promise<void> {
         console.log(`  Relationships: ${chalk.cyan(stats.relationshipCount)}`);
         console.log(`  Clusters:      ${chalk.cyan(stats.clusterCount)}`);
         console.log(`  Processes:     ${chalk.cyan(stats.processCount)}`);
+        console.log(`  Embeddings:    ${chalk.cyan(stats.embeddingCount)}`);
 
         if (stats.skippedFiles > 0) {
           console.log(chalk.yellow(`  Skipped files: ${stats.skippedFiles} (syntax errors or unreadable)`));

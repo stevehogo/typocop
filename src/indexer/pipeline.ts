@@ -36,6 +36,7 @@ import { resolveReferences } from "./resolution/index.js";
 import { clusterSymbols, type AIClient } from "./clustering/index.js";
 import { traceProcesses } from "./processes/index.js";
 import { buildSearchIndex } from "./search/index.js";
+import { embedText } from "./search/embed.js";
 import { storeNodes, storeEdges } from "../graph/store.js";
 import { indexSymbol } from "../vector/index-store.js";
 import type { GraphNode, GraphEdge } from "../graph/connection.js";
@@ -67,6 +68,7 @@ export interface PipelineConfig {
  * @property clusters - Functional communities detected via Louvain algorithm
  * @property processes - Execution flows traced from entry points
  * @property skippedFiles - Count of files that couldn't be parsed (syntax errors, size limits, etc.)
+ * @property embeddingCount - Number of embeddings successfully stored in pgvector
  */
 export interface PipelineResult {
   readonly symbols: Symbol[];
@@ -74,6 +76,7 @@ export interface PipelineResult {
   readonly clusters: Cluster[];
   readonly processes: Process[];
   readonly skippedFiles: number;
+  readonly embeddingCount: number;
 }
 
 /**
@@ -125,6 +128,7 @@ export async function runIndexingPipeline(config: PipelineConfig): Promise<Pipel
       clusters: [],
       processes: [],
       skippedFiles: 0,
+      embeddingCount: 0,
     };
   }
 
@@ -141,6 +145,7 @@ export async function runIndexingPipeline(config: PipelineConfig): Promise<Pipel
       clusters: [],
       processes: [],
       skippedFiles: 0,
+      embeddingCount: 0,
     };
   }
 
@@ -164,15 +169,26 @@ export async function runIndexingPipeline(config: PipelineConfig): Promise<Pipel
 
   if (verbose) console.log("[pipeline] Starting Phase 6: Search indexing");
   
-  // Phase 6: Build search index (Req 3.6)
-  const embedFn = async (text: string) => {
-    // Embedding generation is handled by the caller if needed
-    // This is a placeholder that returns null (service unavailable)
-    return null;
-  };
-  
-  await buildSearchIndex(symbols, clusters, embedFn);
+  // Phase 6: Build search index and generate embeddings (Req 3.6, 3.8)
+  const apiKey = process.env.OPENAI_API_KEY;
+  let embedFn: ((text: string) => Promise<import("../types/index.js").Embedding | null>) | null = null;
+
+  if (!apiKey) {
+    console.log("[pipeline] OPENAI_API_KEY not set — skipping embedding generation");
+  } else {
+    const embeddingConfig = { apiKey, model: "text-embedding-3-large", dimensions: 1536 };
+    embedFn = (text: string) => embedText(text, embeddingConfig);
+  }
+
+  const searchIndex = await buildSearchIndex(symbols, clusters, embedFn);
   if (verbose) console.log(`[pipeline] Phase 6 complete: search index built`);
+
+  // Store embeddings in pgvector — DB errors propagate (Req 3.8)
+  let embeddingCount = 0;
+  for (const result of searchIndex.embeddings) {
+    await indexSymbol(vectorPool, result.symbolId, result.embedding, {});
+    embeddingCount++;
+  }
 
   // Store results in databases (Req 3.8)
   if (verbose) console.log("[pipeline] Storing results in graph database and vector store");
@@ -185,6 +201,7 @@ export async function runIndexingPipeline(config: PipelineConfig): Promise<Pipel
     clusters,
     processes,
     skippedFiles: 0, // TODO: Track skipped files from Phase 2
+    embeddingCount,
   };
 }
 

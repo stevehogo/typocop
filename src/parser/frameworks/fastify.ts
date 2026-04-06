@@ -8,7 +8,12 @@ import { fromSyntaxNode } from "../ast-node.js";
 import path from "path";
 import fs from "fs/promises";
 import Parser from "tree-sitter";
-import TypeScript from "tree-sitter-typescript";
+import { createRequire } from "node:module";
+const require = createRequire(import.meta.url);
+const TypeScript = require("tree-sitter-typescript") as {
+  typescript: Parser.Language;
+  tsx: Parser.Language;
+};
 import JavaScript from "tree-sitter-javascript";
 
 export const FASTIFY_SUPPORT: FrameworkSupport = {
@@ -87,10 +92,10 @@ export async function parseFastifyHooks(filePath: string, parser: Parser): Promi
  */
 export async function parseFastifyFile(filePath: string): Promise<Symbol[]> {
   const ext = path.extname(filePath);
-  if (ext !== ".js" && ext !== ".ts") return [];
+  if (ext !== ".js" && ext !== ".ts" && ext !== ".tsx") return [];
   
   const parser = new Parser();
-  const lang = ext === ".ts" ? TypeScript.typescript : JavaScript;
+  const lang = ext === ".tsx" ? TypeScript.tsx : ext === ".ts" ? TypeScript.typescript : JavaScript;
   parser.setLanguage(lang as unknown as Parser.Language);
   
   const results = await Promise.all([

@@ -47,7 +47,7 @@ vi.mock("./processes/index.js", () => ({
 }));
 
 vi.mock("./search/index.js", () => ({
-  buildSearchIndex: vi.fn().mockResolvedValue(undefined),
+  buildSearchIndex: vi.fn().mockResolvedValue({ keywords: new Map(), symbolCount: 0, embeddings: [] }),
 }));
 
 vi.mock("../vector/index-store.js", () => ({
@@ -60,9 +60,11 @@ import { clusterSymbols } from "./clustering/index.js";
 import { traceProcesses } from "./processes/index.js";
 import { resolveReferences } from "./resolution/index.js";
 import { extractAllSymbols } from "./parsing/index.js";
+import { buildSearchIndex } from "./search/index.js";
+import { indexSymbol } from "../vector/index-store.js";
 import { runIndexingPipeline } from "./pipeline.js";
 import type { GraphEdge } from "../graph/connection.js";
-import type { Relationship, Symbol } from "../types/index.js";
+import type { Relationship, Symbol, Embedding } from "../types/index.js";
 
 /** Minimal stub symbol — ensures pipeline passes the symbols.length === 0 guard */
 const STUB_SYMBOL: Symbol = {
@@ -399,5 +401,107 @@ describe("buildGraph — preservation (baseline must hold before and after fix)"
       }),
       { numRuns: 20 },
     );
+  });
+});
+
+/**
+ * Task 2.1 — Unit tests for Phase 6 graceful degradation and embedding persistence
+ * Requirements: 3.6
+ */
+describe("Phase 6 — embedding generation and persistence", () => {
+  const STUB_EMBEDDING: Embedding = {
+    vector: Array.from({ length: 1536 }, () => 0.1),
+    dimensions: 1536,
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(extractAllSymbols).mockResolvedValue({ symbols: [STUB_SYMBOL], hints: [] });
+    vi.mocked(resolveReferences).mockReturnValue([]);
+    vi.mocked(clusterSymbols).mockResolvedValue([]);
+    vi.mocked(traceProcesses).mockReturnValue([]);
+  });
+
+  it("should return embeddingCount === 0 and not call indexSymbol when OPENAI_API_KEY is absent", async () => {
+    delete process.env.OPENAI_API_KEY;
+
+    vi.mocked(buildSearchIndex).mockResolvedValue({
+      keywords: new Map(),
+      symbolCount: 1,
+      embeddings: [],
+    });
+
+    const result = await runIndexingPipeline({
+      sourcePath: ".",
+      language: "typescript",
+      verbose: false,
+      graphSession: makeSession(),
+      vectorPool: makePool(),
+    });
+
+    expect(result.embeddingCount).toBe(0);
+    expect(vi.mocked(indexSymbol)).not.toHaveBeenCalled();
+  });
+
+  it("should call indexSymbol once per non-null embedding result when OPENAI_API_KEY is present", async () => {
+    process.env.OPENAI_API_KEY = "test-key";
+
+    vi.mocked(buildSearchIndex).mockResolvedValue({
+      keywords: new Map(),
+      symbolCount: 1,
+      embeddings: [
+        { symbolId: "sym-1", embedding: STUB_EMBEDDING },
+        { symbolId: "sym-2", embedding: STUB_EMBEDDING },
+      ],
+    });
+
+    const result = await runIndexingPipeline({
+      sourcePath: ".",
+      language: "typescript",
+      verbose: false,
+      graphSession: makeSession(),
+      vectorPool: makePool(),
+    });
+
+    expect(result.embeddingCount).toBe(2);
+    expect(vi.mocked(indexSymbol)).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(indexSymbol)).toHaveBeenCalledWith(
+      expect.anything(),
+      "sym-1",
+      STUB_EMBEDDING,
+      {},
+    );
+    expect(vi.mocked(indexSymbol)).toHaveBeenCalledWith(
+      expect.anything(),
+      "sym-2",
+      STUB_EMBEDDING,
+      {},
+    );
+
+    delete process.env.OPENAI_API_KEY;
+  });
+
+  it("should propagate DB errors from indexSymbol (hard error)", async () => {
+    process.env.OPENAI_API_KEY = "test-key";
+
+    vi.mocked(buildSearchIndex).mockResolvedValue({
+      keywords: new Map(),
+      symbolCount: 1,
+      embeddings: [{ symbolId: "sym-1", embedding: STUB_EMBEDDING }],
+    });
+
+    vi.mocked(indexSymbol).mockRejectedValueOnce(new Error("DB write failed"));
+
+    await expect(
+      runIndexingPipeline({
+        sourcePath: ".",
+        language: "typescript",
+        verbose: false,
+        graphSession: makeSession(),
+        vectorPool: makePool(),
+      }),
+    ).rejects.toThrow("DB write failed");
+
+    delete process.env.OPENAI_API_KEY;
   });
 });

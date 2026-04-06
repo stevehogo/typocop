@@ -3,10 +3,17 @@
 
 import type { Symbol, Cluster, Embedding } from "../../types/index.js";
 import { buildKeywordIndex } from "./keywords.js";
+import { formatClusterForEmbedding } from "./embed.js";
+
+export interface EmbeddingResult {
+  readonly symbolId: string;
+  readonly embedding: Embedding;
+}
 
 export interface SearchIndex {
   readonly keywords: Map<string, string[]>;
   readonly symbolCount: number;
+  readonly embeddings: EmbeddingResult[];
 }
 
 /**
@@ -14,31 +21,36 @@ export interface SearchIndex {
  *
  * @param symbols - All symbols to index
  * @param clusters - All clusters to index (embeddings only)
- * @param embedFn - Embedding function; returns null if service unavailable
+ * @param embedFn - Embedding function, or null to skip embedding generation
  */
 export async function buildSearchIndex(
   symbols: Symbol[],
   clusters: Cluster[],
-  embedFn: (text: string) => Promise<Embedding | null>,
+  embedFn: ((text: string) => Promise<Embedding | null>) | null,
 ): Promise<SearchIndex> {
-  // Build keyword index (always succeeds)
   const keywords = buildKeywordIndex(symbols);
+  const collected: EmbeddingResult[] = [];
 
-  // Generate embeddings for symbols (best-effort; null = service unavailable)
-  const symbolMap = new Map<string, Symbol>(symbols.map(s => [s.id, s]));
+  if (embedFn !== null) {
+    const symbolMap = new Map<string, Symbol>(symbols.map(s => [s.id, s]));
 
-  for (const cluster of clusters) {
-    const { formatClusterForEmbedding } = await import("./embed.js");
-    const clusterSymbols = cluster.symbols
-      .map(id => symbolMap.get(id))
-      .filter((s): s is Symbol => s !== undefined);
-    const text = formatClusterForEmbedding(cluster, clusterSymbols);
-    await embedFn(text); // result stored by caller if needed
+    for (const cluster of clusters) {
+      const clusterSymbols = cluster.symbols
+        .map(id => symbolMap.get(id))
+        .filter((s): s is Symbol => s !== undefined);
+      const text = formatClusterForEmbedding(cluster, clusterSymbols);
+      const embedding = await embedFn(text);
+
+      if (embedding !== null) {
+        collected.push({ symbolId: cluster.symbols[0], embedding });
+      }
+    }
   }
 
   return {
     keywords,
     symbolCount: symbols.length,
+    embeddings: collected,
   };
 }
 
