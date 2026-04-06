@@ -7,7 +7,7 @@
     "type": "postTaskExecution"
   },
   "then": {
-    "type": "askAgent",
-    "prompt": "A spec task just completed. Identify the current spec folder under .kiro/specs/ based on recent activity.\n\n1. Read tasks.md in that spec folder.\n2. Find ALL task files: tasks.md is the entry point, but tasks may be split across multiple files. Look for any markdown links in tasks.md pointing to other task files (e.g. tasks-phase1.md, tasks-phase2.md, or any file matching `tasks-*.md` in the same folder). Read every linked task file as well.\n3. Across ALL task files combined, collect every required task line. A required task line matches `- [x]` or `- [ ]` and does NOT have an asterisk immediately after the bracket (i.e. NOT `- [ ]*` or `- [x]*`).\n4. If every required task line across all files is marked `[x]` (none are `- [ ]`):\n   a. Rename the spec folder by appending \" (done)\" to its name. Example: `mv '.kiro/specs/my-feature' '.kiro/specs/my-feature (done)'`\n   b. Append a new row to `.kiro/specs/tasks-completed.md` with the spec folder name (without the \" (done)\" suffix). The file is a numbered list — read it first to get the current count, then append the next number. Example: if the last line is `10. two-phase-walker`, append `11. my-feature`.\n5. If any required task is still `- [ ]`, do nothing."
+    "type": "runCommand",
+    "command": "bash .kiro/scripts/check-spec-completion.sh"
   }
 }

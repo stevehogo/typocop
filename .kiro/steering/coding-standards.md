@@ -118,6 +118,30 @@ src/parser/index.ts  ← just re-exports everything from subfiles, adds no value
 - No `__tests__/` folder — tests are co-located with their source file
 - No circular imports between modules
 
+## Stub Code Rule
+
+Whenever you generate stub or placeholder code that is not yet implemented, you **must** include a `TODO` comment that references the task or requirement it belongs to. This ensures that after all spec tasks are executed, a simple search for `TODO` reveals any unfinished work.
+
+```typescript
+// Good — stub with a traceable TODO
+export function resolveImports(symbols: Symbol[]): ResolvedSymbol[] {
+  // TODO: Task 3.2 — resolve cross-file import references
+  return [];
+}
+
+// Bad — silent stub with no indication it's incomplete
+export function resolveImports(symbols: Symbol[]): ResolvedSymbol[] {
+  return [];
+}
+```
+
+### Rules
+
+- Every stub function/method body must have a `// TODO: <task reference> — <short description>` comment
+- The task reference should match the task ID in `tasks.md` (e.g., `Task 4`, `Task 2.3`)
+- Never return empty arrays, `null`, `undefined`, or `{}` from a stub without a TODO comment
+- After all tasks are complete, run `grep -r "TODO:" src/` to verify no stubs remain
+
 ## Naming Conventions
 
 - Files: `kebab-case.ts`

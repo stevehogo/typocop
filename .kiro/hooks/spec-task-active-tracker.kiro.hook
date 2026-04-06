@@ -1,0 +1,14 @@
+{
+  "enabled": true,
+  "name": "Track Active Spec",
+  "description": "When a tasks.md file is edited, checks if any task is in-progress and writes the spec path to .kiro/specs/.active-spec. Clears it if no tasks are in-progress.",
+  "version": "1",
+  "when": {
+    "type": "fileEdited",
+    "patterns": [".kiro/specs/*/tasks.md"]
+  },
+  "then": {
+    "type": "runCommand",
+    "command": "bash .kiro/scripts/track-active-spec.sh"
+  }
+}
