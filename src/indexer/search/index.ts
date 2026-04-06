@@ -8,6 +8,7 @@ import { formatClusterForEmbedding } from "./embed.js";
 export interface EmbeddingResult {
   readonly symbolId: string;
   readonly embedding: Embedding;
+  readonly metadata: Record<string, string>;
 }
 
 export interface SearchIndex {
@@ -42,7 +43,20 @@ export async function buildSearchIndex(
       const embedding = await embedFn(text);
 
       if (embedding !== null) {
-        collected.push({ symbolId: cluster.symbols[0], embedding });
+        const firstSymbol = clusterSymbols[0];
+        collected.push({
+          symbolId: cluster.symbols[0],
+          embedding,
+          metadata: {
+            clusterId: cluster.id,
+            clusterName: cluster.name,
+            category: cluster.category,
+            ...(firstSymbol ? {
+              filePath: firstSymbol.location.filePath,
+              kind: firstSymbol.kind,
+            } : {}),
+          },
+        });
       }
     }
   }

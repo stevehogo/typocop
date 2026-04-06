@@ -186,7 +186,7 @@ export async function runIndexingPipeline(config: PipelineConfig): Promise<Pipel
   // Store embeddings in pgvector — DB errors propagate (Req 3.8)
   let embeddingCount = 0;
   for (const result of searchIndex.embeddings) {
-    await indexSymbol(vectorPool, result.symbolId, result.embedding, {});
+    await indexSymbol(vectorPool, result.symbolId, result.embedding, result.metadata);
     embeddingCount++;
   }
 

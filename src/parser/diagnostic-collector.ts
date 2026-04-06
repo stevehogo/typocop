@@ -28,13 +28,12 @@ function extractSnippet(source: string, errorRow: number, col: number): string |
 
 /** Classify an Error_Node into a human-readable message. */
 function nodeMessage(node: SyntaxNode): string {
-  if (node.isMissing) return `Missing token: ${node.type}`;
-  return "Unexpected token";
+  return `Missing token: ${node.type}`;
 }
 
-/** Depth-first walk; yields every Error_Node (type "ERROR" or isMissing). */
+/** Depth-first walk; yields only missing-token nodes (isMissing). */
 function* walkErrorNodes(node: SyntaxNode): Generator<SyntaxNode> {
-  if (node.type === "ERROR" || node.isMissing) {
+  if (node.isMissing) {
     yield node;
   }
   for (const child of node.children) {
