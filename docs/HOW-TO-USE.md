@@ -68,7 +68,7 @@ pnpm build
 
 ## 4. CLI Reference
 
-After a global install (`pnpm add -g typocop`) the commands are available directly:
+After a global install (`pnpm link --global`) the commands are available directly:
 
 ```bash
 typocop <command> [options]
@@ -126,6 +126,7 @@ typocop reindex -d <db-path>
 
 Clears the existing graph and re-indexes from scratch. Use after large refactors.
 
+*Remove global* `pnpm unlink --global`
 ---
 
 ## 5. MCP Server
@@ -291,3 +292,5 @@ pnpm vitest --run --coverage
 **MCP server not connecting**
 - Confirm `MCP_AUTH_TOKEN` matches in both `.env` and your editor's MCP config
 - Run `node dist/mcp/main.js` directly and check for startup errors
+
+##
