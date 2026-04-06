@@ -1,0 +1,10 @@
+1. cli-packaging
+2. cluster-process-edge-bug
+3. code-graph-analyzer
+4. comprehensive-ignore-rules
+5. improve-resolution-context
+6. improve-symbol-table
+7. language-config-loaders
+8. mcp-session-stuck-transaction
+9. process-steps-missing
+10. two-phase-walker
