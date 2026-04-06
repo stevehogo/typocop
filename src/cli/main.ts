@@ -27,10 +27,13 @@ async function main(): Promise<void> {
   let command;
   try {
     command = parseArgs(["node", "typocop", ...filteredArgv]);
-  } catch (err) {
+  } catch (err: any) {
     if (err instanceof CLIValidationError) {
       process.stderr.write(err.message + "\n");
       process.exit(1);
+    }
+    if (err?.code === "commander.helpDisplayed" || err?.code === "commander.version") {
+      process.exit(err.exitCode ?? 0);
     }
     throw err;
   }
