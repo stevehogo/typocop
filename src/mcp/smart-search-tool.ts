@@ -11,7 +11,7 @@ import { semanticSearch } from "../vector/search.js";
 import { txFindNode, txFindDependents, txFindClustersBySymbol } from "../graph/query.js";
 import { SessionManager } from "./session-manager.js";
 
-const DEFAULT_MAX_RESULTS = 10;
+const DEFAULT_MAX_RESULTS = 50;
 const MAX_RESULTS_CAP = 50;
 
 /**
