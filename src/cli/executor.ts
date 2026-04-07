@@ -6,6 +6,7 @@ import ora from "ora";
 import { createDriver } from "../graph/connection.js";
 import { createPool, initVectorStore } from "../vector/connection.js";
 import { runIndexingPipeline, type PipelineConfig } from "../indexer/pipeline.js";
+import { configurationManager } from "../config/index.js";
 
 export interface IndexingStats {
   symbolCount: number;
@@ -45,13 +46,16 @@ function getDatabaseConfig() {
 
 /**
  * Execute the indexing pipeline with database connections.
- * Requirements: 1.1, 3.1–3.8
+ * Requirements: 1.1, 3.1–3.8, 7.2, 7.4
  */
 async function executeIndexingPipeline(
   sourcePath: string,
   language: string,
   verbose: boolean
 ): Promise<IndexingStats> {
+  const prefix = configurationManager.getPrefix();
+  console.log(chalk.dim(`[typocop] Effective prefix: ${prefix}`));
+
   const config = getDatabaseConfig();
   
   // Create database connections
@@ -93,27 +97,31 @@ async function executeIndexingPipeline(
 
 /**
  * Read graph status from Neo4j.
- * Requirements: 1.7
+ * Requirements: 1.7, 7.3
  */
 async function readGraphStatus(_dbPath?: string): Promise<GraphStatus> {
+  const prefix = configurationManager.getPrefix();
+  console.log(chalk.dim(`[typocop] Effective prefix: ${prefix}`));
+
   const config = getDatabaseConfig();
-  
   const driver = await createDriver(config.neo4j.uri, config.neo4j.user, config.neo4j.password);
   
   try {
     const session = driver.session();
     try {
-      // Count symbols
-      const symbolResult = await session.run("MATCH (s:Symbol) RETURN count(s) as count");
+      // Count symbols using prefixed label
+      const symbolResult = await session.run(
+        `MATCH (s:${prefix}Symbol) RETURN count(s) as count`
+      );
       const symbolCount = symbolResult.records[0]?.get("count").toNumber() || 0;
       
       // Count relationships
       const relResult = await session.run("MATCH ()-[r]->() RETURN count(r) as count");
       const relationshipCount = relResult.records[0]?.get("count").toNumber() || 0;
       
-      // Get last indexed timestamp (stored as a property on a metadata node)
+      // Get last indexed timestamp using prefixed label
       const timestampResult = await session.run(
-        "MATCH (m:Metadata {key: 'lastIndexed'}) RETURN m.timestamp as timestamp"
+        `MATCH (m:${prefix}Metadata {key: 'lastIndexed'}) RETURN m.timestamp as timestamp`
       );
       const lastIndexed = timestampResult.records[0]?.get("timestamp") || null;
       

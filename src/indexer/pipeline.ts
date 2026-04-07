@@ -135,7 +135,7 @@ export async function runIndexingPipeline(config: PipelineConfig): Promise<Pipel
   if (verbose) console.log("[pipeline] Starting Phase 2: Parsing");
   
   // Phase 2: Extract symbols and relationship hints (Req 3.2)
-  const { symbols, hints } = await extractAllSymbols(fileNodes, sourcePath);
+  const { symbols, hints, skippedFiles } = await extractAllSymbols(fileNodes, sourcePath);
   if (verbose) console.log(`[pipeline] Phase 2 complete: ${symbols.length} symbols extracted, ${hints.length} relationship hints`);
 
   if (symbols.length === 0) {
@@ -144,7 +144,7 @@ export async function runIndexingPipeline(config: PipelineConfig): Promise<Pipel
       relationships: [],
       clusters: [],
       processes: [],
-      skippedFiles: 0,
+      skippedFiles,
       embeddingCount: 0,
     };
   }
@@ -200,7 +200,7 @@ export async function runIndexingPipeline(config: PipelineConfig): Promise<Pipel
     relationships,
     clusters,
     processes,
-    skippedFiles: 0, // TODO: Track skipped files from Phase 2
+    skippedFiles,
     embeddingCount,
   };
 }

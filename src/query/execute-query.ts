@@ -4,23 +4,11 @@
  */
 import type { Pool } from "pg";
 import type { Session } from "neo4j-driver";
-import type { Query, QueryResult, QueryIntent, Symbol, Relationship, Cluster, Process, RiskLevel } from "../types/index.js";
+import type { Query, QueryResult, QueryIntent, Symbol, Relationship, Cluster, Process } from "../types/index.js";
 import { QUERY_TIMEOUT_MS } from "../utils/limits.js";
 import { findNode } from "../graph/query.js";
 import { parseQueryIntent } from "./parse-intent.js";
-import { executeImpactAnalysis } from "./impact-analysis.js";
-
-/**
- * Calculate risk level based on affected symbol count and criticality.
- * Requirements: 9.5, 10.4, 10.5, 10.6, 10.7
- */
-function calculateRiskLevel(affectedCount: number, _symbols: Symbol[]): RiskLevel {
-  // TODO: Check for core components (auth, payment, etc.) for CRITICAL
-  if (affectedCount === 0) return "low";
-  if (affectedCount <= 2) return "low";
-  if (affectedCount <= 10) return "medium";
-  return "high";
-}
+import { executeImpactAnalysis, calculateImpactRisk } from "./impact-analysis.js";
 
 /**
  * Calculate confidence score based on symbol resolution completeness.
@@ -84,7 +72,7 @@ async function executeQueryInternal(
       generateEmbedding,
     );
     const confidence = result.symbols.length > 0 ? Math.max(0.90, intentConfidence) : 0.75;
-    const riskLevel = calculateRiskLevel(result.symbols.length, result.symbols);
+    const riskLevel = calculateImpactRisk(result.symbols);
     const affectedFlows = result.processes.map((p) => p.name);
 
     return {

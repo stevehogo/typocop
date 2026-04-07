@@ -469,13 +469,13 @@ describe("Phase 6 — embedding generation and persistence", () => {
       expect.anything(),
       "sym-1",
       STUB_EMBEDDING,
-      {},
+      undefined,
     );
     expect(vi.mocked(indexSymbol)).toHaveBeenCalledWith(
       expect.anything(),
       "sym-2",
       STUB_EMBEDDING,
-      {},
+      undefined,
     );
 
     delete process.env.OPENAI_API_KEY;

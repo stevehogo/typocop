@@ -159,7 +159,10 @@ async function executeImpactAnalysisTool(
 
 /**
  * Execute MCP tool by name.
- * Requirements: 15.1, 15.2, 15.5, 15.6, 15.8
+ * Requirements: 15.1, 15.2, 15.5, 15.6, 15.8, 17.1
+ *
+ * @param _prefix - The configured prefix (reserved for future per-query use;
+ *                  prefix is already applied via the ConfigurationManager singleton)
  */
 export async function executeTool(
   toolName: string,
@@ -167,6 +170,7 @@ export async function executeTool(
   vectorPool: Pool,
   driver: Driver,
   sessionManager: SessionManager,
+  _prefix?: string,
 ): Promise<MCPToolResponse> {
   switch (toolName) {
     case "get_symbol_context":

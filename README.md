@@ -60,6 +60,41 @@ export POSTGRES_URI=postgresql://localhost:5432/typocop
 export OPENAI_API_KEY=sk-...  # Optional
 ```
 
+### Schema Prefix Configuration
+
+Typocop uses a configurable prefix for all PostgreSQL table names and Neo4j node labels/relationship types. This allows multiple Typocop instances to share the same database infrastructure without data conflicts.
+
+**Environment variable:** `TYPOCOP_PREFIX`
+
+**Default value:** `tpc_`
+
+**Naming rules:**
+- Must start with a lowercase letter (`a–z`)
+- May contain lowercase letters, digits, and underscores only (`[a-z0-9_]`)
+- Maximum 32 characters
+- A trailing underscore is auto-appended if missing (e.g. `tpc` → `tpc_`)
+
+**Examples:**
+
+| Value | Effective prefix | Example table |
+|-------|-----------------|---------------|
+| *(unset)* | `tpc_` | `tpc_embeddings` |
+| `tpc_` | `tpc_` | `tpc_embeddings` |
+| `myapp_` | `myapp_` | `myapp_embeddings` |
+| `prod_` | `prod_` | `prod_embeddings` |
+| `dev_` | `dev_` | `dev_embeddings` |
+
+**What it affects:**
+- PostgreSQL table names: `{prefix}embeddings`, `{prefix}metadata`
+- Neo4j node labels: `{prefix}Symbol`, `{prefix}File`, `{prefix}Cluster`, `{prefix}Process`, `{prefix}Metadata`
+- Neo4j relationship types: `{prefix}CALLS`, `{prefix}IMPORTS`, `{prefix}INHERITS`, `{prefix}IMPLEMENTS`, `{prefix}CONTAINS`, `{prefix}REFERENCES`, `{prefix}DEFINES`
+
+Set it in your `.env-typocop` file or as a system environment variable:
+
+```bash
+TYPOCOP_PREFIX=myapp_
+```
+
 ### Parsing a Codebase
 
 ```bash

@@ -1,25 +1,49 @@
 /**
  * Query server HTTP API using Fastify.
- * Requirements: 9.3, 20.1, 20.2, 23.3
+ * Requirements: 9.1, 9.2, 9.3, 20.1, 20.2, 23.3
  */
 import Fastify from "fastify";
 import type { FastifyInstance } from "fastify";
 import type { Pool } from "pg";
 import type { Driver } from "neo4j-driver";
-import type { Query, QueryResult } from "../types/index.js";
+import type { Query, QueryResult, RelationType } from "../types/index.js";
 import { executeQuery } from "./execute-query.js";
 import { sanitizeQuery } from "../security/sanitize.js";
+import { configurationManager, ConfigurationError } from "../config/index.js";
 
 export interface QueryServerConfig {
   readonly port: number;
   readonly host: string;
   readonly vectorPool: Pool;
   readonly graphDriver: Driver;
+  readonly prefix?: string;
 }
+
+// ─── Prefix helpers ───────────────────────────────────────────────────────────
+
+function stripPrefix(value: string, prefix: string): string {
+  if (prefix && value.startsWith(prefix)) {
+    return value.slice(prefix.length);
+  }
+  return value;
+}
+
+function stripPrefixFromResult(result: QueryResult, prefix: string): QueryResult {
+  if (!prefix) return result;
+  return {
+    ...result,
+    relationships: result.relationships.map(r => ({
+      ...r,
+      relType: stripPrefix(r.relType, prefix) as RelationType,
+    })),
+  };
+}
+
+// ─── Server factory ───────────────────────────────────────────────────────────
 
 /**
  * Create and configure the query server.
- * Requirements: 9.3
+ * Requirements: 9.2, 9.3
  */
 export function createQueryServer(config: QueryServerConfig): FastifyInstance {
   const server = Fastify({
@@ -56,6 +80,10 @@ export function createQueryServer(config: QueryServerConfig): FastifyInstance {
       });
     }
 
+    // Req 9.2: use configured prefix for graph and vector queries
+    const prefix = config.prefix ?? configurationManager.getPrefix();
+    request.log.debug({ prefix }, "[query-server] Using prefix for query");
+
     // Sanitize query input (Req 22.3)
     const sanitizedText = sanitizeQuery(text);
 
@@ -68,7 +96,9 @@ export function createQueryServer(config: QueryServerConfig): FastifyInstance {
     try {
       const session = config.graphDriver.session();
       try {
-        const result = await executeQuery(query, config.vectorPool, session);
+        const raw = await executeQuery(query, config.vectorPool, session);
+        // Req 9.3: strip prefix from relationship types and node labels in response
+        const result = stripPrefixFromResult(raw, prefix);
         return result;
       } finally {
         await session.close();
@@ -85,12 +115,27 @@ export function createQueryServer(config: QueryServerConfig): FastifyInstance {
   return server;
 }
 
+// ─── Server startup ───────────────────────────────────────────────────────────
+
 /**
  * Start the query server.
- * Requirements: 9.3
+ * Requirements: 9.1, 9.3
  */
 export async function startQueryServer(config: QueryServerConfig): Promise<FastifyInstance> {
-  const server = createQueryServer(config);
+  // Req 9.1: initialize ConfigurationManager to read TYPOCOP_PREFIX
+  try {
+    await configurationManager.initialize();
+  } catch (err) {
+    if (err instanceof ConfigurationError) {
+      throw new Error(`[query-server] Failed to initialize configuration: ${err.message}`);
+    }
+    throw err;
+  }
+
+  const prefix = config.prefix ?? configurationManager.getPrefix();
+  console.log(`[query-server] Using prefix: ${prefix}`);
+
+  const server = createQueryServer({ ...config, prefix });
 
   try {
     await server.listen({

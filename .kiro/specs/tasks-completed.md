@@ -11,3 +11,4 @@
 11. embeddings-pipeline
 12. parser-syntax-diagnostics
 13. mcp-natural-language-search
+14. schema-prefixes

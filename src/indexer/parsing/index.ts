@@ -25,6 +25,7 @@ export type { RawRelationshipHint } from "../../parser/extract-symbols.js";
 export interface ParsingResult {
   readonly symbols: Symbol[];
   readonly hints: RawRelationshipHint[];
+  readonly skippedFiles: number;
 }
 
 // ─── Symbol ID generation ─────────────────────────────────────────────────────
@@ -70,6 +71,7 @@ export async function extractAllSymbols(
   const allSymbols: Symbol[] = [];
   const allHints: RawRelationshipHint[] = [];
   const parsers = new Map<Language, Parser>();
+  let skippedFiles = 0;
 
   for (const fileNode of fileNodes) {
     let parser = parsers.get(fileNode.language);
@@ -82,6 +84,7 @@ export async function extractAllSymbols(
           `[phase2] Warning: failed to init parser for ${fileNode.language} — skipping ${fileNode.path}`,
           err,
         );
+        skippedFiles++;
         continue;
       }
     }
@@ -95,6 +98,7 @@ export async function extractAllSymbols(
       if (!(err instanceof ParseError)) {
         console.warn(`[phase2] Warning: unexpected error parsing ${fileNode.path}`, err);
       }
+      skippedFiles++;
       continue;
     }
 
@@ -121,5 +125,6 @@ export async function extractAllSymbols(
   return {
     symbols: deduplicateById(allSymbols),
     hints: allHints,
+    skippedFiles,
   };
 }

@@ -5,3 +5,4 @@
 export { createPool, initVectorStore, withRetry } from "./connection.js";
 export { indexSymbol } from "./index-store.js";
 export { semanticSearch } from "./search.js";
+export { VectorStore } from "./vector-store.js";

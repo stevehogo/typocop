@@ -1,27 +1,30 @@
 /**
  * MCP server main entry point — connects to query server via HTTP.
- * Requirements: 15.5, 15.7
+ * Requirements: 15.5, 15.7, 17.1, 17.2, 17.3
  */
-import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
   CallToolRequestSchema,
-  ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import { createMCPServer, registerTools, registerPrompts } from "./registration.js";
+import { createMCPServer } from "./registration.js";
 import { executeTool } from "./tools.js";
 import { SessionManager } from "./session-manager.js";
-import { createDriver, type Driver } from "../graph/connection.js";
+import { createDriver } from "../graph/connection.js";
 import { createPool } from "../vector/connection.js";
+import { configurationManager, ConfigurationError, PrefixValidationError } from "../config/index.js";
+import type { MCPToolResponse } from "../types/index.js";
 
 /**
  * Get database configuration from environment variables.
  */
-function getDatabaseConfig() {
+function getDatabaseConfig(): {
+  neo4j: { uri: string; user: string; password: string };
+  postgres: { host: string; port: number; database: string; user: string; password: string };
+} {
   const neo4jUri = process.env.NEO4J_URI || "bolt://localhost:8687";
   const neo4jUser = process.env.NEO4J_USER || "neo4j";
   const neo4jPassword = process.env.NEO4J_PASSWORD || "password";
-  
+
   const pgHost = process.env.POSTGRES_HOST || "localhost";
   const pgPort = parseInt(process.env.POSTGRES_PORT || "5432", 10);
   const pgDatabase = process.env.POSTGRES_DB || "typocop";
@@ -35,12 +38,55 @@ function getDatabaseConfig() {
 }
 
 /**
+ * Strip the configured prefix from relationship types in an MCP tool response.
+ * Req 17.2: Strip prefix from node labels and relationship types in the response.
+ */
+function stripPrefixFromMCPResponse(response: MCPToolResponse, prefix: string): MCPToolResponse {
+  if (!prefix) return response;
+
+  return {
+    ...response,
+    symbols: response.symbols.map((s) => ({
+      ...s,
+      relationship: s.relationship.startsWith(prefix)
+        ? s.relationship.slice(prefix.length)
+        : s.relationship,
+    })),
+  };
+}
+
+/**
  * Start the MCP server with database connections.
- * Requirements: 15.5, 15.7
+ * Requirements: 15.5, 15.7, 17.1, 17.2, 17.3
  */
 export async function startMCPServer(): Promise<void> {
+  // Req 17.1, 18.1: Initialize configuration before database connections
+  try {
+    await configurationManager.initialize();
+  } catch (error) {
+    if (error instanceof ConfigurationError) {
+      if (error instanceof PrefixValidationError) {
+        const lines = [
+          `[mcp] Error: Invalid TYPOCOP_PREFIX value "${error.prefix}"`,
+          `[mcp] Reason: ${error.reason}`,
+        ];
+        if (error.suggestion) {
+          lines.push(`[mcp] Suggestion: ${error.suggestion}`);
+        }
+        console.error(lines.join("\n"));
+      } else {
+        console.error(`[mcp] Error: ${error.message}`);
+      }
+      process.exit(1);
+    }
+    throw error;
+  }
+
+  const prefix = configurationManager.getPrefix();
+  console.error(`[mcp] Using prefix: ${prefix}`);
+
   const config = getDatabaseConfig();
-  
+
   // Create database connections
   const driver = await createDriver(config.neo4j.uri, config.neo4j.user, config.neo4j.password);
   const pool = await createPool(config.postgres);
@@ -50,27 +96,50 @@ export async function startMCPServer(): Promise<void> {
 
   // Create MCP server
   const server = createMCPServer();
-  
+
   // Register tool call handler
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     try {
+      // Req 17.1: Use the configured prefix for all database queries (via singleton)
       const result = await executeTool(
         request.params.name,
         request.params.arguments || {},
         pool,
         driver,
         sessionManager,
+        prefix,
       );
-      
+
+      // Req 17.2: Strip prefix from response before returning
+      const stripped = stripPrefixFromMCPResponse(result, prefix);
+
       return {
         content: [
           {
             type: "text",
-            text: JSON.stringify(result, null, 2),
+            text: JSON.stringify(stripped, null, 2),
           },
         ],
       };
     } catch (error) {
+      // Req 17.3: Return descriptive error for ConfigurationError
+      if (error instanceof ConfigurationError) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({
+                error: "ConfigurationError",
+                message: error.message,
+                prefix: error.prefix,
+                reason: error.reason,
+              }),
+            },
+          ],
+          isError: true,
+        };
+      }
+
       return {
         content: [
           {
@@ -82,11 +151,9 @@ export async function startMCPServer(): Promise<void> {
         ],
         isError: true,
       };
-    } finally {
-      // sessions are managed per-query inside each tool function
     }
   });
-  
+
   // Start server with stdio transport
   const transport = new StdioServerTransport();
 
@@ -97,7 +164,7 @@ export async function startMCPServer(): Promise<void> {
   };
 
   await server.connect(transport);
-  
+
   console.error("MCP server started");
 }
 
