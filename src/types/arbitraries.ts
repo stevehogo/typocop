@@ -131,3 +131,21 @@ export const processArbitrary = (): fc.Arbitrary<Process> =>
       ...rec,
       steps: Array.from(rec.steps),
     }));
+
+// ─── FileNode (for parsing tests) ─────────────────────────────────────────────
+
+import type { FileNode } from "../indexer/structure/index.js";
+
+const languageArbitrary = (): fc.Arbitrary<string> =>
+  fc.constantFrom(
+    "typescript", "javascript", "python", "php", "java",
+    "go", "rust", "c", "cpp", "csharp", "ruby", "swift"
+  );
+
+/** Generates a valid FileNode with relative path and supported language. */
+export const fileNodeArbitrary = (): fc.Arbitrary<FileNode> =>
+  fc.record({
+    path: fc.string({ minLength: 1, maxLength: 100 }).map(p => p.replace(/\\/g, "/")),
+    size: fc.nat({ max: 1_000_000 }),
+    language: languageArbitrary() as fc.Arbitrary<any>,
+  });

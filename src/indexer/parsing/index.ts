@@ -102,14 +102,14 @@ export async function extractAllSymbols(
       continue;
     }
 
-    const result = extractSymbolsWithQueries(ast, fileNode.path, fileNode.language, parser);
+    const result = extractSymbolsWithQueries(ast, fullPath, fileNode.language, parser);
 
     if (result.symbols.length > 0) {
       allSymbols.push(...result.symbols);
       allHints.push(...result.hints);
     } else {
       // Fallback: structural heuristic extraction with deterministic IDs
-      const fallback = extractSymbols(ast, fileNode.path).map((sym) => ({
+      const fallback = extractSymbols(ast, fullPath).map((sym) => ({
         ...sym,
         id: generateSymbolId(
           sym.location.filePath,

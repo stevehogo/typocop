@@ -55,17 +55,17 @@ describe("executeCLI", () => {
 
   it("executes the status command and reports symbol/relationship counts", async () => {
     // Arrange
-    const consoleLogSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const command: CLICommand = { type: "status" };
 
     // Act
     await executeCLI(command);
 
     // Assert
-    expect(consoleLogSpy).toHaveBeenCalledWith(expect.stringContaining("Knowledge Graph Status:"));
-    expect(consoleLogSpy).toHaveBeenCalledWith(expect.stringContaining("Symbols:"));
-    expect(consoleLogSpy).toHaveBeenCalledWith(expect.stringContaining("Relationships:"));
-    expect(consoleLogSpy).toHaveBeenCalledWith(expect.stringContaining("Last Indexed:"));
+    expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining("Knowledge Graph Status:"));
+    expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining("Symbols:"));
+    expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining("Relationships:"));
+    expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining("Last Indexed:"));
   });
 
   it("executes the reindex command and reports completion", async () => {
@@ -83,7 +83,7 @@ describe("executeCLI", () => {
 
   it("executes the parse command and reports statistics", async () => {
     // Arrange
-    const consoleLogSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const command: CLICommand = {
       type: "parse",
       config: { sourcePath: "./src", language: "typescript", verbose: false },
@@ -93,15 +93,15 @@ describe("executeCLI", () => {
     await executeCLI(command);
 
     // Assert
-    expect(consoleLogSpy).toHaveBeenCalledWith(expect.stringContaining("Initializing indexing for typescript"));
-    expect(consoleLogSpy).toHaveBeenCalledWith(expect.stringContaining("Statistics:"));
+    expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining("Initializing indexing for typescript"));
+    expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining("Statistics:"));
     const oraInstance = vi.mocked(ora)("Starting");
     expect(oraInstance.succeed).toHaveBeenCalledWith(expect.stringContaining("Indexing completed successfully."));
   });
 
   it("shows verbose info message when verbose mode is enabled", async () => {
     // Arrange
-    vi.spyOn(console, "log").mockImplementation(() => {});
+    vi.spyOn(console, "error").mockImplementation(() => {});
     const command: CLICommand = {
       type: "parse",
       config: { sourcePath: "./src", language: "typescript", verbose: true },
@@ -119,7 +119,7 @@ describe("executeCLI", () => {
     // This test validates Req 18.3 — skipped file count is surfaced to the user.
     // The pipeline stub returns 0 skipped files; once the real pipeline is wired,
     // this test should be updated with a mock that returns skippedFiles > 0.
-    const consoleLogSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const command: CLICommand = {
       type: "parse",
       config: { sourcePath: "./src", language: "typescript", verbose: false },
@@ -128,7 +128,7 @@ describe("executeCLI", () => {
     await executeCLI(command);
 
     // With 0 skipped files the warning line should NOT appear
-    const calls = consoleLogSpy.mock.calls.map(c => String(c[0]));
+    const calls = consoleErrorSpy.mock.calls.map(c => String(c[0]));
     expect(calls.some(c => c.includes("Skipped files:"))).toBe(false);
   });
 
