@@ -48,12 +48,14 @@ export async function createPool(config: {
  * Initialize pgvector extension and create embeddings table with HNSW index.
  * Using 1536 dimensions (text-embedding-3-large reduced) to stay within
  * pgvector's 2000-dimension index limit.
- * Requirements: 17.1, 17.5
+ * Requirements: 17.1, 17.5, 2.6
  */
-export async function initVectorStore(pool: Pool): Promise<void> {
+export async function initVectorStore(pool: Pool, prefix: string): Promise<void> {
+  const table = `${prefix}embeddings`;
+  const index = `${prefix}embeddings_hnsw_idx`;
   await pool.query("CREATE EXTENSION IF NOT EXISTS vector");
   await pool.query(`
-    CREATE TABLE IF NOT EXISTS embeddings (
+    CREATE TABLE IF NOT EXISTS ${table} (
       symbol_id TEXT PRIMARY KEY,
       embedding vector(1536),
       metadata JSONB DEFAULT '{}'
@@ -61,7 +63,7 @@ export async function initVectorStore(pool: Pool): Promise<void> {
   `);
   // HNSW index for approximate nearest neighbor search (Req 17.5)
   await pool.query(`
-    CREATE INDEX IF NOT EXISTS embeddings_hnsw_idx
-    ON embeddings USING hnsw (embedding vector_cosine_ops)
+    CREATE INDEX IF NOT EXISTS ${index}
+    ON ${table} USING hnsw (embedding vector_cosine_ops)
   `);
 }

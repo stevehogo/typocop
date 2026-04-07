@@ -54,6 +54,13 @@ vi.mock("../vector/index-store.js", () => ({
   indexSymbol: vi.fn().mockResolvedValue(undefined),
 }));
 
+vi.mock("../config/index.js", () => ({
+  configurationManager: {
+    initialize: vi.fn().mockResolvedValue(undefined),
+    getPrefix: vi.fn().mockReturnValue("tpc_"),
+  },
+}));
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 import { clusterSymbols } from "./clustering/index.js";
@@ -391,9 +398,11 @@ describe("buildGraph — preservation (baseline must hold before and after fix)"
         expect(stepEdges).toHaveLength(process.steps.length);
 
         for (const step of process.steps) {
-          // Find the edge associated with this step's symbolId (source or target depending on fix state)
+          // Find the edge associated with this step's symbolId and order
           const edge = stepEdges.find(
-            (e) => e.source === step.symbolId || e.target === step.symbolId,
+            (e) =>
+              (e.source === step.symbolId || e.target === step.symbolId) &&
+              e.properties.order === String(step.order),
           );
           expect(edge).toBeDefined();
           expect(edge!.properties.order).toBe(String(step.order));
@@ -470,12 +479,14 @@ describe("Phase 6 — embedding generation and persistence", () => {
       "sym-1",
       STUB_EMBEDDING,
       undefined,
+      "tpc_",
     );
     expect(vi.mocked(indexSymbol)).toHaveBeenCalledWith(
       expect.anything(),
       "sym-2",
       STUB_EMBEDDING,
       undefined,
+      "tpc_",
     );
 
     delete process.env.OPENAI_API_KEY;

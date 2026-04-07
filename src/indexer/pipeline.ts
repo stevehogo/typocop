@@ -39,6 +39,7 @@ import { buildSearchIndex } from "./search/index.js";
 import { embedText } from "./search/embed.js";
 import { storeNodes, storeEdges } from "../graph/store.js";
 import { indexSymbol } from "../vector/index-store.js";
+import { configurationManager } from "../config/index.js";
 import type { GraphNode, GraphEdge } from "../graph/connection.js";
 
 /**
@@ -184,9 +185,10 @@ export async function runIndexingPipeline(config: PipelineConfig): Promise<Pipel
   if (verbose) console.log(`[pipeline] Phase 6 complete: search index built`);
 
   // Store embeddings in pgvector — DB errors propagate (Req 3.8)
+  const prefix = configurationManager.getPrefix();
   let embeddingCount = 0;
   for (const result of searchIndex.embeddings) {
-    await indexSymbol(vectorPool, result.symbolId, result.embedding, result.metadata);
+    await indexSymbol(vectorPool, result.symbolId, result.embedding, result.metadata, prefix);
     embeddingCount++;
   }
 
@@ -277,7 +279,7 @@ async function storeInDatabases(
   }));
 
   // Store all nodes
-  await storeNodes(graphSession, [...symbolNodes, ...clusterNodes, ...processNodes]);
+  await storeNodes(graphSession, [...symbolNodes, ...clusterNodes, ...processNodes], configurationManager.getPrefix());
 
   // Convert relationships to graph edges
   const relationshipEdges: GraphEdge[] = relationships.map((r) => ({
@@ -308,5 +310,5 @@ async function storeInDatabases(
   );
 
   // Store all edges
-  await storeEdges(graphSession, [...relationshipEdges, ...clusterEdges, ...processEdges]);
+  await storeEdges(graphSession, [...relationshipEdges, ...clusterEdges, ...processEdges], configurationManager.getPrefix());
 }

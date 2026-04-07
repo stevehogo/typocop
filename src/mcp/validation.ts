@@ -106,6 +106,25 @@ export function validateToolParams(
       }
       break;
 
+    case "smart_search":
+      if (!params.query || typeof params.query !== "string" || params.query.trim() === "") {
+        throw new MCPValidationError(
+          "smart_search requires a non-empty 'query' parameter",
+          "MISSING_PARAMETER",
+          { tool: toolName, missing: "query" },
+        );
+      }
+      if (params.maxResults !== undefined) {
+        if (typeof params.maxResults !== "number" || params.maxResults <= 0) {
+          throw new MCPValidationError(
+            "smart_search 'maxResults' must be a positive number",
+            "INVALID_PARAMETER_TYPE",
+            { tool: toolName, parameter: "maxResults", expected: "positive number" },
+          );
+        }
+      }
+      break;
+
     default:
       throw new MCPValidationError(
         `Unknown tool: ${toolName}`,

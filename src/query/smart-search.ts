@@ -1,11 +1,12 @@
 /**
  * Smart search query implementation.
- * Requirements: 11.1, 11.2, 11.3, 11.4, 11.5
+ * Requirements: 11.1, 11.2, 11.3, 11.4, 11.5, 22.3
  */
 import type { Pool } from "pg";
 import type { Session } from "neo4j-driver";
 import type { Symbol, Cluster, Process, SearchResult, Embedding } from "../types/index.js";
 import { semanticSearch } from "../vector/search.js";
+import { preprocessQuery } from "./preprocess.js";
 
 /**
  * Embedding generator function type for dependency injection.
@@ -112,13 +113,14 @@ async function fetchSymbols(
  * Execute smart search query.
  * 
  * Steps:
- * 1. Perform semantic search to find relevant symbols (Req 11.1)
- * 2. Group symbols by cluster (Req 11.2)
- * 3. Retrieve associated processes (Req 11.3)
- * 4. Order process steps sequentially (Req 11.4)
- * 5. Return clusters with symbols and execution flows (Req 11.5)
+ * 1. Preprocess query for consistency (Req 22.3)
+ * 2. Perform semantic search to find relevant symbols (Req 11.1)
+ * 3. Group symbols by cluster (Req 11.2)
+ * 4. Retrieve associated processes (Req 11.3)
+ * 5. Order process steps sequentially (Req 11.4)
+ * 6. Return clusters with symbols and execution flows (Req 11.5)
  * 
- * Requirements: 11.1, 11.2, 11.3, 11.4, 11.5
+ * Requirements: 11.1, 11.2, 11.3, 11.4, 11.5, 22.3
  */
 export async function executeSmartSearch(
   query: string,
@@ -126,17 +128,23 @@ export async function executeSmartSearch(
   vectorPool: Pool,
   graphSession: Session,
   embedFn: EmbedFunction,
+  prefix: string,
 ): Promise<{
   symbols: Symbol[];
   clusters: Cluster[];
   processes: Process[];
+  searchResults: SearchResult[];
 }> {
-  // Step 1: Semantic search (Req 11.1)
-  const embedding = await embedFn(query);
+  // Step 1: Preprocess query for consistency (Req 22.3)
+  const preprocessedQuery = preprocessQuery(query);
+
+  // Step 2: Semantic search (Req 11.1)
+  const embedding = await embedFn(preprocessedQuery);
   const searchResults: SearchResult[] = await semanticSearch(
     vectorPool,
     embedding,
     maxResults * 2, // Get more candidates for clustering
+    prefix,
   );
 
   const symbolIds = searchResults.map((r) => r.symbolId);
@@ -144,23 +152,24 @@ export async function executeSmartSearch(
   // Fetch full symbol details
   const symbols = await fetchSymbols(graphSession, symbolIds);
 
-  // Step 2: Group by cluster (Req 11.2)
+  // Step 3: Group by cluster (Req 11.2)
   const clusters = await fetchClustersForSymbols(graphSession, symbolIds);
 
-  // Step 3: Retrieve associated processes (Req 11.3)
+  // Step 4: Retrieve associated processes (Req 11.3)
   const processes = await fetchProcessesForSymbols(graphSession, symbolIds);
 
-  // Step 4: Order process steps sequentially (Req 11.4)
+  // Step 5: Order process steps sequentially (Req 11.4)
   // Steps are already ordered by the `order` field in the database
   const orderedProcesses = processes.map((p) => ({
     ...p,
     steps: [...p.steps].sort((a, b) => a.order - b.order),
   }));
 
-  // Step 5: Return results (Req 11.5)
+  // Step 6: Return results (Req 11.5)
   return {
     symbols: symbols.slice(0, maxResults),
     clusters,
     processes: orderedProcesses,
+    searchResults,
   };
 }

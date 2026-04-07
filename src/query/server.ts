@@ -96,7 +96,7 @@ export function createQueryServer(config: QueryServerConfig): FastifyInstance {
     try {
       const session = config.graphDriver.session();
       try {
-        const raw = await executeQuery(query, config.vectorPool, session);
+        const raw = await executeQuery(query, config.vectorPool, session, prefix);
         // Req 9.3: strip prefix from relationship types and node labels in response
         const result = stripPrefixFromResult(raw, prefix);
         return result;

@@ -18,7 +18,8 @@ import * as fc from "fast-check";
 import { parseQueryIntent } from "./parse-intent.js";
 import { executeQuery } from "./execute-query.js";
 import { formatResponse } from "./format-response.js";
-import type { Query, QueryResult } from "../types/index.js";
+import { calculateConfidence } from "./confidence.js";
+import type { Query, QueryResult, Symbol, Relationship, QueryIntent } from "../types/index.js";
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 
@@ -28,6 +29,11 @@ vi.mock("../vector/embed.js", () => ({
     vector: new Array(1536).fill(0),
     dimensions: 1536,
   })),
+}));
+
+// Mock semantic search to control scores in tests
+vi.mock("../vector/search.js", () => ({
+  semanticSearch: vi.fn(async () => []),
 }));
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -58,7 +64,7 @@ describe("executeQuery (Property 9: Result Limit)", () => {
           const pool = mockVectorPool();
           const session = mockGraphSession();
 
-          const result = await executeQuery(query, pool as never, session as never);
+          const result = await executeQuery(query, pool as never, session as never, "tpc_");
 
           return result.symbols.length <= maxResults;
         },
@@ -68,7 +74,7 @@ describe("executeQuery (Property 9: Result Limit)", () => {
 
   it("respects maxResults=1", async () => {
     const query: Query = { text: "find user functions", maxResults: 1 };
-    const result = await executeQuery(query, mockVectorPool() as never, mockGraphSession() as never);
+    const result = await executeQuery(query, mockVectorPool() as never, mockGraphSession() as never, "tpc_");
     expect(result.symbols.length).toBeLessThanOrEqual(1);
   });
 });
@@ -83,7 +89,7 @@ describe("executeQuery (Property 10: Confidence Bounds)", () => {
         const pool = mockVectorPool();
         const session = mockGraphSession();
 
-        const result = await executeQuery(query, pool as never, session as never);
+        const result = await executeQuery(query, pool as never, session as never, "tpc_");
 
         return result.confidence >= 0.0 && result.confidence <= 1.0;
       }),
@@ -102,6 +108,7 @@ describe("executeQuery (Property 10: Confidence Bounds)", () => {
         { text, maxResults: 10 },
         mockVectorPool() as never,
         mockGraphSession() as never,
+        "tpc_",
       );
       expect(result.confidence).toBeGreaterThanOrEqual(0.0);
       expect(result.confidence).toBeLessThanOrEqual(1.0);
@@ -113,25 +120,76 @@ describe("executeQuery (Property 10: Confidence Bounds)", () => {
 
 describe("executeQuery (Property 11: High Confidence Completeness)", () => {
   it("Property 11: confidence >= 0.90 implies at least one symbol returned", async () => {
-    // This property is hard to test with mocks since our stub returns empty results
-    // In a real implementation with DB, we'd verify:
-    // If confidence >= 0.90, then symbols.length >= 1
-    // For now, verify the inverse: if symbols.length === 0, confidence < 0.90
+    // Inverse: if symbols.length === 0, confidence must be < 0.90
     await fc.assert(
       fc.asyncProperty(fc.string({ minLength: 1 }), async (text) => {
         const query: Query = { text, maxResults: 10 };
         const pool = mockVectorPool();
         const session = mockGraphSession();
 
-        const result = await executeQuery(query, pool as never, session as never);
+        const result = await executeQuery(query, pool as never, session as never, "tpc_");
 
-        // Inverse: no symbols => confidence < 0.90
         if (result.symbols.length === 0) {
           return result.confidence < 0.90;
         }
         return true;
       }),
     );
+  });
+});
+
+// ─── calculateConfidence unit tests ──────────────────────────────────────────
+
+describe("calculateConfidence", () => {
+  const intent: QueryIntent = { type: "smartSearch", query: "test" };
+
+  const makeSymbol = (): Symbol => ({
+    id: "s1", name: "foo", kind: "function",
+    location: { filePath: "a.ts", startLine: 1, startColumn: 0, endLine: 5, endColumn: 0 },
+    visibility: "public", modifiers: [],
+  });
+
+  it("returns 0.5 when no symbols found", () => {
+    expect(calculateConfidence([], [], intent)).toBe(0.5);
+    expect(calculateConfidence([], [], intent, [{ score: 0.95 }])).toBe(0.5);
+  });
+
+  it("uses average similarity score when search results provided", () => {
+    const symbols = [makeSymbol()];
+    const score = calculateConfidence(symbols, [], intent, [
+      { score: 0.95 },
+      { score: 0.85 },
+    ]);
+    // avg = 0.90, no structural bonus → 0.90
+    expect(score).toBeCloseTo(0.90, 5);
+  });
+
+  it("adds structural bonus when relationships present", () => {
+    const symbols = [makeSymbol()];
+    const rel: Relationship = {
+      id: "r1", source: "s1", target: "s2", relType: "calls", metadata: {},
+    };
+    const score = calculateConfidence(symbols, [rel], intent, [{ score: 0.90 }]);
+    // 0.90 + 0.05 = 0.95
+    expect(score).toBeCloseTo(0.95, 5);
+  });
+
+  it("caps confidence at 1.0", () => {
+    const symbols = [makeSymbol()];
+    const rel: Relationship = {
+      id: "r1", source: "s1", target: "s2", relType: "calls", metadata: {},
+    };
+    const score = calculateConfidence(symbols, [rel], intent, [{ score: 0.99 }]);
+    expect(score).toBeLessThanOrEqual(1.0);
+  });
+
+  it("falls back to count-based heuristic without search results", () => {
+    const symbols = [makeSymbol()];
+    const rel: Relationship = {
+      id: "r1", source: "s1", target: "s2", relType: "calls", metadata: {},
+    };
+    expect(calculateConfidence(symbols, [rel], intent)).toBe(0.92);
+    expect(calculateConfidence(symbols, [], intent)).toBe(0.75);
   });
 });
 

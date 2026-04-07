@@ -1,5 +1,8 @@
 // Resource limits — enforced throughout the system (Req 23)
 
+/** Minimum cosine similarity score for semantic search results (Req 17.3) */
+export const SEMANTIC_SEARCH_THRESHOLD = 0.70;
+
 /** Maximum source file size in bytes before skipping during indexing (Req 23.1) */
 export const MAX_FILE_SIZE_BYTES = 512 * 1024; // 512 KB — matches two-phase scan threshold
 

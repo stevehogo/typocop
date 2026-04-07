@@ -2,7 +2,7 @@
  * Unit tests for smart-search-tool.ts
  * Covers: sanitizeQuery, executeSmartSearchTool (4.1–4.5)
  */
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { SearchResult } from "../types/index.js";
 import type { GraphNode } from "../graph/connection.js";
 
@@ -26,6 +26,7 @@ import { generateEmbedding } from "../vector/embed.js";
 import { semanticSearch } from "../vector/search.js";
 import { txFindNode, txFindDependents, txFindClustersBySymbol } from "../graph/query.js";
 import { sanitizeQuery, executeSmartSearchTool } from "./smart-search-tool.js";
+import { configurationManager } from "../config/index.js";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -64,14 +65,14 @@ function makeMockPool() {
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 describe("sanitizeQuery", () => {
-  it("removes semicolons, quotes, and backslashes", () => {
+  it("removes Cypher MATCH patterns with parentheses", () => {
     // 4.1
-    expect(sanitizeQuery(`hello; world' test" path\\`)).toBe("hello world test path");
+    expect(sanitizeQuery("Find auth MATCH (n) RETURN n")).toBe("Find auth RETURN n");
   });
 
-  it("removes Cypher keywords case-insensitively", () => {
+  it("removes Cypher CREATE patterns with parentheses", () => {
     // 4.1
-    expect(sanitizeQuery("MATCH users CREATE DELETE SET REMOVE")).toBe("users");
+    expect(sanitizeQuery("Show users CREATE (n:User) RETURN n")).not.toContain("CREATE");
   });
 
   it("trims leading and trailing whitespace", () => {
@@ -85,7 +86,9 @@ describe("sanitizeQuery", () => {
 });
 
 describe("executeSmartSearchTool", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
+    delete process.env["TYPOCOP_PREFIX"];
+    await configurationManager.initialize();
     vi.mocked(generateEmbedding).mockResolvedValue(FAKE_EMBEDDING);
     vi.mocked(txFindDependents).mockResolvedValue([]);
     vi.mocked(txFindClustersBySymbol).mockResolvedValue([]);

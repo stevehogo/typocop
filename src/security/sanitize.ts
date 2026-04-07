@@ -5,7 +5,7 @@
  * These patterns could be used for injection attacks against graph databases.
  */
 const MALICIOUS_PATTERNS = [
-  // Cypher injection patterns (Neo4j) - match full clauses
+  // Cypher injection patterns (Neo4j) - match full clauses with parentheses
   /MATCH\s*\([^)]*\)/gi,
   /CREATE\s*\([^)]*\)/gi,
   /DELETE\s+\w+/gi,

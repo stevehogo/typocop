@@ -64,7 +64,7 @@ async function executeIndexingPipeline(
   
   try {
     // Initialize vector store
-    await initVectorStore(pool);
+    await initVectorStore(pool, prefix);
     
     const session = driver.session();
     try {

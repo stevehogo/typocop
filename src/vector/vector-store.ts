@@ -4,6 +4,7 @@
  */
 import type { Pool } from "pg";
 import type { Embedding, SearchResult } from "../types/index.js";
+import { SEMANTIC_SEARCH_THRESHOLD } from "../utils/limits.js";
 
 type BaseTableName = "embeddings" | "metadata";
 
@@ -66,6 +67,7 @@ export class VectorStore {
 
   /**
    * Semantic similarity search using cosine distance.
+   * Only returns results with score >= SEMANTIC_SEARCH_THRESHOLD (0.70).
    * Requirements: 3.5
    */
   async semanticSearch(
@@ -80,9 +82,10 @@ export class VectorStore {
          1 - (embedding <=> $1::vector) AS score,
          metadata
        FROM ${table}
+       WHERE 1 - (embedding <=> $1::vector) >= $3
        ORDER BY embedding <=> $1::vector
        LIMIT $2`,
-      [JSON.stringify(queryEmbedding.vector), limit],
+      [JSON.stringify(queryEmbedding.vector), limit, SEMANTIC_SEARCH_THRESHOLD],
     );
 
     return result.rows.map((row) => ({

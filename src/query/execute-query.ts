@@ -9,26 +9,9 @@ import { QUERY_TIMEOUT_MS } from "../utils/limits.js";
 import { findNode } from "../graph/query.js";
 import { parseQueryIntent } from "./parse-intent.js";
 import { executeImpactAnalysis, calculateImpactRisk } from "./impact-analysis.js";
-
-/**
- * Calculate confidence score based on symbol resolution completeness.
- * Requirements: 9.4, 21.2
- */
-function calculateConfidence(
-  symbols: Symbol[],
-  relationships: Relationship[],
-  _intent: QueryIntent,
-): number {
-  if (symbols.length === 0) return 0.5;
-  
-  // High confidence if we have both symbols and relationships
-  if (symbols.length > 0 && relationships.length > 0) return 0.92;
-  
-  // Medium confidence if we have symbols but no relationships
-  if (symbols.length > 0) return 0.75;
-  
-  return 0.5;
-}
+import { preprocessQuery, isValidQuery } from "./preprocess.js";
+import { sanitizeQuery } from "../security/sanitize.js";
+import { calculateConfidence } from "./confidence.js";
 
 /**
  * Execute a query with timeout enforcement.
@@ -38,12 +21,13 @@ export async function executeQuery(
   query: Query,
   vectorPool: Pool,
   graphSession: Session,
+  prefix: string,
 ): Promise<QueryResult> {
   const timeoutPromise = new Promise<never>((_, reject) =>
     setTimeout(() => reject(new Error("Query timeout")), QUERY_TIMEOUT_MS),
   );
 
-  const resultPromise = executeQueryInternal(query, vectorPool, graphSession);
+  const resultPromise = executeQueryInternal(query, vectorPool, graphSession, prefix);
 
   return Promise.race([resultPromise, timeoutPromise]);
 }
@@ -52,8 +36,23 @@ async function executeQueryInternal(
   query: Query,
   vectorPool: Pool,
   graphSession: Session,
+  prefix: string,
 ): Promise<QueryResult> {
-  const { intent, confidence: intentConfidence } = parseQueryIntent(query.text);
+  // Preprocess and sanitize query text before intent parsing (Req 22.3)
+  if (!isValidQuery(query.text)) {
+    return {
+      intent: { type: "smartSearch", query: "" },
+      symbols: [],
+      relationships: [],
+      clusters: [],
+      processes: [],
+      confidence: 0.5,
+      riskLevel: "low",
+      affectedFlows: [],
+    };
+  }
+  const processedText = preprocessQuery(sanitizeQuery(query.text));
+  const { intent, confidence: intentConfidence } = parseQueryIntent(processedText);
 
   // Route to specific query handler based on intent
   if (intent.type === "impactAnalysis") {
@@ -70,8 +69,9 @@ async function executeQueryInternal(
       vectorPool,
       graphSession,
       generateEmbedding,
+      prefix,
     );
-    const confidence = result.symbols.length > 0 ? Math.max(0.90, intentConfidence) : 0.75;
+    const confidence = calculateConfidence(result.symbols, [], intent, result.searchResults);
     const riskLevel = calculateImpactRisk(result.symbols);
     const affectedFlows = result.processes.map((p) => p.name);
 

@@ -131,3 +131,42 @@ describe('containsMaliciousPatterns', () => {
     expect(containsMaliciousPatterns('javascript:void(0)')).toBe(true);
   });
 });
+
+/**
+ * Property 19: Input Sanitization
+ * For any string input, sanitizeQuery output must never contain malicious patterns.
+ * Validates: Req 22.3
+ */
+import { describe as describeProperty, it as itProperty } from 'vitest';
+import * as fc from 'fast-check';
+
+describeProperty('Property 19: Input Sanitization', () => {
+  itProperty('sanitized output never contains malicious patterns', () => {
+    fc.assert(
+      fc.property(fc.string(), (input) => {
+        const sanitized = sanitizeQuery(input);
+        // After sanitization, containsMaliciousPatterns must return false
+        return !containsMaliciousPatterns(sanitized);
+      }),
+      { numRuns: 100 },
+    );
+  });
+
+  itProperty('sanitizeQuery output is always a string', () => {
+    fc.assert(
+      fc.property(fc.string(), (input) => {
+        return typeof sanitizeQuery(input) === 'string';
+      }),
+      { numRuns: 100 },
+    );
+  });
+
+  itProperty('sanitizeQuery is idempotent — applying twice yields same result', () => {
+    fc.assert(
+      fc.property(fc.string(), (input) => {
+        return sanitizeQuery(sanitizeQuery(input)) === sanitizeQuery(input);
+      }),
+      { numRuns: 100 },
+    );
+  });
+});

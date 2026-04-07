@@ -9,3 +9,4 @@ export { executeImpactAnalysis, calculateImpactRisk } from "./impact-analysis.js
 export { executeContextRetrieval } from "./context-retrieval.js";
 export { executeDataFlowTrace } from "./data-flow-trace.js";
 export { createQueryServer, startQueryServer, type QueryServerConfig } from "./server.js";
+export { preprocessQuery, isValidQuery } from "./preprocess.js";

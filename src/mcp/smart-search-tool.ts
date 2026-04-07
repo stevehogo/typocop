@@ -10,21 +10,14 @@ import { generateEmbedding } from "../vector/embed.js";
 import { semanticSearch } from "../vector/search.js";
 import { txFindNode, txFindDependents, txFindClustersBySymbol } from "../graph/query.js";
 import { SessionManager } from "./session-manager.js";
+import { configurationManager } from "../config/index.js";
+import { sanitizeQuery as sanitizeQueryImpl } from "../security/sanitize.js";
+
+// Re-export for testing
+export { sanitizeQueryImpl as sanitizeQuery };
 
 const DEFAULT_MAX_RESULTS = 50;
 const MAX_RESULTS_CAP = 50;
-
-/**
- * Strip Cypher injection patterns from a query string.
- * Removes `;`, `'`, `"`, `\`, and Cypher keywords MATCH/CREATE/DELETE/SET/REMOVE.
- * Requirements: 1.3, 22.3
- */
-export function sanitizeQuery(query: string): string {
-  return query
-    .replace(/[;'"\\]/g, "")
-    .replace(/\b(MATCH|CREATE|DELETE|SET|REMOVE)\b/gi, "")
-    .trim();
-}
 
 /**
  * Compute confidence from resolved symbols and top cosine score.
@@ -77,9 +70,10 @@ export async function executeSmartSearchTool(
     MAX_RESULTS_CAP,
   );
 
-  const sanitized = sanitizeQuery(rawQuery);
+  const sanitized = sanitizeQueryImpl(rawQuery);
   const embedding = await generateEmbedding(sanitized);
-  const searchResults: SearchResult[] = await semanticSearch(vectorPool, embedding, maxResults);
+  const prefix = configurationManager.getPrefix();
+  const searchResults: SearchResult[] = await semanticSearch(vectorPool, embedding, maxResults, prefix);
 
   if (searchResults.length === 0) {
     return {
