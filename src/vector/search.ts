@@ -20,6 +20,11 @@ export async function semanticSearch(
   prefix: string,
 ): Promise<SearchResult[]> {
   const table = `${prefix}embeddings`;
+  
+  // Log to console for debugging (more reliable than file I/O)
+  const logMsg = `[semanticSearch] Querying table: ${table}, prefix: ${prefix}, limit: ${limit}, threshold: ${SEMANTIC_SEARCH_THRESHOLD}, embedding dims: ${queryEmbedding.vector.length}`;
+  console.error(logMsg);
+  
   const result = await pool.query(
     `SELECT
        symbol_id,
@@ -32,6 +37,9 @@ export async function semanticSearch(
     [JSON.stringify(queryEmbedding.vector), limit, SEMANTIC_SEARCH_THRESHOLD],
   );
 
+  const resultMsg = `[semanticSearch] Found ${result.rows.length} results from table ${table}`;
+  console.error(resultMsg);
+  
   return result.rows.map((row) => ({
     symbolId: row.symbol_id as string,
     score: parseFloat(row.score as string),

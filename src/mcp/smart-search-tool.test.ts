@@ -30,7 +30,7 @@ import { configurationManager } from "../config/index.js";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-const FAKE_EMBEDDING = new Array(1536).fill(0.1);
+const FAKE_EMBEDDING = { vector: new Array(1536).fill(0.1), dimensions: 1536 };
 
 function makeNode(id: string, name: string): GraphNode {
   return { id, labels: ["Symbol"], properties: { name, kind: "function", filePath: "a.ts", startLine: "1" } };

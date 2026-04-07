@@ -134,6 +134,7 @@ export interface MCPToolResponse {
     kind: SymbolKind;
     location: { filePath: string; startLine: number };
     relationship: string;
+    score?: number; // Semantic similarity score [0.0, 1.0]
   }>;
   clusters: Array<{
     id: string;

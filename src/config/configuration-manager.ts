@@ -37,7 +37,7 @@ export class ConfigurationManager implements IConfigurationManager {
         loadedAt: new Date(),
         source: "default",
       };
-      console.log(`[typocop] Using default prefix: ${DEFAULT_PREFIX}`);
+      console.error(`[typocop] Using default prefix: ${DEFAULT_PREFIX}`);
       return;
     }
 
@@ -56,7 +56,7 @@ export class ConfigurationManager implements IConfigurationManager {
       source: "environment",
     };
 
-    console.log(`[typocop] Using prefix from ${ENV_VAR}: ${normalized}`);
+    console.error(`[typocop] Using prefix from ${ENV_VAR}: ${normalized}`);
   }
 
   getPrefix(): string {

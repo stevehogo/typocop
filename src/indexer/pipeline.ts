@@ -22,7 +22,7 @@
  *   vectorPool: pool,
  * });
  * 
- * console.log(`Indexed ${result.symbols.length} symbols`);
+ * console.error(`Indexed ${result.symbols.length} symbols`);
  * ```
  * 
  * Requirements: 1.1, 1.6, 1.7, 3.1–3.8
@@ -108,7 +108,7 @@ export interface PipelineResult {
  *   vectorPool: pgPool,
  * });
  * 
- * console.log(`Found ${result.symbols.length} symbols in ${result.clusters.length} clusters`);
+ * console.error(`Found ${result.symbols.length} symbols in ${result.clusters.length} clusters`);
  * ```
  * 
  * Requirements: 3.1–3.8
@@ -116,11 +116,11 @@ export interface PipelineResult {
 export async function runIndexingPipeline(config: PipelineConfig): Promise<PipelineResult> {
   const { sourcePath, verbose, graphSession, vectorPool, aiClient } = config;
 
-  if (verbose) console.log("[pipeline] Starting Phase 1: Structure");
+  if (verbose) console.error("[pipeline] Starting Phase 1: Structure");
   
   // Phase 1: Walk file tree (Req 3.1)
   const fileNodes = await walkFileTree(sourcePath);
-  if (verbose) console.log(`[pipeline] Phase 1 complete: ${fileNodes.length} files found`);
+  if (verbose) console.error(`[pipeline] Phase 1 complete: ${fileNodes.length} files found`);
 
   if (fileNodes.length === 0) {
     return {
@@ -133,11 +133,11 @@ export async function runIndexingPipeline(config: PipelineConfig): Promise<Pipel
     };
   }
 
-  if (verbose) console.log("[pipeline] Starting Phase 2: Parsing");
+  if (verbose) console.error("[pipeline] Starting Phase 2: Parsing");
   
   // Phase 2: Extract symbols and relationship hints (Req 3.2)
   const { symbols, hints, skippedFiles } = await extractAllSymbols(fileNodes, sourcePath);
-  if (verbose) console.log(`[pipeline] Phase 2 complete: ${symbols.length} symbols extracted, ${hints.length} relationship hints`);
+  if (verbose) console.error(`[pipeline] Phase 2 complete: ${symbols.length} symbols extracted, ${hints.length} relationship hints`);
 
   if (symbols.length === 0) {
     return {
@@ -150,39 +150,39 @@ export async function runIndexingPipeline(config: PipelineConfig): Promise<Pipel
     };
   }
 
-  if (verbose) console.log("[pipeline] Starting Phase 3: Resolution");
+  if (verbose) console.error("[pipeline] Starting Phase 3: Resolution");
   
   // Phase 3: Resolve references (Req 3.3)
   const relationships = await resolveReferences(symbols, hints, sourcePath);
-  if (verbose) console.log(`[pipeline] Phase 3 complete: ${relationships.length} relationships resolved`);
+  if (verbose) console.error(`[pipeline] Phase 3 complete: ${relationships.length} relationships resolved`);
 
-  if (verbose) console.log("[pipeline] Starting Phase 4: Clustering");
+  if (verbose) console.error("[pipeline] Starting Phase 4: Clustering");
   
   // Phase 4: Cluster symbols (Req 3.4)
   const clusters = await clusterSymbols(symbols, relationships, aiClient);
-  if (verbose) console.log(`[pipeline] Phase 4 complete: ${clusters.length} clusters created`);
+  if (verbose) console.error(`[pipeline] Phase 4 complete: ${clusters.length} clusters created`);
 
-  if (verbose) console.log("[pipeline] Starting Phase 5: Processes");
+  if (verbose) console.error("[pipeline] Starting Phase 5: Processes");
   
   // Phase 5: Trace processes (Req 3.5)
   const processes = traceProcesses(symbols, relationships);
-  if (verbose) console.log(`[pipeline] Phase 5 complete: ${processes.length} processes traced`);
+  if (verbose) console.error(`[pipeline] Phase 5 complete: ${processes.length} processes traced`);
 
-  if (verbose) console.log("[pipeline] Starting Phase 6: Search indexing");
+  if (verbose) console.error("[pipeline] Starting Phase 6: Search indexing");
   
   // Phase 6: Build search index and generate embeddings (Req 3.6, 3.8)
   const apiKey = process.env.OPENAI_API_KEY;
   let embedFn: ((text: string) => Promise<import("../types/index.js").Embedding | null>) | null = null;
 
   if (!apiKey) {
-    console.log("[pipeline] OPENAI_API_KEY not set — skipping embedding generation");
+    console.error("[pipeline] OPENAI_API_KEY not set — skipping embedding generation");
   } else {
     const embeddingConfig = { apiKey, model: "text-embedding-3-large", dimensions: 1536 };
     embedFn = (text: string) => embedText(text, embeddingConfig);
   }
 
   const searchIndex = await buildSearchIndex(symbols, clusters, embedFn);
-  if (verbose) console.log(`[pipeline] Phase 6 complete: search index built`);
+  if (verbose) console.error(`[pipeline] Phase 6 complete: search index built`);
 
   // Store embeddings in pgvector — DB errors propagate (Req 3.8)
   const prefix = configurationManager.getPrefix();
@@ -193,9 +193,9 @@ export async function runIndexingPipeline(config: PipelineConfig): Promise<Pipel
   }
 
   // Store results in databases (Req 3.8)
-  if (verbose) console.log("[pipeline] Storing results in graph database and vector store");
+  if (verbose) console.error("[pipeline] Storing results in graph database and vector store");
   await storeInDatabases(symbols, relationships, clusters, processes, graphSession, vectorPool);
-  if (verbose) console.log("[pipeline] Storage complete");
+  if (verbose) console.error("[pipeline] Storage complete");
 
   return {
     symbols,

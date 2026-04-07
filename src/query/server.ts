@@ -133,7 +133,7 @@ export async function startQueryServer(config: QueryServerConfig): Promise<Fasti
   }
 
   const prefix = config.prefix ?? configurationManager.getPrefix();
-  console.log(`[query-server] Using prefix: ${prefix}`);
+  console.error(`[query-server] Using prefix: ${prefix}`);
 
   const server = createQueryServer({ ...config, prefix });
 
@@ -142,7 +142,7 @@ export async function startQueryServer(config: QueryServerConfig): Promise<Fasti
       port: config.port,
       host: config.host,
     });
-    console.log(`Query server listening on ${config.host}:${config.port}`);
+    console.error(`Query server listening on ${config.host}:${config.port}`);
     return server;
   } catch (err) {
     server.log.error(err);

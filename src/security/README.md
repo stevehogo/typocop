@@ -56,7 +56,7 @@ verifyEnrichmentPrompt(prompt, `cluster ${cluster.name}`);
 
 // Get privacy compliance status
 const compliance = getPrivacyCompliance();
-console.log(compliance.localProcessing); // true
+console.error(compliance.localProcessing); // true
 ```
 
 ## Privacy Guarantees
@@ -135,10 +135,10 @@ All external data policies are documented and queryable:
 import { EXTERNAL_DATA_POLICIES } from './security/index.js';
 
 for (const policy of EXTERNAL_DATA_POLICIES) {
-  console.log(`Service: ${policy.service}`);
-  console.log(`Purpose: ${policy.purpose}`);
-  console.log(`Data Types: ${policy.dataTypes}`);
-  console.log(`Excluded: ${policy.excludedData}`);
+  console.error(`Service: ${policy.service}`);
+  console.error(`Purpose: ${policy.purpose}`);
+  console.error(`Data Types: ${policy.dataTypes}`);
+  console.error(`Excluded: ${policy.excludedData}`);
 }
 ```
 

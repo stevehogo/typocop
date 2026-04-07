@@ -71,9 +71,16 @@ export async function executeSmartSearchTool(
   );
 
   const sanitized = sanitizeQueryImpl(rawQuery);
+  console.error(`[executeSmartSearchTool] Raw query: "${rawQuery}", Sanitized: "${sanitized}"`);
+  
   const embedding = await generateEmbedding(sanitized);
+  console.error(`[executeSmartSearchTool] Generated embedding with ${embedding.vector.length} dimensions`);
+  
   const prefix = configurationManager.getPrefix();
+  console.error(`[executeSmartSearchTool] Using prefix: "${prefix}"`);
+  
   const searchResults: SearchResult[] = await semanticSearch(vectorPool, embedding, maxResults, prefix);
+  console.error(`[executeSmartSearchTool] Semantic search returned ${searchResults.length} results`);
 
   if (searchResults.length === 0) {
     return {
@@ -118,6 +125,9 @@ export async function executeSmartSearchTool(
   const confidence = computeConfidence(resolved, topScore);
   const summary = buildSummary(rawQuery, resolved, clusters);
 
+  // Create a map of symbolId to score for quick lookup
+  const scoreMap = new Map(searchResults.map((r) => [r.symbolId, r.score]));
+
   return {
     symbols: resolved.map((n) => ({
       id: n.id,
@@ -128,6 +138,7 @@ export async function executeSmartSearchTool(
         startLine: parseInt(n.properties["startLine"] ?? "0", 10),
       },
       relationship: "semantic-match",
+      score: scoreMap.get(n.id) ?? 0,
     })),
     clusters: clusters.map((c) => ({
       id: c.id,

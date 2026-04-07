@@ -31,5 +31,5 @@ export function calculateConfidence(
 
   // Fallback: count-based heuristic for non-semantic query types
   if (relationships.length > 0) return 0.92;
-  return 0.75;
+  return 0.65;
 }

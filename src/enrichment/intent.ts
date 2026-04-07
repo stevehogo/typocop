@@ -40,7 +40,7 @@ const PATTERNS: Array<{
   },
 ];
 
-const FALLBACK_CONFIDENCE = 0.75;
+const FALLBACK_CONFIDENCE = 0.65;
 
 function extractTarget(text: string): string {
   // Grab the first quoted token or the last word-like token

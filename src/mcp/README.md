@@ -291,8 +291,8 @@ const response = await handleMCPRequest(
 );
 
 if ("result" in response) {
-  console.log(response.result.summary);
-  console.log(`Risk: ${response.result.riskLevel}`);
+  console.error(response.result.summary);
+  console.error(`Risk: ${response.result.riskLevel}`);
 } else {
   console.error(`Error: ${response.message}`);
 }

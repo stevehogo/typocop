@@ -54,7 +54,7 @@ async function executeIndexingPipeline(
   verbose: boolean
 ): Promise<IndexingStats> {
   const prefix = configurationManager.getPrefix();
-  console.log(chalk.dim(`[typocop] Effective prefix: ${prefix}`));
+  console.error(chalk.dim(`[typocop] Effective prefix: ${prefix}`));
 
   const config = getDatabaseConfig();
   
@@ -101,7 +101,7 @@ async function executeIndexingPipeline(
  */
 async function readGraphStatus(_dbPath?: string): Promise<GraphStatus> {
   const prefix = configurationManager.getPrefix();
-  console.log(chalk.dim(`[typocop] Effective prefix: ${prefix}`));
+  console.error(chalk.dim(`[typocop] Effective prefix: ${prefix}`));
 
   const config = getDatabaseConfig();
   const driver = await createDriver(config.neo4j.uri, config.neo4j.user, config.neo4j.password);
@@ -142,7 +142,7 @@ export async function executeCLI(command: CLICommand): Promise<void> {
   switch (command.type) {
     case "parse": {
       const { sourcePath, language, verbose } = command.config;
-      console.log(chalk.blue(`Initializing indexing for ${language} codebase at ${sourcePath}`));
+      console.error(chalk.blue(`Initializing indexing for ${language} codebase at ${sourcePath}`));
 
       const spinner = ora("Starting multi-phase indexing pipeline...").start();
 
@@ -154,15 +154,15 @@ export async function executeCLI(command: CLICommand): Promise<void> {
         const stats = await executeIndexingPipeline(sourcePath, language, verbose);
 
         spinner.succeed(chalk.green("Indexing completed successfully."));
-        console.log(chalk.bold("\nStatistics:"));
-        console.log(`  Symbols:       ${chalk.cyan(stats.symbolCount)}`);
-        console.log(`  Relationships: ${chalk.cyan(stats.relationshipCount)}`);
-        console.log(`  Clusters:      ${chalk.cyan(stats.clusterCount)}`);
-        console.log(`  Processes:     ${chalk.cyan(stats.processCount)}`);
-        console.log(`  Embeddings:    ${chalk.cyan(stats.embeddingCount)}`);
+        console.error(chalk.bold("\nStatistics:"));
+        console.error(`  Symbols:       ${chalk.cyan(stats.symbolCount)}`);
+        console.error(`  Relationships: ${chalk.cyan(stats.relationshipCount)}`);
+        console.error(`  Clusters:      ${chalk.cyan(stats.clusterCount)}`);
+        console.error(`  Processes:     ${chalk.cyan(stats.processCount)}`);
+        console.error(`  Embeddings:    ${chalk.cyan(stats.embeddingCount)}`);
 
         if (stats.skippedFiles > 0) {
-          console.log(chalk.yellow(`  Skipped files: ${stats.skippedFiles} (syntax errors or unreadable)`));
+          console.error(chalk.yellow(`  Skipped files: ${stats.skippedFiles} (syntax errors or unreadable)`));
         }
       } catch (err) {
         spinner.fail(chalk.red("Indexing failed."));
@@ -185,10 +185,10 @@ export async function executeCLI(command: CLICommand): Promise<void> {
 
     case "status": {
       const status = await readGraphStatus();
-      console.log(chalk.bold("Knowledge Graph Status:"));
-      console.log(`  Last Indexed:  ${chalk.cyan(status.lastIndexed ?? "never")}`);
-      console.log(`  Symbols:       ${chalk.cyan(status.symbolCount)}`);
-      console.log(`  Relationships: ${chalk.cyan(status.relationshipCount)}`);
+      console.error(chalk.bold("Knowledge Graph Status:"));
+      console.error(`  Last Indexed:  ${chalk.cyan(status.lastIndexed ?? "never")}`);
+      console.error(`  Symbols:       ${chalk.cyan(status.symbolCount)}`);
+      console.error(`  Relationships: ${chalk.cyan(status.relationshipCount)}`);
       break;
     }
   }

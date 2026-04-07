@@ -87,7 +87,7 @@ describe("PostgreSQL Bug Condition: Multi-Tenancy Table Collision", () => {
     expect(instance1InsertQueries).toHaveLength(1);
 
     const instance1TableName = extractTableName(instance1InsertQueries[0].sql);
-    console.log(`Instance 1 inserted into table: ${instance1TableName}`);
+    console.error(`Instance 1 inserted into table: ${instance1TableName}`);
 
     // ─── Step 2: Instance 2 indexes same symbol 'foo' with embedding2 ─────────
 
@@ -100,7 +100,7 @@ describe("PostgreSQL Bug Condition: Multi-Tenancy Table Collision", () => {
     expect(instance2InsertQueries).toHaveLength(1);
 
     const instance2TableName = extractTableName(instance2InsertQueries[0].sql);
-    console.log(`Instance 2 inserted into table: ${instance2TableName}`);
+    console.error(`Instance 2 inserted into table: ${instance2TableName}`);
 
     // ─── BUG CONDITION: Both instances write to the SAME unprefixed table ─────
 
@@ -109,13 +109,13 @@ describe("PostgreSQL Bug Condition: Multi-Tenancy Table Collision", () => {
     expect(instance2TableName).toBe(`${instance2Prefix}embeddings`);
     expect(instance1TableName).not.toBe(instance2TableName);
 
-    console.log(
+    console.error(
       `\n✅ FIX VERIFIED: Instances now write to prefixed tables`,
     );
-    console.log(
+    console.error(
       `   Instance 1 (${instance1Prefix}) writes to: ${instance1TableName}`,
     );
-    console.log(
+    console.error(
       `   Instance 2 (${instance2Prefix}) writes to: ${instance2TableName}`,
     );
 
@@ -141,16 +141,16 @@ describe("PostgreSQL Bug Condition: Multi-Tenancy Table Collision", () => {
     expect(searchResults[0].symbolId).toBe(symbolId);
 
     // The score should be based on embedding1 (instance 1's data)
-    console.log(
+    console.error(
       `\n✅ FIX VERIFIED: Instance 1 retrieved ONLY its own embedding`,
     );
-    console.log(
+    console.error(
       `   Instance 1 indexed embedding with vector[0] = 0.1 (embedding1)`,
     );
-    console.log(
+    console.error(
       `   Instance 2 indexed embedding with vector[0] = 0.9 (embedding2)`,
     );
-    console.log(
+    console.error(
       `   Instance 1 retrieved embedding with vector[0] = 0.1 (embedding1) ← CORRECT!`,
     );
 
@@ -163,22 +163,22 @@ describe("PostgreSQL Bug Condition: Multi-Tenancy Table Collision", () => {
     const searchTableName = extractTableName(searchQueries[0].sql);
     expect(searchTableName).toBe(`${instance1Prefix}embeddings`);
 
-    console.log(
+    console.error(
       `\n📋 FIX CONFIRMED:`,
     );
-    console.log(
+    console.error(
       `   - Instance 1 (${instance1Prefix}) writes to and reads from '${instance1TableName}' table`,
     );
-    console.log(
+    console.error(
       `   - Instance 2 (${instance2Prefix}) writes to and reads from '${instance2TableName}' table`,
     );
-    console.log(
+    console.error(
       `   - Symbol '${symbolId}' is isolated per instance`,
     );
-    console.log(
+    console.error(
       `   - Instance 1 retrieves only its own embedding`,
     );
-    console.log(
+    console.error(
       `   - Multi-tenancy isolation is now enforced (Requirements 2.4, 2.5, 2.6)`,
     );
   });
@@ -195,11 +195,11 @@ describe("PostgreSQL Bug Condition: Multi-Tenancy Table Collision", () => {
     const fixedInstance1Table = `${instance1Prefix}${unprefixedTableName}`;
     const fixedInstance2Table = `${instance2Prefix}${unprefixedTableName}`;
 
-    console.log("\n📋 FIX VERIFICATION:");
-    console.log(`\nFixed behavior (after implementing prefix support):`);
-    console.log(`  Instance 1 table: ${fixedInstance1Table}`);
-    console.log(`  Instance 2 table: ${fixedInstance2Table}`);
-    console.log(`  → Each uses its own prefixed table → ISOLATED`);
+    console.error("\n📋 FIX VERIFICATION:");
+    console.error(`\nFixed behavior (after implementing prefix support):`);
+    console.error(`  Instance 1 table: ${fixedInstance1Table}`);
+    console.error(`  Instance 2 table: ${fixedInstance2Table}`);
+    console.error(`  → Each uses its own prefixed table → ISOLATED`);
 
     // Verify the fix works
     expect(fixedInstance1Table).not.toBe(fixedInstance2Table);

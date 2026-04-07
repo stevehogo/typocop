@@ -61,7 +61,7 @@ async function main(): Promise<void> {
 
   // Req 17.1: Log effective prefix at startup (ConfigurationManager already logs it,
   // but surface it here so CLI users see it in the same output stream as other CLI logs)
-  console.log(`[typocop] Effective prefix: ${configurationManager.getPrefix()}`);
+  console.error(`[typocop] Effective prefix: ${configurationManager.getPrefix()}`);
 
   let command;
   try {

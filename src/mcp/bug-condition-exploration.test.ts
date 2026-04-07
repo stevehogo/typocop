@@ -211,7 +211,7 @@ describe("Bug Condition Exploration — fixed tools.ts with SessionManager", () 
 
       // Document the counterexample
       if (isBugConditionConcurrent(peak)) {
-        console.log(
+        console.error(
           `[BUG CONFIRMED] Case A counterexample: peakConcurrentOpen=${peak} ` +
           `(expected <= 1). Two sessions were open simultaneously.`,
         );
@@ -283,7 +283,7 @@ describe("Bug Condition Exploration — fixed tools.ts with SessionManager", () 
       const openCountAfterDisconnect = sessionManager.openCount();
 
       if (isBugConditionZombie(openCountAfterDisconnect)) {
-        console.log(
+        console.error(
           `[BUG CONFIRMED] Case B counterexample: openCountOnDisconnect=${openCountAfterDisconnect} ` +
           `(expected 0). Session is still open after simulated disconnect — zombie transaction.`,
         );

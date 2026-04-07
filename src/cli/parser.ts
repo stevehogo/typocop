@@ -64,7 +64,7 @@ export function parseArgs(rawArgs: string[]): CLICommand {
             `Could not auto-detect language in '${options.path}'. Use --lang to specify one explicitly.`
           );
         }
-        console.log(`Auto-detected language: ${detected}`);
+        console.error(`Auto-detected language: ${detected}`);
         lang = detected;
       }
 

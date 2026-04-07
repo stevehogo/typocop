@@ -17,7 +17,7 @@ const EMBEDDING_DIMENSIONS = 1536;
 
 /**
  * Formats a symbol into a text string suitable for embedding.
- * Uses name, kind, signature, and documentation.
+ * Includes name, kind, signature, documentation, file context, and semantic tags.
  * 
  * PRIVACY: Only symbol metadata is included, never full source code.
  * Requirements: 22.2
@@ -26,6 +26,20 @@ export function formatSymbolForEmbedding(symbol: Symbol): string {
   const parts: string[] = [
     `${symbol.kind}: ${symbol.name}`,
   ];
+  
+  // Add file and module context
+  if (symbol.location?.filePath) {
+    const filePath = symbol.location.filePath;
+    parts.push(`file: ${filePath}`);
+    
+    // Extract module/folder context from path
+    const pathParts = filePath.split('/');
+    if (pathParts.length > 1) {
+      const module = pathParts.slice(0, -1).join('/');
+      parts.push(`module: ${module}`);
+    }
+  }
+  
   if (symbol.signature) {
     parts.push(`signature: ${symbol.signature}`);
   }
@@ -47,6 +61,7 @@ export function formatSymbolForEmbedding(symbol: Symbol): string {
 
 /**
  * Formats a cluster and its resolved symbols into a text string for embedding.
+ * Includes cluster metadata, symbol details, and semantic relationships.
  * 
  * PRIVACY: Only cluster metadata and symbol names/kinds are included.
  * Requirements: 22.2
@@ -57,9 +72,37 @@ export function formatClusterForEmbedding(cluster: Cluster, symbols: Symbol[]): 
     `category: ${cluster.category}`,
     `confidence: ${cluster.confidence.toFixed(2)}`,
   ];
+  
   if (symbols.length > 0) {
-    const symbolNames = symbols.map(s => `${s.kind} ${s.name}`).join(", ");
-    parts.push(`symbols: ${symbolNames}`);
+    // Include detailed symbol information
+    const symbolDetails = symbols
+      .map(s => {
+        const details = [`${s.kind} ${s.name}`];
+        if (s.location?.filePath) {
+          const module = s.location.filePath.split('/').slice(0, -1).join('/');
+          details.push(`(${module})`);
+        }
+        return details.join(' ');
+      })
+      .join(", ");
+    parts.push(`symbols: ${symbolDetails}`);
+    
+    // Extract semantic tags from symbol names and kinds
+    const semanticTags = new Set<string>();
+    symbols.forEach(s => {
+      // Extract keywords from symbol names
+      const nameWords = s.name.toLowerCase().split(/[_-]/);
+      nameWords.forEach(word => {
+        if (word.length > 3) semanticTags.add(word);
+      });
+      
+      // Add kind as semantic tag
+      semanticTags.add(s.kind);
+    });
+    
+    if (semanticTags.size > 0) {
+      parts.push(`tags: ${Array.from(semanticTags).join(", ")}`);
+    }
   }
   
   const formatted = parts.join("\n");
