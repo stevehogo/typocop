@@ -77,6 +77,8 @@ rm -f "$ACTIVE_SPEC_FILE"
 NEW_NAME="$SPEC_PATH (done)"
 if [[ ! -d "$NEW_NAME" ]]; then
   mv "$SPEC_PATH" "$NEW_NAME"
+  rm -f ".kiro/specs/.active-spec"
+  rm -rf "$SPEC_PATH"
 fi
 
 # Append to tasks-completed.md

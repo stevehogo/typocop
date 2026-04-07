@@ -22,7 +22,8 @@ fi
 # Step 2: parse the written file path from stdin (tool input JSON)
 # The hook passes tool input as JSON on stdin.
 # fsWrite/strReplace tools have a "path" field; smartRelocate has "destinationPath".
-STDIN_DATA=$(cat)
+# Use a short timeout so we don't block if stdin has no data.
+STDIN_DATA=$(timeout 2 cat 2>/dev/null || true)
 
 FILE_PATH=$(echo "$STDIN_DATA" | python3 -c "
 import sys, json

@@ -1,31 +1,58 @@
 #!/usr/bin/env bash
 # track-active-spec.sh
-# Called when a tasks.md or tasks-*.md file is edited.
-# Finds the spec folder and writes it to .kiro/specs/.active-spec if any task is in-progress.
+# Called on preTaskExecution event.
+# Extracts the spec folder from the task file path provided via stdin JSON,
+# then writes it to .kiro/specs/.active-spec for other hooks to use.
 
-set -euo pipefail
+# Read stdin with a short timeout — preTaskExecution passes task context as JSON
+STDIN_DATA=$(timeout 2 cat 2>/dev/null || true)
 
-EDITED_FILE="$1"
+spec_path=""
 
-if [[ ! -f "$EDITED_FILE" ]]; then
-  exit 0
+# Try to extract taskFilePath from the JSON payload
+if [[ -n "$STDIN_DATA" ]]; then
+  spec_path=$(echo "$STDIN_DATA" | python3 -c "
+import sys, json, os
+try:
+    data = json.load(sys.stdin)
+    # preTaskExecution provides taskFilePath (e.g. .kiro/specs/my-spec/tasks.md)
+    task_file = data.get('taskFilePath') or data.get('specPath') or ''
+    if task_file:
+        # Return the directory containing the tasks file
+        print(os.path.dirname(task_file))
+except Exception:
+    pass
+" 2>/dev/null || true)
 fi
 
-# Extract spec folder from the file path
-# Expected: .kiro/specs/{spec-name}/tasks.md or .kiro/specs/{spec-name}/tasks-*.md
-if [[ "$EDITED_FILE" =~ ^\.kiro/specs/([^/]+)/tasks(-[^/]+)?\.md$ ]]; then
-  SPEC_NAME="${BASH_REMATCH[1]}"
-  SPEC_PATH=".kiro/specs/$SPEC_NAME"
-  SPEC_DIR="$SPEC_PATH"
-else
-  exit 0
+# Fallback: scan for the spec with the most recently changed in-progress task
+if [[ -z "$spec_path" ]]; then
+  # Find the tasks.md most recently modified that has an in-progress [-] task
+  while IFS= read -r -d '' tasks_file; do
+    if grep -qE '^\s*-\s*\[-\]' "$tasks_file" 2>/dev/null; then
+      spec_path="${tasks_file%/tasks*}"
+      break
+    fi
+  done < <(find .kiro/specs -maxdepth 2 -name "tasks*.md" -print0 2>/dev/null \
+    | xargs -0 ls -t 2>/dev/null \
+    | tr '\n' '\0' \
+    | head -z -n 20)
 fi
 
-# Check if any task is in-progress (marked with [-]) across ALL task files
-# Look in tasks.md and any tasks-*.md files in the same folder
-if find "$SPEC_DIR" -maxdepth 1 -name "tasks*.md" -type f -exec grep -l "^\s*-\s*\[-\]" {} \; | grep -q .; then
-  echo "$SPEC_PATH" > ".kiro/specs/.active-spec"
+# Fallback: queued [~] tasks
+if [[ -z "$spec_path" ]]; then
+  while IFS= read -r -d '' tasks_file; do
+    if grep -qE '^\s*-\s*\[~\]' "$tasks_file" 2>/dev/null; then
+      spec_path="${tasks_file%/tasks*}"
+      break
+    fi
+  done < <(find .kiro/specs -maxdepth 2 -name "tasks*.md" -print0 2>/dev/null)
+fi
+
+if [[ -n "$spec_path" ]]; then
+  echo "$spec_path" > ".kiro/specs/.active-spec"
 else
-  # No in-progress tasks, clear the active spec
   rm -f ".kiro/specs/.active-spec"
 fi
+
+exit 0

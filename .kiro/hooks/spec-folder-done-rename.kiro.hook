@@ -1,5 +1,4 @@
 {
-  "enabled": true,
   "name": "Mark Spec as Done",
   "description": "After each task completes, checks if all required tasks in the spec's tasks.md are done. If so, renames the spec folder to append \" (done)\" so completed specs are visually distinct.",
   "version": "1",
@@ -8,6 +7,9 @@
   },
   "then": {
     "type": "runCommand",
-    "command": "bash .kiro/scripts/check-spec-completion.sh"
-  }
+    "command": "bash .kiro/scripts/check-spec-completion.sh",
+    "timeout": 60
+  },
+  "workspaceFolderName": "typocop",
+  "shortName": "spec-folder-done-rename"
 }

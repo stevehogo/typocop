@@ -1,14 +1,18 @@
 {
-  "enabled": true,
   "name": "Track Files Written During Spec Task",
   "description": "After each file write tool use, records the written file path into the active spec's files-touched.md manifest. This avoids full src/ scans when checking for TODOs at spec completion.",
   "version": "1",
   "when": {
     "type": "postToolUse",
-    "toolTypes": ["write"]
+    "toolTypes": [
+      "write"
+    ]
   },
   "then": {
     "type": "runCommand",
-    "command": "bash .kiro/scripts/track-touched-file.sh"
-  }
+    "command": "bash .kiro/scripts/track-touched-file.sh",
+    "timeout": 60
+  },
+  "workspaceFolderName": "typocop",
+  "shortName": "spec-task-files-tracker"
 }
