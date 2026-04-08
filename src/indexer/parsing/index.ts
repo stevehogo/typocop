@@ -59,7 +59,7 @@ function deduplicateById(symbols: Symbol[]): Symbol[] {
  * Phase 2 pipeline entry point.
  * Returns symbols and raw relationship hints extracted from all files.
  *
- * @param fileNodes - Files to process (paths relative to rootPath)
+ * @param fileNodes - Files to process (paths relative to parent of rootPath)
  * @param rootPath  - Root used to resolve paths for I/O (defaults to CWD)
  *
  * Requirements: 3.2, 4.1, 4.2
@@ -72,6 +72,10 @@ export async function extractAllSymbols(
   const allHints: RawRelationshipHint[] = [];
   const parsers = new Map<Language, Parser>();
   let skippedFiles = 0;
+  
+  // Resolve root path and get parent directory (same logic as walkFileTree)
+  const normalizedRoot = path.resolve(rootPath);
+  const rootParent = path.dirname(normalizedRoot);
 
   for (const fileNode of fileNodes) {
     let parser = parsers.get(fileNode.language);
@@ -89,7 +93,7 @@ export async function extractAllSymbols(
       }
     }
 
-    const fullPath = path.resolve(rootPath, fileNode.path);
+    const fullPath = path.join(rootParent, fileNode.path);
 
     let ast: ASTNode;
     try {
@@ -102,14 +106,14 @@ export async function extractAllSymbols(
       continue;
     }
 
-    const result = extractSymbolsWithQueries(ast, fullPath, fileNode.language, parser);
+    const result = extractSymbolsWithQueries(ast, fileNode.path, fileNode.language, parser);
 
     if (result.symbols.length > 0) {
       allSymbols.push(...result.symbols);
       allHints.push(...result.hints);
     } else {
       // Fallback: structural heuristic extraction with deterministic IDs
-      const fallback = extractSymbols(ast, fullPath).map((sym) => ({
+      const fallback = extractSymbols(ast, fileNode.path).map((sym) => ({
         ...sym,
         id: generateSymbolId(
           sym.location.filePath,

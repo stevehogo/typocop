@@ -81,6 +81,13 @@ export const walkFileTree = async (
   onProgress?: WalkProgressCallback
 ): Promise<FileNode[]> => {
   const relativePaths: string[] = [];
+  
+  // Normalize and resolve the root path
+  const normalizedRoot = path.resolve(rootPath);
+  // Get the base name of the root path (e.g., "src" from "./src" or "/home/user/project/src")
+  const rootBaseName = path.basename(normalizedRoot);
+  // Get the parent directory (used for making paths relative)
+  const rootParent = path.dirname(normalizedRoot);
 
   // Recursive directory scan — collect relative paths only.
   // Symlinks are implicitly skipped: isDirectory() and isFile() both return
@@ -96,7 +103,8 @@ export const walkFileTree = async (
 
     for (const entry of entries) {
       const fullPath = path.join(dir, entry.name);
-      const relativePath = path.relative(rootPath, fullPath).replace(/\\/g, "/");
+      // Make path relative to parent, so it includes the root directory name
+      const relativePath = path.relative(rootParent, fullPath).replace(/\\/g, "/");
 
       if (shouldIgnorePath(relativePath)) continue;
 
@@ -109,7 +117,7 @@ export const walkFileTree = async (
     }
   };
 
-  await collect(rootPath);
+  await collect(normalizedRoot);
 
   const total = relativePaths.length;
   const fileNodes: FileNode[] = [];
@@ -123,7 +131,7 @@ export const walkFileTree = async (
         const language = detectLanguageFromPath(relativePath);
         if (!language) return { node: null, relativePath };
 
-        const fullPath = path.join(rootPath, relativePath);
+        const fullPath = path.join(rootParent, relativePath);
         const stat = await fs.stat(fullPath);
         if (stat.size > MAX_FILE_SIZE) return { node: "large" as const, relativePath };
 
@@ -166,12 +174,16 @@ export const readFileContents = async (
   relativePaths: string[]
 ): Promise<Map<string, string>> => {
   const contents = new Map<string, string>();
+  
+  // Resolve root path and get parent directory
+  const normalizedRoot = path.resolve(rootPath);
+  const rootParent = path.dirname(normalizedRoot);
 
   for (let i = 0; i < relativePaths.length; i += READ_CONCURRENCY) {
     const batch = relativePaths.slice(i, i + READ_CONCURRENCY);
     const results = await Promise.allSettled(
       batch.map(async (relativePath) => {
-        const fullPath = path.join(rootPath, relativePath);
+        const fullPath = path.join(rootParent, relativePath);
         const content = await fs.readFile(fullPath, "utf-8");
         return { path: relativePath, content };
       })
