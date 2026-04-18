@@ -7,6 +7,14 @@ import { createDriver } from "../graph/connection.js";
 import { createPool, initVectorStore } from "../vector/connection.js";
 import { runIndexingPipeline, type PipelineConfig } from "../indexer/pipeline.js";
 import { configurationManager } from "../config/index.js";
+import { clearGraphData } from "../graph/store.js";
+import { clearVectorData } from "../vector/index-store.js";
+
+export interface ClearingStats {
+  nodesDeleted: number;
+  relationshipsDeleted: number;
+  embeddingsDeleted: number;
+}
 
 export interface IndexingStats {
   symbolCount: number;
@@ -15,6 +23,7 @@ export interface IndexingStats {
   processCount: number;
   skippedFiles: number;
   embeddingCount: number;
+  clearingStats?: ClearingStats;
 }
 
 export interface GraphStatus {
@@ -46,12 +55,13 @@ function getDatabaseConfig() {
 
 /**
  * Execute the indexing pipeline with database connections.
- * Requirements: 1.1, 3.1–3.8, 7.2, 7.4
+ * Requirements: 1.1, 3.1–3.8, 7.2, 7.4, 5.1–5.6
  */
-async function executeIndexingPipeline(
+export async function executeIndexingPipeline(
   sourcePath: string,
   language: string,
-  verbose: boolean
+  verbose: boolean,
+  refresh?: boolean
 ): Promise<IndexingStats> {
   const prefix = configurationManager.getPrefix();
   console.error(chalk.dim(`[typocop] Effective prefix: ${prefix}`));
@@ -68,6 +78,31 @@ async function executeIndexingPipeline(
     
     const session = driver.session();
     try {
+      let clearingStats: ClearingStats | undefined;
+      
+      // Clear existing data if refresh is requested (before Phase 1)
+      if (refresh) {
+        if (verbose) {
+          console.error(chalk.yellow("[typocop] Refresh flag enabled: clearing existing graph and vector data..."));
+        }
+        
+        const graphStats = await clearGraphData(session, prefix);
+        const embeddingCount = await clearVectorData(pool, prefix);
+        
+        clearingStats = {
+          nodesDeleted: graphStats.nodesDeleted,
+          relationshipsDeleted: graphStats.relationshipsDeleted,
+          embeddingsDeleted: embeddingCount,
+        };
+        
+        if (verbose) {
+          console.error(chalk.green("[typocop] Clearing completed successfully."));
+          console.error(chalk.dim(`  Nodes deleted:         ${clearingStats.nodesDeleted}`));
+          console.error(chalk.dim(`  Relationships deleted: ${clearingStats.relationshipsDeleted}`));
+          console.error(chalk.dim(`  Embeddings deleted:    ${clearingStats.embeddingsDeleted}`));
+        }
+      }
+      
       const pipelineConfig: PipelineConfig = {
         sourcePath,
         language: language as any,
@@ -85,6 +120,7 @@ async function executeIndexingPipeline(
         processCount: result.processes.length,
         skippedFiles: result.skippedFiles,
         embeddingCount: result.embeddingCount,
+        clearingStats,
       };
     } finally {
       await session.close();
@@ -141,20 +177,37 @@ async function readGraphStatus(_dbPath?: string): Promise<GraphStatus> {
 export async function executeCLI(command: CLICommand): Promise<void> {
   switch (command.type) {
     case "parse": {
-      const { sourcePath, language, verbose } = command.config;
+      const { sourcePath, language, verbose, refresh } = command.config;
       console.error(chalk.blue(`Initializing indexing for ${language} codebase at ${sourcePath}`));
 
-      const spinner = ora("Starting multi-phase indexing pipeline...").start();
+      // Determine initial spinner message based on refresh flag
+      const initialMessage = refresh
+        ? "Clearing existing data and starting multi-phase indexing pipeline..."
+        : "Starting multi-phase indexing pipeline...";
+      
+      const spinner = ora(initialMessage).start();
 
       try {
         if (verbose) {
           spinner.info("Verbose mode enabled.");
+          if (refresh) {
+            console.error(chalk.yellow("[typocop] Refresh flag enabled: clearing existing graph and vector data..."));
+          }
         }
 
-        const stats = await executeIndexingPipeline(sourcePath, language, verbose);
+        const stats = await executeIndexingPipeline(sourcePath, language, verbose, refresh);
 
         spinner.succeed(chalk.green("Indexing completed successfully."));
-        console.error(chalk.bold("\nStatistics:"));
+        
+        // Display clearing statistics if refresh was performed
+        if (refresh && stats.clearingStats) {
+          console.error(chalk.bold("\nClearing Statistics:"));
+          console.error(`  Nodes deleted:         ${chalk.yellow(stats.clearingStats.nodesDeleted)}`);
+          console.error(`  Relationships deleted: ${chalk.yellow(stats.clearingStats.relationshipsDeleted)}`);
+          console.error(`  Embeddings deleted:    ${chalk.yellow(stats.clearingStats.embeddingsDeleted)}`);
+        }
+        
+        console.error(chalk.bold("\nIndexing Statistics:"));
         console.error(`  Symbols:       ${chalk.cyan(stats.symbolCount)}`);
         console.error(`  Relationships: ${chalk.cyan(stats.relationshipCount)}`);
         console.error(`  Clusters:      ${chalk.cyan(stats.clusterCount)}`);

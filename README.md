@@ -99,7 +99,7 @@ TYPOCOP_PREFIX=myapp_
 
 ```bash
 # General command structure
-node dist/cli/index.js parse --path <source_path> --lang <language> [--verbose]
+node dist/cli/index.js parse --path <source_path> --lang <language> [--verbose] [--refresh]
 
 # Example: TypeScript Project
 node dist/cli/index.js parse --path ./src --lang typescript --verbose
@@ -110,6 +110,44 @@ node dist/cli/index.js parse --path ./app/code --lang php --verbose
 # Example: Python Project
 node dist/cli/index.js parse --path ./src --lang python --verbose
 ```
+
+#### Refresh Flag: Complete Rebuild
+
+The `--refresh` flag (short form: `-r`) clears all existing graph and embeddings data before reindexing. This is useful when you need a clean slate.
+
+**Use cases:**
+- **Schema changes**: After modifying your codebase structure significantly
+- **Bug fixes**: When you suspect stale or corrupted data in the graph
+- **Fresh start**: Starting a new analysis from scratch
+- **Prefix migration**: When switching to a different database prefix
+
+**Examples:**
+
+```bash
+# Full refresh with verbose output
+node dist/cli/index.js parse --path ./src --lang typescript --refresh --verbose
+
+# Short form
+node dist/cli/index.js parse --path ./src --lang typescript -r
+
+# Refresh without verbose output
+node dist/cli/index.js parse --path ./src --lang typescript --refresh
+```
+
+**What happens during refresh:**
+
+1. All Neo4j nodes and relationships for the current prefix are deleted
+2. All pgvector embeddings for the current prefix are deleted
+3. The indexing pipeline runs normally (Phases 1-6)
+4. Graph and embeddings are rebuilt from scratch
+
+**Important notes:**
+
+- The `--refresh` flag is **optional** and defaults to `false`
+- Only data for the configured prefix is cleared (other prefixes are preserved)
+- Clearing happens **before** indexing begins
+- The operation is **atomic** from the user's perspective
+- Clearing is **idempotent** — safe to run multiple times
 
 ### Supported Languages
 

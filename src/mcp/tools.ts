@@ -15,7 +15,7 @@ import { executeSmartSearchTool } from "./smart-search-tool.js";
 /**
  * Default maximum results for queries.
  */
-const DEFAULT_MAX_RESULTS = 50;
+const DEFAULT_MAX_RESULTS = 100;
 
 /**
  * Partial QueryResult without intent field.

@@ -93,7 +93,7 @@ describe("walkFileTree", () => {
     const result = await walkFileTree("/repo");
 
     expect(result).toHaveLength(1);
-    expect(result[0].path).toBe("repo/src/index.ts");
+    expect(result[0].path).toBe("src/index.ts");
     expect(fs.readdir).not.toHaveBeenCalledWith(
       path.join("/repo", "node_modules"),
       expect.anything()
@@ -112,7 +112,7 @@ describe("walkFileTree", () => {
     const result = await walkFileTree("/repo");
 
     expect(result).toHaveLength(1);
-    expect(result[0]).toEqual({ path: "repo/app.ts", size: 2048, language: "typescript" });
+    expect(result[0]).toEqual({ path: "app.ts", size: 2048, language: "typescript" });
   });
 
   it("skips files with unrecognised extensions", async () => {
@@ -152,7 +152,7 @@ describe("walkFileTree", () => {
     const result = await walkFileTree("/repo");
 
     expect(result).toHaveLength(1);
-    expect(result[0].path).toBe("repo/small.ts");
+    expect(result[0].path).toBe("small.ts");
   });
 
   it("handles readdir errors gracefully by skipping the directory", async () => {
@@ -174,7 +174,7 @@ describe("walkFileTree", () => {
     const result = await walkFileTree("/repo");
 
     expect(result).toHaveLength(1);
-    expect(result[0].path).toBe("repo/good/index.ts");
+    expect(result[0].path).toBe("good/index.ts");
     expect(warnSpy).toHaveBeenCalled();
     warnSpy.mockRestore();
   });
@@ -340,13 +340,13 @@ describe("Property: readFileContents isolation — result contains only successf
         fc.array(fc.boolean(), { minLength: 1, maxLength: 10 }),
         async (names, shouldFail) => {
           vi.clearAllMocks();
-          // Paths now include the root directory name
-          const paths = names.map((n, i) => `repo/${n}${i}.ts`);
+          // Paths are relative to the root directory
+          const paths = names.map((n, i) => `${n}${i}.ts`);
           const failSet = new Set(paths.filter((_, i) => shouldFail[i] ?? false));
 
           vi.mocked(fs.readFile).mockImplementation(async (p) => {
-            // Paths are now relative to parent of /repo (which is /)
-            const rel = path.relative("/", String(p));
+            // Paths are now relative to /repo itself
+            const rel = path.relative("/repo", String(p));
             if (failSet.has(rel)) throw new Error("ENOENT");
             return "content";
           });

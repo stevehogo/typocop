@@ -16,8 +16,8 @@ import { sanitizeQuery as sanitizeQueryImpl } from "../security/sanitize.js";
 // Re-export for testing
 export { sanitizeQueryImpl as sanitizeQuery };
 
-const DEFAULT_MAX_RESULTS = 50;
-const MAX_RESULTS_CAP = 50;
+const DEFAULT_MAX_RESULTS = 100;
+const MAX_RESULTS_CAP = 200;
 
 /**
  * Compute confidence from resolved symbols and top cosine score.

@@ -26,3 +26,34 @@ export async function indexSymbol(
     [symbolId, JSON.stringify(embedding.vector), JSON.stringify(metadata)],
   );
 }
+
+/**
+ * Clear all embeddings for a given prefix from pgvector table.
+ * Deletes all rows where symbol_id starts with the prefix.
+ * Idempotent: safe to call multiple times.
+ * Requirements: 3.7, 17.5
+ */
+export async function clearVectorData(pool: Pool, prefix: string): Promise<number> {
+  const client = await pool.connect();
+  try {
+    // Delete all embeddings for the prefix
+    const result = await client.query(
+      `DELETE FROM ${prefix}embeddings`
+    );
+
+    const deleteCount = result.rowCount ?? 0;
+
+    // Log deletion count
+    console.error(`[clearVectorData] Deleted ${deleteCount} embeddings with prefix "${prefix}"`);
+    
+    return deleteCount;
+  } catch (err) {
+    // Handle errors gracefully and propagate
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`[clearVectorData] Error clearing vector data for prefix "${prefix}": ${message}`);
+    throw err;
+  } finally {
+    // Properly release database connection
+    client.release();
+  }
+}

@@ -22,11 +22,10 @@ describe("walkFileTree integration — ignore filtering", () => {
       // Act
       const result = await walkFileTree(tmpDir);
 
-      // Assert: only src/index.ts survives filtering (now includes tmpDir basename)
+      // Assert: only src/index.ts survives filtering
       const paths = result.map((f) => f.path);
       expect(paths.length).toBe(1);
-      expect(paths[0]).toMatch(/\/src\/index\.ts$/); // Ends with /src/index.ts
-      expect(paths[0]).toContain("src/index.ts");
+      expect(paths[0]).toBe("src/index.ts");
     } finally {
       await rm(tmpDir, { recursive: true, force: true });
     }

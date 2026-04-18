@@ -59,7 +59,7 @@ function deduplicateById(symbols: Symbol[]): Symbol[] {
  * Phase 2 pipeline entry point.
  * Returns symbols and raw relationship hints extracted from all files.
  *
- * @param fileNodes - Files to process (paths relative to parent of rootPath)
+ * @param fileNodes - Files to process (paths relative to rootPath)
  * @param rootPath  - Root used to resolve paths for I/O (defaults to CWD)
  *
  * Requirements: 3.2, 4.1, 4.2
@@ -73,9 +73,8 @@ export async function extractAllSymbols(
   const parsers = new Map<Language, Parser>();
   let skippedFiles = 0;
   
-  // Resolve root path and get parent directory (same logic as walkFileTree)
+  // Resolve root path (same logic as walkFileTree)
   const normalizedRoot = path.resolve(rootPath);
-  const rootParent = path.dirname(normalizedRoot);
 
   for (const fileNode of fileNodes) {
     let parser = parsers.get(fileNode.language);
@@ -93,7 +92,7 @@ export async function extractAllSymbols(
       }
     }
 
-    const fullPath = path.join(rootParent, fileNode.path);
+    const fullPath = path.join(normalizedRoot, fileNode.path);
 
     let ast: ASTNode;
     try {

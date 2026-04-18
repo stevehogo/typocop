@@ -22,6 +22,7 @@ describe("parseArgs", () => {
         language: "typescript",
         outputPath: undefined,
         verbose: true,
+        refresh: false,
       },
     });
   });
@@ -40,6 +41,7 @@ describe("parseArgs", () => {
         language: "python",
         outputPath: undefined,
         verbose: false,
+        refresh: false,
       },
     });
   });
@@ -80,5 +82,80 @@ describe("parseArgs", () => {
     const command = parseArgs(args);
 
     expect(command).toEqual({ type: "status" });
+  });
+
+  it("parses the parse command with --refresh flag", () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    const args = ["node", "typocop", "parse", "-p", "./src", "-l", "typescript", "--refresh"];
+    const command = parseArgs(args);
+
+    expect(command).toEqual({
+      type: "parse",
+      config: {
+        sourcePath: "./src",
+        language: "typescript",
+        outputPath: undefined,
+        verbose: false,
+        refresh: true,
+      },
+    });
+  });
+
+  it("parses the parse command with -r short form", () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    const args = ["node", "typocop", "parse", "-p", "./src", "-l", "typescript", "-r"];
+    const command = parseArgs(args);
+
+    expect(command).toEqual({
+      type: "parse",
+      config: {
+        sourcePath: "./src",
+        language: "typescript",
+        outputPath: undefined,
+        verbose: false,
+        refresh: true,
+      },
+    });
+  });
+
+  it("defaults refresh to false when flag is omitted", () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    const args = ["node", "typocop", "parse", "-p", "./src", "-l", "typescript"];
+    const command = parseArgs(args);
+
+    expect(command).toEqual({
+      type: "parse",
+      config: {
+        sourcePath: "./src",
+        language: "typescript",
+        outputPath: undefined,
+        verbose: false,
+        refresh: false,
+      },
+    });
+  });
+
+  it("help text includes refresh option", () => {
+    // Capture stdout to verify help text
+    let helpOutput = "";
+    const originalWrite = process.stdout.write;
+    vi.spyOn(process.stdout, "write").mockImplementation((chunk) => {
+      helpOutput += chunk.toString();
+      return true;
+    });
+
+    try {
+      const args = ["node", "typocop", "parse", "--help"];
+      parseArgs(args);
+    } catch (error) {
+      // --help causes the program to exit, which is expected
+    }
+
+    process.stdout.write = originalWrite;
+
+    // Verify help text contains refresh option
+    expect(helpOutput).toContain("--refresh");
+    expect(helpOutput).toContain("-r");
+    expect(helpOutput).toContain("Clear and rebuild all graph and embeddings data");
   });
 });

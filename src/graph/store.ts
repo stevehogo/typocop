@@ -68,3 +68,50 @@ export async function storeEdges(session: Session, edges: GraphEdge[], prefix: s
     }
   }
 }
+
+/**
+ * Clear all graph data for a given prefix.
+ * Deletes all relationships first (to avoid foreign key constraint issues),
+ * then deletes all nodes with prefixed labels.
+ * Idempotent: safe to call multiple times.
+ * Requirements: 3.7, 16.3
+ */
+export async function clearGraphData(session: Session, prefix: string): Promise<{ nodesDeleted: number; relationshipsDeleted: number }> {
+  try {
+    // Step 1: Delete all relationships with prefixed types
+    const relResult = await session.executeWrite((tx) =>
+      tx.run(
+        `MATCH ()-[r]->()
+         WHERE type(r) STARTS WITH $prefix
+         DELETE r
+         RETURN count(r) AS count`,
+        { prefix },
+      )
+    );
+
+    const relCount = relResult.records[0]?.get("count") ?? 0;
+
+    // Step 2: Delete all nodes with prefixed labels
+    const nodeResult = await session.executeWrite((tx) =>
+      tx.run(
+        `MATCH (n)
+         WHERE any(label IN labels(n) WHERE label STARTS WITH $prefix)
+         DETACH DELETE n
+         RETURN count(n) AS count`,
+        { prefix },
+      )
+    );
+
+    const nodeCount = nodeResult.records[0]?.get("count") ?? 0;
+
+    // Step 3: Log deletion counts
+    console.error(`[clearGraphData] Deleted ${relCount} relationships and ${nodeCount} nodes with prefix "${prefix}"`);
+    
+    return { nodesDeleted: nodeCount, relationshipsDeleted: relCount };
+  } catch (err) {
+    // Handle errors gracefully and propagate
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`[clearGraphData] Error clearing graph data for prefix "${prefix}": ${message}`);
+    throw err;
+  }
+}

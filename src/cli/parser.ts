@@ -8,6 +8,13 @@ export interface CLIConfig {
   language: Language;
   outputPath?: string;
   verbose: boolean;
+  /**
+   * When true, clears all existing Neo4j graph data and pgvector embeddings
+   * for the configured prefix before starting the indexing pipeline.
+   * This enables a complete rebuild of the knowledge graph and embeddings.
+   * Defaults to false for incremental/update behavior.
+   */
+  refresh?: boolean;
 }
 
 export type CLICommand =
@@ -44,6 +51,7 @@ export function parseArgs(rawArgs: string[]): CLICommand {
     .option("-l, --lang <language>", "Programming language (auto-detected if omitted)")
     .option("-o, --out <path>", "Output database path")
     .option("-v, --verbose", "Enable verbose logging", false)
+    .option("-r, --refresh", "Clear and rebuild all graph and embeddings data", false)
     .action((options) => {
       if (!fs.existsSync(options.path)) {
         throw new CLIValidationError(`Source path does not exist: ${options.path}`);
@@ -74,7 +82,8 @@ export function parseArgs(rawArgs: string[]): CLICommand {
           sourcePath: options.path,
           language: lang,
           outputPath: options.out,
-          verbose: options.verbose
+          verbose: options.verbose,
+          refresh: options.refresh
         }
       };
     });
