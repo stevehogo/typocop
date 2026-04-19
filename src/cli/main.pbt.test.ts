@@ -154,7 +154,7 @@ describe("Property-based tests: CLI and MCP entry points", () => {
     const { parseArgs: realParseArgs } =
       await vi.importActual<typeof import("./index.js")>("./index.js");
 
-    const validCommands = ["parse", "reindex", "status"];
+    const validCommands = ["parse", "reindex", "status", "obsidian"];
     const unknownCmd = fc
       .string({ minLength: 1 })
       .filter(

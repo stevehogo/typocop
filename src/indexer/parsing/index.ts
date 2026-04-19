@@ -73,8 +73,12 @@ export async function extractAllSymbols(
   const parsers = new Map<Language, Parser>();
   let skippedFiles = 0;
   
-  // Resolve root path (same logic as walkFileTree)
+  // Compute the same relativeBase as walkFileTree so paths resolve correctly
   const normalizedRoot = path.resolve(rootPath);
+  const cwd = process.cwd();
+  const relativeBase = normalizedRoot.startsWith(cwd + path.sep) || normalizedRoot === cwd
+    ? cwd
+    : normalizedRoot;
 
   for (const fileNode of fileNodes) {
     let parser = parsers.get(fileNode.language);
@@ -92,7 +96,7 @@ export async function extractAllSymbols(
       }
     }
 
-    const fullPath = path.join(normalizedRoot, fileNode.path);
+    const fullPath = path.resolve(relativeBase, fileNode.path);
 
     let ast: ASTNode;
     try {

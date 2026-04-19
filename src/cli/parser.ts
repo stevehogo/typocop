@@ -17,10 +17,16 @@ export interface CLIConfig {
   refresh?: boolean;
 }
 
+export interface ObsidianExportConfig {
+  readonly outputPath: string;
+  readonly verbose: boolean;
+}
+
 export type CLICommand =
   | { type: "parse"; config: CLIConfig }
   | { type: "reindex"; dbPath: string }
-  | { type: "status" };
+  | { type: "status" }
+  | { type: "obsidian"; config: ObsidianExportConfig };
 
 const supportedLanguages: Language[] = [
   "php", "typescript", "javascript", "python", "java",
@@ -108,6 +114,21 @@ export function parseArgs(rawArgs: string[]): CLICommand {
     .action(() => {
       parsedCommand = {
         type: "status"
+      };
+    });
+
+  program
+    .command("obsidian")
+    .description("Export the knowledge graph as an Obsidian-compatible markdown vault")
+    .option("-o, --out <path>", "Output directory for the vault", "./.typocop-obsidian")
+    .option("-v, --verbose", "Enable verbose logging", false)
+    .action((options) => {
+      parsedCommand = {
+        type: "obsidian",
+        config: {
+          outputPath: options.out,
+          verbose: options.verbose,
+        },
       };
     });
 

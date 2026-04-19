@@ -63,6 +63,7 @@ describe("detectLanguageFromPath", () => {
 describe("walkFileTree", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.spyOn(process, "cwd").mockReturnValue("/repo");
   });
 
   it("returns empty array for empty directory", async () => {
@@ -206,6 +207,7 @@ describe("walkFileTree", () => {
 describe("readFileContents", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.spyOn(process, "cwd").mockReturnValue("/repo");
   });
 
   it("returns a Map with file contents keyed by relative path", async () => {
@@ -243,7 +245,10 @@ describe("readFileContents", () => {
 // ─── Task 2: Symlink safety ───────────────────────────────────────────────────
 
 describe("walkFileTree: symlink skipping", () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.spyOn(process, "cwd").mockReturnValue("/repo");
+  });
 
   it("skips symlink dirents — isFile() and isDirectory() both return false", async () => {
     const symlinkDirent = {
@@ -269,7 +274,10 @@ describe("walkFileTree: symlink skipping", () => {
 // ─── Task 1: onProgress callback ─────────────────────────────────────────────
 
 describe("walkFileTree: onProgress callback", () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.spyOn(process, "cwd").mockReturnValue("/repo");
+  });
 
   it("invokes callback with monotonically increasing scanned, final scanned === total", async () => {
     vi.mocked(fs.readdir).mockImplementation(async (dir) => {
@@ -313,6 +321,7 @@ describe("Property: size gate — no FileNode has size > MAX_FILE_SIZE", () => {
         fc.array(fc.integer({ min: 1, max: MAX_FILE_SIZE * 2 }), { minLength: 1, maxLength: 10 }),
         async (sizes) => {
           vi.clearAllMocks();
+          vi.spyOn(process, "cwd").mockReturnValue("/repo");
           const names = sizes.map((_, i) => `file${i}.ts`);
           vi.mocked(fs.readdir).mockImplementation(async (dir) => {
             if (dir === "/repo") return names.map((n) => makeDirent(n, false)) as never;
@@ -340,12 +349,12 @@ describe("Property: readFileContents isolation — result contains only successf
         fc.array(fc.boolean(), { minLength: 1, maxLength: 10 }),
         async (names, shouldFail) => {
           vi.clearAllMocks();
-          // Paths are relative to the root directory
+          vi.spyOn(process, "cwd").mockReturnValue("/repo");
+          // Paths are relative to cwd
           const paths = names.map((n, i) => `${n}${i}.ts`);
           const failSet = new Set(paths.filter((_, i) => shouldFail[i] ?? false));
 
           vi.mocked(fs.readFile).mockImplementation(async (p) => {
-            // Paths are now relative to /repo itself
             const rel = path.relative("/repo", String(p));
             if (failSet.has(rel)) throw new Error("ENOENT");
             return "content";

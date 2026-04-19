@@ -84,6 +84,14 @@ export const walkFileTree = async (
   
   // Normalize and resolve the root path
   const normalizedRoot = path.resolve(rootPath);
+  // Use cwd as the base for relative paths when the root is within cwd.
+  // This ensures `parse -p ./src` produces `src/file.ts` not just `file.ts`.
+  // When root is outside cwd (e.g. absolute path to another directory),
+  // fall back to making paths relative to the root itself.
+  const cwd = process.cwd();
+  const relativeBase = normalizedRoot.startsWith(cwd + path.sep) || normalizedRoot === cwd
+    ? cwd
+    : normalizedRoot;
 
   // Recursive directory scan — collect relative paths only.
   // Symlinks are implicitly skipped: isDirectory() and isFile() both return
@@ -99,8 +107,8 @@ export const walkFileTree = async (
 
     for (const entry of entries) {
       const fullPath = path.join(dir, entry.name);
-      // Make path relative to the root directory itself
-      const relativePath = path.relative(normalizedRoot, fullPath).replace(/\\/g, "/");
+      // Make path relative to relativeBase
+      const relativePath = path.relative(relativeBase, fullPath).replace(/\\/g, "/");
 
       if (shouldIgnorePath(relativePath)) continue;
 
@@ -127,7 +135,7 @@ export const walkFileTree = async (
         const language = detectLanguageFromPath(relativePath);
         if (!language) return { node: null, relativePath };
 
-        const fullPath = path.join(normalizedRoot, relativePath);
+        const fullPath = path.resolve(relativeBase, relativePath);
         const stat = await fs.stat(fullPath);
         if (stat.size > MAX_FILE_SIZE) return { node: "large" as const, relativePath };
 
@@ -171,14 +179,18 @@ export const readFileContents = async (
 ): Promise<Map<string, string>> => {
   const contents = new Map<string, string>();
   
-  // Resolve root path
+  // Compute the same relativeBase as walkFileTree so paths resolve correctly
   const normalizedRoot = path.resolve(rootPath);
+  const cwd = process.cwd();
+  const relativeBase = normalizedRoot.startsWith(cwd + path.sep) || normalizedRoot === cwd
+    ? cwd
+    : normalizedRoot;
 
   for (let i = 0; i < relativePaths.length; i += READ_CONCURRENCY) {
     const batch = relativePaths.slice(i, i + READ_CONCURRENCY);
     const results = await Promise.allSettled(
       batch.map(async (relativePath) => {
-        const fullPath = path.join(normalizedRoot, relativePath);
+        const fullPath = path.resolve(relativeBase, relativePath);
         const content = await fs.readFile(fullPath, "utf-8");
         return { path: relativePath, content };
       })

@@ -1,5 +1,3 @@
-import type { Driver, Session } from "neo4j-driver";
-import type { Pool } from "pg";
 import { CLICommand } from "./parser.js";
 import chalk from "chalk";
 import ora from "ora";
@@ -9,6 +7,7 @@ import { runIndexingPipeline, type PipelineConfig } from "../indexer/pipeline.js
 import { configurationManager } from "../config/index.js";
 import { clearGraphData } from "../graph/store.js";
 import { clearVectorData } from "../vector/index-store.js";
+import { executeObsidianExport } from "../obsidian-export/index.js";
 
 export interface ClearingStats {
   nodesDeleted: number;
@@ -242,6 +241,31 @@ export async function executeCLI(command: CLICommand): Promise<void> {
       console.error(`  Last Indexed:  ${chalk.cyan(status.lastIndexed ?? "never")}`);
       console.error(`  Symbols:       ${chalk.cyan(status.symbolCount)}`);
       console.error(`  Relationships: ${chalk.cyan(status.relationshipCount)}`);
+      break;
+    }
+
+    case "obsidian": {
+      const { outputPath, verbose } = command.config;
+      console.error(chalk.blue(`Exporting knowledge graph to Obsidian vault at ${outputPath}`));
+
+      const spinner = ora("Exporting graph to Obsidian vault...").start();
+
+      try {
+        if (verbose) {
+          spinner.info("Verbose mode enabled.");
+        }
+
+        const result = await executeObsidianExport(command.config);
+
+        spinner.succeed(chalk.green("Obsidian vault export completed."));
+        console.error(chalk.bold("\nExport Statistics:"));
+        console.error(`  Files written:       ${chalk.cyan(result.filesWritten)}`);
+        console.error(`  Directories created: ${chalk.cyan(result.directoriesCreated)}`);
+        console.error(`  Total bytes:         ${chalk.cyan(result.totalBytes)}`);
+      } catch (err) {
+        spinner.fail(chalk.red("Obsidian export failed."));
+        throw err;
+      }
       break;
     }
   }
