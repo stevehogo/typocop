@@ -119,7 +119,7 @@ All properties below must have passing tests before implementation is considered
 - All tests should follow the AAA pattern (Arrange-Act-Assert)
 - Test one function per `describe` block
 - Cover happy path, error path, and edge cases
-- Use `vi.mock` for external dependencies (Neo4j, pgvector, OpenAI)
+- Use `vi.mock` for external dependencies (LadybugDB, Ollama)
 - Never make real network calls in unit tests
 
 ```typescript
@@ -134,7 +134,7 @@ describe("resolveImport", () => {
 
 ## Integration Test Guidelines
 
-Integration tests use real in-process instances where possible, or Docker-based Neo4j/Postgres for DB tests.
+Integration tests use real in-process instances where possible, or embedded LadybugDB for DB tests.
 
 Required integration test scenarios (task 28.4):
 - Full indexing pipeline on sample TypeScript, PHP, and JavaScript projects

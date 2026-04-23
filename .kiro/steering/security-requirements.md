@@ -11,20 +11,15 @@ Security rules specific to the Code Graph Analyzer project (derived from Require
 
 ### 1. Never Send Full Source Code to External APIs (Req 22.2)
 
-Only send symbol signatures to OpenAI for embeddings and enrichment — never full source code.
+Only send symbol signatures to embedding services for embeddings and enrichment — never full source code.
 
 ```typescript
 // Good — only signature
 const signature = `function ${symbol.name}(${params}): ${returnType}`;
-const embedding = await openai.embeddings.create({
-  model: "text-embedding-3-large",
-  input: signature,
-});
+const embedding = await embeddingAdapter.embedText(signature);
 
 // Bad — full source code
-const embedding = await openai.embeddings.create({
-  input: fileContent,  // NEVER do this
-});
+const embedding = await embeddingAdapter.embedText(fileContent);  // NEVER do this
 ```
 
 ### 2. Sanitize All Query Inputs (Req 22.3)
@@ -120,15 +115,14 @@ Never hardcode secrets — use environment variables:
 
 ```typescript
 // Good
-const neo4jPassword = process.env.NEO4J_PASSWORD;
-const openaiKey = process.env.OPENAI_API_KEY;
+const ollamaUrl = process.env.OLLAMA_URL;
 
-if (!neo4jPassword || !openaiKey) {
+if (!ollamaUrl) {
   throw new Error("Missing required environment variables");
 }
 
 // Bad
-const neo4jPassword = "password123";  // NEVER do this
+const dbPassword = "password123";  // NEVER do this
 ```
 
 ## Dependency Security
@@ -158,11 +152,11 @@ Store database credentials in environment variables, never in code:
 
 ```bash
 # .env (never commit this file)
-NEO4J_URI=bolt://localhost:8687
-NEO4J_USER=neo4j
-NEO4J_PASSWORD=your-secure-password
-POSTGRES_URI=postgresql://localhost:5432/typocop
-OPENAI_API_KEY=sk-...
+TYPOCOP_PREFIX=tpc_
+OLLAMA_ENABLED=true
+OLLAMA_URL=http://localhost:11434
+OLLAMA_MODEL=mxbai-embed-large
+OLLAMA_DIMENSIONS=1024
 MCP_AUTH_TOKEN=your-secure-token
 ```
 
@@ -172,12 +166,12 @@ Never log sensitive information:
 
 ```typescript
 // Good
-logger.info("Connected to Neo4j", { uri: neo4jUri });
+logger.info("Connected to LadybugDB", { dbPath });
 
 // Bad
-logger.info("Connected to Neo4j", { 
-  uri: neo4jUri, 
-  password: neo4jPassword  // NEVER log passwords
+logger.info("Connected to LadybugDB", { 
+  dbPath, 
+  password: dbPassword  // NEVER log passwords
 });
 ```
 
@@ -216,7 +210,7 @@ catch (error) {
 
 // Bad
 catch (error) {
-  throw new Error(`Failed to connect to ${neo4jUri} with user ${neo4jUser}`);
+  throw new Error(`Failed to connect to database at ${dbPath}`);
   // Leaks connection details
 }
 ```

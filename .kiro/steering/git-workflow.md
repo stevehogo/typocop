@@ -35,8 +35,8 @@ Use component names as scopes:
 
 - `parser`: Tree-sitter parsing
 - `indexer`: Indexing pipeline phases
-- `graph`: Neo4j graph database
-- `vector`: pgvector semantic search
+- `graph`: LadybugDB graph database
+- `vector`: LadybugDB vector search
 - `query`: Query execution
 - `mcp`: MCP server
 - `cli`: CLI commands
@@ -71,7 +71,7 @@ Validates that all query results have confidence in [0.0, 1.0].
 
 docs(readme): update installation instructions
 
-Add Docker Compose setup for Neo4j and PostgreSQL.
+Add LadybugDB setup instructions.
 
 ---
 
@@ -135,7 +135,7 @@ chore(deps): update tree-sitter to v0.21.0
 - Environment files (`.env`, `.env.local`)
 - IDE settings (`.vscode/`, `.idea/`)
 - Log files (`*.log`)
-- Database files (`*.db`, `neo4j/`)
+- Database files (`*.db`, `*.ladybug`)
 - Temporary files (`*.tmp`, `*~`)
 
 ## .gitignore
@@ -158,7 +158,7 @@ build/
 .env.*.local
 
 # Databases
-neo4j/
+*.ladybug
 *.db
 *.sqlite
 

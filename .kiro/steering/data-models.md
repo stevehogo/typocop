@@ -184,8 +184,8 @@ interface FrameworkSupport {
 
 ```typescript
 interface Embedding {
-  readonly vector: number[];    // exactly 1536 elements
-  readonly dimensions: number;  // always 1536
+  readonly vector: number[];    // length === dimensions
+  readonly dimensions: number;  // variable: depends on embedding model (e.g. 1024 for mxbai-embed-large)
 }
 
 interface SearchResult {
@@ -195,4 +195,4 @@ interface SearchResult {
 }
 ```
 
-**Invariants**: `vector.length === 1536`, `dimensions === 1536`, search results ordered by descending `score`.
+**Invariants**: `vector.length === dimensions`, `dimensions` depends on embedding model (e.g. 1024 for mxbai-embed-large), search results ordered by descending `score`.

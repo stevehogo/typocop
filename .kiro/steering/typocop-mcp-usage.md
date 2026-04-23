@@ -67,8 +67,6 @@ When executing any spec task:
 
 ## Connection Details
 
-The server connects to:
-- Neo4j at `bolt://localhost:8687`
-- PostgreSQL at `localhost:8432` (database: `typocop`)
+The server connects to an embedded LadybugDB (Kùzu) database stored locally. The default path is `~/.typocop/{prefix}/db.ladybug`.
 
-If a tool call fails with a connection error, the databases may not be running. Check before assuming the codebase has no graph data.
+If a tool call fails with a connection error, the database file may not exist yet (run the indexer first).

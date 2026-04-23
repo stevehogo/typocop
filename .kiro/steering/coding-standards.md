@@ -48,8 +48,7 @@ src/
     processes/  # Phase 5: trace execution flows from entry points
     search/     # Phase 6: build hybrid vector + keyword indexes
     index.ts    # re-exports all phases
-  graph/        # Neo4j graph database interface
-  vector/       # pgvector semantic search interface
+  db/           # LadybugDB database adapters (graph, vector, embedding)
   enrichment/   # AI Context Enrichment component
   query/        # Query server, intent classification, query execution
   mcp/          # MCP server and tool registration

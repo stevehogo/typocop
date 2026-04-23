@@ -34,7 +34,7 @@ Map task content to skills using these guidelines:
 | NestJS controllers, guards, interceptors, pipes | `nestjs-expert` |
 | Laravel controllers, Eloquent, service providers | `laravel-expert` |
 | PHP generators, SPL, modern OOP | `php-pro` |
-| PostgreSQL schema, indexes, constraints | `postgresql` |
+| LadybugDB schema, indexes, constraints | `postgresql` |
 | Slow queries, query plans, index optimization | `sql-optimization-patterns` |
 | Vector databases, embeddings, semantic search | `vector-database-engineer` |
 | Security auditing, penetration testing, hardening | `security-audit` |

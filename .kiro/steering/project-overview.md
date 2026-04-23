@@ -17,7 +17,7 @@ Traditional AI agents run 10+ queries to understand one function. Typocop answer
 ## System Architecture
 
 ```
-CLI Tool → AST Parser (tree-sitter) → 6-Phase Indexer → Neo4j + pgvector
+CLI Tool → AST Parser (tree-sitter) → 6-Phase Indexer → LadybugDB (Kùzu)
                                                               ↓
                                               Query Server (Fastify HTTP API)
                                                               ↓
@@ -47,9 +47,8 @@ CLI Tool → AST Parser (tree-sitter) → 6-Phase Indexer → Neo4j + pgvector
 
 - **Language**: TypeScript
 - **AST Parsing**: tree-sitter (12 languages)
-- **Graph Database**: Neo4j
-- **Vector Store**: PostgreSQL + pgvector (HNSW index)
-- **Embeddings**: OpenAI text-embedding-3-large (3072 dimensions)
+- **Database**: LadybugDB (embedded Kùzu graph + vector storage)
+- **Embeddings**: Ollama local embeddings (mxbai-embed-large, 1024 dimensions)
 - **Query Server**: Fastify
 - **MCP SDK**: @modelcontextprotocol/sdk
 - **Property Testing**: fast-check

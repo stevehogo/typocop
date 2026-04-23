@@ -39,7 +39,7 @@ const process = (x: any) => { ... }  // no any, no implicit return type
 - Use named exports only — no default exports
 - Group imports in this order:
   1. Node.js built-ins (`node:fs`, `node:path`)
-  2. External libraries (`tree-sitter`, `neo4j-driver`)
+  2. External libraries (`tree-sitter`, `kuzu`)
   3. Internal modules (`../types`, `./utils`)
 - Use absolute imports with path mapping for cross-module imports
 - Each subfolder exports its public API via `index.ts`
@@ -141,6 +141,6 @@ function parseFiles(paths: string[]): Promise<Symbol[]> {
 - All public functions must have unit tests
 - Use `vitest` for unit and integration tests
 - Use `fast-check` for property-based tests
-- Mock external dependencies (Neo4j, pgvector, OpenAI)
+- Mock external dependencies (LadybugDB, Ollama)
 - Never make real network calls in unit tests
 - Co-locate test files with source: `index.ts` → `index.test.ts`

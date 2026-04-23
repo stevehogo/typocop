@@ -198,7 +198,7 @@ The legacy uses Leiden (a Louvain variant). We use Louvain as specified in our d
 
 | File | Reason |
 |---|---|
-| `delta-processor.ts` | Tightly coupled to Neo4j service + TypeORM entities from a different architecture |
+| `delta-processor.ts` | Tightly coupled to legacy database service + TypeORM entities from a different architecture |
 | `pipeline.ts` | Our pipeline structure differs; use as conceptual reference only |
 | `workers/worker-pool.ts` | Overkill for MVP; use sequential fallback, add workers later |
 | `resolvers/` | Complex language-specific import resolvers; port incrementally per language in Phase 3 |

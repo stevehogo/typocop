@@ -67,7 +67,7 @@ tests/
 
 - Run tests in parallel (default behavior)
 - Use test caching: vitest caches by default
-- Mock external dependencies (Neo4j, pgvector, OpenAI) to speed up tests
+- Mock external dependencies (LadybugDB, Ollama) to speed up tests
 - Skip slow integration tests during development: `test.skip()` or `--grep "^(?!.*integration)"`
 
 ## CI/CD Considerations
