@@ -27,7 +27,8 @@ export type CLICommand =
   | { type: "reindex"; dbPath: string }
   | { type: "status" }
   | { type: "obsidian"; config: ObsidianExportConfig }
-  | { type: "hf" };
+  | { type: "hf" }
+  | { type: "ollama"; url?: string };
 
 const supportedLanguages: Language[] = [
   "php", "typescript", "javascript", "python", "java",
@@ -139,6 +140,17 @@ export function parseArgs(rawArgs: string[]): CLICommand {
     .action(() => {
       parsedCommand = {
         type: "hf"
+      };
+    });
+
+  program
+    .command("ollama")
+    .description("Configure Ollama embeddings provider")
+    .option("-u, --url <url>", "Ollama server URL", "http://localhost:11434")
+    .action((options) => {
+      parsedCommand = {
+        type: "ollama",
+        url: options.url
       };
     });
 

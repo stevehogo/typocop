@@ -81,6 +81,18 @@ export async function runFullCLI(argv: string[]): Promise<void> {
     throw err;
   }
 
+  // Handle graceful shutdown on SIGINT
+  let isShuttingDown = false;
+  const handleShutdown = async () => {
+    if (isShuttingDown) return;
+    isShuttingDown = true;
+    process.stderr.write("\n");
+    await drainAllPools();
+    process.exit(130); // Standard exit code for SIGINT
+  };
+
+  process.on("SIGINT", handleShutdown);
+
   try {
     await executeCLI(command);
     await drainAllPools();

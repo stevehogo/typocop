@@ -45,17 +45,74 @@ pnpm build
 
 Before running the indexer, ensure you have:
 
-1. **Ollama** running locally (optional — for semantic embeddings)
+1. **Node.js** 20.0.0 or higher
+2. **Embeddings provider** (optional — for semantic search)
+   - **HuggingFace** (recommended, lightweight, no external service required)
+   - **Ollama** (local embeddings service)
 
-Set environment variables in `.env-typocop`:
+### Embedding Configuration
+
+Typocop supports semantic search through embeddings. By default, embeddings are disabled (`EMBEDDING_PROVIDER=none`).
+
+#### Quick Setup: HuggingFace Embeddings
+
+To enable HuggingFace embeddings with automatic model download:
+
 ```bash
-TYPOCOP_PREFIX=tpc_
+pnpm typocop hf
+```
 
-# Ollama local embeddings (optional — disabled by default)
-OLLAMA_ENABLED=true
-OLLAMA_URL=http://localhost:11434
-OLLAMA_MODEL=mxbai-embed-large
-OLLAMA_DIMENSIONS=1024
+This command:
+- Updates `.env-typocop` to set `EMBEDDING_PROVIDER=huggingface`
+- Sets `HF_HOME=~/.cache/huggingface` for model caching
+- Downloads and caches the embedding model locally (`mixedbread-ai/mxbai-embed-large-v1`)
+- Enables WASM runtime caching for faster offline loads
+- Provides feedback on the configuration and cache location
+
+After running this command, re-index your codebase to generate embeddings:
+
+```bash
+pnpm typocop parse --path ./src --lang typescript --refresh
+```
+
+**Cache Location**: Models are cached at `~/.cache/huggingface/transformers` by default. The cache is persistent across runs, so subsequent indexing operations will use the cached models without re-downloading. You can customize the cache location by setting `HF_HOME` in `.env-typocop`.
+
+#### Manual Configuration: Ollama
+
+If you prefer to use Ollama for local embeddings, use the configuration command:
+
+```bash
+# Default (localhost:11434)
+pnpm typocop ollama
+
+# Custom Ollama server URL
+pnpm typocop ollama --url http://192.168.1.100:11434
+```
+
+This command:
+- Updates `.env-typocop` to set `EMBEDDING_PROVIDER=ollama`
+- Enables Ollama (`OLLAMA_ENABLED=true`)
+- Sets the Ollama server URL
+- Verifies the connection to your Ollama server
+
+Ensure Ollama is running before indexing:
+
+```bash
+ollama serve
+```
+
+Then re-index your codebase:
+
+```bash
+pnpm typocop parse --path ./src --lang typescript --refresh
+```
+
+#### Disabling Embeddings
+
+To disable semantic search (faster indexing, no model download):
+
+```bash
+EMBEDDING_PROVIDER=none
 ```
 
 ### Schema Prefix Configuration
@@ -97,17 +154,22 @@ TYPOCOP_PREFIX=myapp_
 
 ```bash
 # General command structure
-node dist/cli/index.js parse --path <source_path> --lang <language> [--verbose] [--refresh]
+pnpm typocop parse --path <source_path> --lang <language> [--verbose] [--refresh]
 
 # Example: TypeScript Project
-node dist/cli/index.js parse --path ./src --lang typescript --verbose
+pnpm typocop parse --path ./src --lang typescript --verbose
 
 # Example: Magento 2 Project
-node dist/cli/index.js parse --path ./app/code --lang php --verbose
+pnpm typocop parse --path ./app/code --lang php --verbose
 
 # Example: Python Project
-node dist/cli/index.js parse --path ./src --lang python --verbose
+pnpm typocop parse --path ./src --lang python --verbose
+
+# With embeddings enabled (after running `pnpm typocop hf`)
+pnpm typocop parse --path ./src --lang typescript --refresh
 ```
+
+**Graceful Shutdown**: Press `Ctrl+C` at any time to cancel the parse process. The CLI will clean up resources and exit gracefully.
 
 #### Refresh Flag: Complete Rebuild
 
@@ -118,18 +180,19 @@ The `--refresh` flag (short form: `-r`) clears all existing graph and embeddings
 - **Bug fixes**: When you suspect stale or corrupted data in the graph
 - **Fresh start**: Starting a new analysis from scratch
 - **Prefix migration**: When switching to a different database prefix
+- **Embeddings update**: After enabling embeddings with `pnpm typocop hf`
 
 **Examples:**
 
 ```bash
 # Full refresh with verbose output
-node dist/cli/index.js parse --path ./src --lang typescript --refresh --verbose
+pnpm typocop parse --path ./src --lang typescript --refresh --verbose
 
 # Short form
-node dist/cli/index.js parse --path ./src --lang typescript -r
+pnpm typocop parse --path ./src --lang typescript -r
 
 # Refresh without verbose output
-node dist/cli/index.js parse --path ./src --lang typescript --refresh
+pnpm typocop parse --path ./src --lang typescript --refresh
 ```
 
 **What happens during refresh:**
@@ -154,13 +217,13 @@ TypeScript, JavaScript, Python, PHP, Java, Go, Rust, C, C++, C#, Ruby, Swift
 ### Checking Status
 
 ```bash
-node dist/cli/index.js status
+pnpm typocop status
 ```
 
 ### Reindexing
 
 ```bash
-node dist/cli/index.js reindex
+pnpm typocop reindex --db ~/.typocop/tpc_/db.ladybug
 ```
 
 ## 📊 Six-Phase Indexing Pipeline

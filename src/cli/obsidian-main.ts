@@ -56,6 +56,21 @@ export async function runObsidianCLI(argv: string[]): Promise<void> {
   let envPath: string | undefined;
   let envExplicit = false;
   const filteredArgv: string[] = [];
+  let isShuttingDown = false;
+
+  // Set up signal handlers for graceful shutdown on Ctrl+C
+  const handleSignal = async (signal: string) => {
+    if (isShuttingDown) {
+      return; // Already shutting down
+    }
+    isShuttingDown = true;
+    console.error(`\n[typocop] Received ${signal}, shutting down gracefully...`);
+    await drainAllPools();
+    process.exit(130); // Standard exit code for SIGINT
+  };
+
+  process.on("SIGINT", () => handleSignal("SIGINT"));
+  process.on("SIGTERM", () => handleSignal("SIGTERM"));
 
   for (let i = 0; i < argv.length; i++) {
     if ((argv[i] === "-e" || argv[i] === "--env") && i + 1 < argv.length) {
@@ -144,6 +159,11 @@ export async function runObsidianCLI(argv: string[]): Promise<void> {
     await drainAllPools();
     process.exit(0);
   } catch (err) {
+    if (isShuttingDown) {
+      // Already handling shutdown, don't print error
+      await drainAllPools();
+      process.exit(1);
+    }
     spinner.fail(chalk.red("Obsidian export failed."));
     const msg = err instanceof Error ? err.message : String(err);
     process.stderr.write(msg + "\n");
