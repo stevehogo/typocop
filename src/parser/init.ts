@@ -54,8 +54,17 @@ async function loadGrammar(language: Language): Promise<any> {
       return mod.default;
     }
     case "csharp": {
-      const mod = await import("tree-sitter-c-sharp");
-      return mod.default;
+      try {
+        // @ts-ignore - tree-sitter-c-sharp types are not properly exported
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const mod: any = await import("tree-sitter-c-sharp");
+        return mod.default;
+      } catch {
+        throw new Error(
+          "C# grammar (tree-sitter-c-sharp) is not installed. " +
+          "Run: pnpm add tree-sitter-c-sharp"
+        );
+      }
     }
     case "ruby": {
       const mod = await import("tree-sitter-ruby");

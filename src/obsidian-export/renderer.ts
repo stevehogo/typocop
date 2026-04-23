@@ -43,7 +43,7 @@ export interface VaultContent {
 
 export function renderVault(data: GraphData): VaultContent {
   const files: VaultFile[] = [];
-  const symbolsByFile = groupBy(data.symbols, (s) => s.filePath);
+  const symbolsByCluster = groupSymbolsByCluster(data.symbols, data.clusterMemberships, data.clusters);
   const symbolToCluster = buildSymbolToClusterMap(data.clusterMemberships, data.clusters);
   const callerCounts = buildCallerCountMap(data.relationships);
   const outgoingCalls = buildOutgoingCallsMap(data.relationships);
@@ -51,11 +51,13 @@ export function renderVault(data: GraphData): VaultContent {
 
   const ctx: SymbolRenderContext = { symbolToCluster, callerCounts, outgoingCalls, incomingCalls };
 
-  // Symbol files (one per source file)
-  for (const [filePath, symbols] of symbolsByFile) {
-    const mdPath = sourcePathToVaultPath(filePath);
-    const content = renderSymbolFile(filePath, symbols, ctx);
-    files.push({ relativePath: mdPath, content });
+  // Symbol files organized by cluster (not by source file path)
+  for (const [clusterName, symbols] of symbolsByCluster) {
+    for (const symbol of symbols) {
+      const mdPath = `03-symbols/${slugify(clusterName)}/${slugify(symbol.name)}.md`;
+      const content = renderSymbolFile(symbol.filePath, [symbol], ctx);
+      files.push({ relativePath: mdPath, content });
+    }
   }
 
   // Cluster files + index
@@ -64,23 +66,23 @@ export function renderVault(data: GraphData): VaultContent {
       .map((id) => data.symbols.find((s) => s.id === id))
       .filter((s): s is ExportedSymbol => s !== undefined);
     files.push({
-      relativePath: `_clusters/${slugify(cluster.name)}.md`,
+      relativePath: `01-clusters/${slugify(cluster.name)}.md`,
       content: renderClusterFile(cluster, members),
     });
   }
-  files.push({ relativePath: "_clusters/_index.md", content: renderClusterIndex(data.clusters) });
+  files.push({ relativePath: "01-clusters/_index.md", content: renderClusterIndex(data.clusters) });
 
   // Process files + index
   for (const process of data.processes) {
     const steps = data.processSteps.get(process.id) ?? [];
     files.push({
-      relativePath: `_processes/${slugify(process.name)}.md`,
+      relativePath: `02-processes/${slugify(process.name)}.md`,
       content: renderProcessFile(process, steps),
     });
   }
-  files.push({ relativePath: "_processes/_index.md", content: renderProcessIndex(data.processes) });
+  files.push({ relativePath: "02-processes/_index.md", content: renderProcessIndex(data.processes) });
 
-  // Top-level navigation
+  // Top-level navigation (main MOC)
   files.push({ relativePath: "_index.md", content: renderNavigationIndex(data) });
 
   return { files };
@@ -100,6 +102,41 @@ export function groupBy<T>(items: readonly T[], keyFn: (item: T) => string): Map
     }
   }
   return map;
+}
+
+// --- Utility: groupSymbolsByCluster ---
+
+export function groupSymbolsByCluster(
+  symbols: readonly ExportedSymbol[],
+  memberships: ReadonlyMap<string, string[]>,
+  clusters: readonly ExportedCluster[],
+): Map<string, ExportedSymbol[]> {
+  const clusterById = new Map(clusters.map((c) => [c.id, c.name]));
+  const symbolToClusterId = new Map<string, string>();
+
+  // Build symbol -> cluster ID mapping
+  for (const [clusterId, symbolIds] of memberships) {
+    for (const symbolId of symbolIds) {
+      symbolToClusterId.set(symbolId, clusterId);
+    }
+  }
+
+  // Group symbols by cluster name
+  const result = new Map<string, ExportedSymbol[]>();
+  for (const symbol of symbols) {
+    const clusterId = symbolToClusterId.get(symbol.id);
+    const clusterName = clusterId ? clusterById.get(clusterId) : "unclustered";
+    const name = clusterName || "unclustered";
+
+    const group = result.get(name);
+    if (group) {
+      group.push(symbol);
+    } else {
+      result.set(name, [symbol]);
+    }
+  }
+
+  return result;
 }
 
 // --- Reverse-lookup map builders ---

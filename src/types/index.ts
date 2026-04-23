@@ -157,8 +157,8 @@ export interface MCPToolResponse {
 // ─── Search & Embeddings ──────────────────────────────────────────────────────
 
 export interface Embedding {
-  readonly vector: number[];   // exactly 1536 elements
-  readonly dimensions: number; // always 1536
+  readonly vector: number[];   // length === dimensions
+  readonly dimensions: number; // variable: depends on embedding model (e.g. 2560 for Ollama)
 }
 
 export interface SearchResult {

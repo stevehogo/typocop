@@ -3,7 +3,7 @@
 
 import type { Symbol, Cluster, Embedding } from "../../types/index.js";
 import { buildKeywordIndex } from "./keywords.js";
-import { formatClusterForEmbedding } from "./embed.js";
+import { formatSymbolForEmbedding, formatClusterForEmbedding } from "./format.js";
 
 export interface EmbeddingResult {
   readonly symbolId: string;
@@ -33,6 +33,24 @@ export async function buildSearchIndex(
   const collected: EmbeddingResult[] = [];
 
   if (embedFn !== null) {
+    // Embed individual symbols (name + signature + documentation)
+    for (const symbol of symbols) {
+      const text = formatSymbolForEmbedding(symbol);
+      const embedding = await embedFn(text);
+
+      if (embedding !== null) {
+        collected.push({
+          symbolId: symbol.id,
+          embedding,
+          metadata: {
+            kind: symbol.kind,
+            filePath: symbol.location.filePath,
+          },
+        });
+      }
+    }
+
+    // Embed clusters for broader semantic coverage
     const symbolMap = new Map<string, Symbol>(symbols.map(s => [s.id, s]));
 
     for (const cluster of clusters) {
@@ -45,7 +63,7 @@ export async function buildSearchIndex(
       if (embedding !== null) {
         const firstSymbol = clusterSymbols[0];
         collected.push({
-          symbolId: cluster.symbols[0],
+          symbolId: `cluster:${cluster.id}`,
           embedding,
           metadata: {
             clusterId: cluster.id,
@@ -54,6 +72,7 @@ export async function buildSearchIndex(
             ...(firstSymbol ? {
               filePath: firstSymbol.location.filePath,
               kind: firstSymbol.kind,
+              symbolId: firstSymbol.id,
             } : {}),
           },
         });
@@ -68,6 +87,5 @@ export async function buildSearchIndex(
   };
 }
 
-export { formatSymbolForEmbedding, formatClusterForEmbedding, embedText } from "./embed.js";
-export type { EmbeddingConfig } from "./embed.js";
+export { formatSymbolForEmbedding, formatClusterForEmbedding } from "./format.js";
 export { extractKeywords, buildKeywordIndex } from "./keywords.js";

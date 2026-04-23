@@ -1,13 +1,12 @@
 /**
- * Tests for MCP request handler.
+ * Tests for MCP request handler with DatabaseAdapter.
+ * Requirements: 7.1
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import type { Pool } from "pg";
-import type { Session } from "neo4j-driver";
+import type { DatabaseAdapter } from "../db/types.js";
 import { handleMCPRequest, createConnectionState } from "./handler.js";
 import type { MCPContext } from "./handler.js";
 import { createAuthConfig } from "./auth.js";
-import { MCPValidationError, MCPAuthenticationError } from "./types.js";
 
 // Mock the tools module
 vi.mock("./tools.js", () => ({
@@ -21,6 +20,16 @@ vi.mock("./tools.js", () => ({
     summary: "Test summary",
   }),
 }));
+
+function createMockAdapter(): DatabaseAdapter {
+  return {
+    initialize: vi.fn().mockResolvedValue(undefined),
+    close: vi.fn().mockResolvedValue(undefined),
+    getGraphAdapter: vi.fn().mockReturnValue({}),
+    getVectorAdapter: vi.fn().mockReturnValue({}),
+    getEmbeddingAdapter: vi.fn().mockReturnValue({}),
+  };
+}
 
 describe("createConnectionState", () => {
   it("creates a new connection state with session ID", () => {
@@ -37,30 +46,21 @@ describe("handleMCPRequest", () => {
 
   beforeEach(() => {
     mockContext = {
-      vectorPool: {} as Pool,
-      graphSession: {} as Session,
+      adapter: createMockAdapter(),
       authConfig: createAuthConfig(["valid-token"], true),
       connectionStates: new Map(),
     };
   });
 
   it("returns validation error for malformed request", async () => {
-    const result = await handleMCPRequest(
-      null,
-      mockContext,
-      "session-1",
-    );
+    const result = await handleMCPRequest(null, mockContext, "session-1");
 
     expect(result).toHaveProperty("code", "INVALID_REQUEST_FORMAT");
     expect(result).toHaveProperty("message");
   });
 
   it("returns validation error for missing method", async () => {
-    const result = await handleMCPRequest(
-      { params: {} },
-      mockContext,
-      "session-1",
-    );
+    const result = await handleMCPRequest({ params: {} }, mockContext, "session-1");
 
     expect(result).toHaveProperty("code", "MISSING_METHOD");
   });

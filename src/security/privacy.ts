@@ -15,12 +15,15 @@
  * 1. LOCAL-ONLY CODE PROCESSING (Req 22.1)
  *    - All parsing happens locally using tree-sitter
  *    - All indexing phases (1-6) execute locally
- *    - Graph database (Neo4j) runs locally or in user-controlled infrastructure
- *    - Vector store (PostgreSQL + pgvector) runs locally or in user-controlled infrastructure
+ *    - Graph database (LadybugDB) runs locally as an embedded database
+ *    - Vector store (LadybugDB) runs locally as an embedded database
  *    - No source code is transmitted to external services
  *
  * 2. SYMBOL SIGNATURES ONLY FOR EMBEDDINGS (Req 22.2)
- *    - When using external embedding APIs (OpenAI), only symbol signatures are sent
+ *    - When using embedding APIs (Ollama or HuggingFace in-process), only
+ *      symbol signatures are sent
+ *    - HuggingFace inference runs entirely in-process via ONNX Runtime —
+ *      no data leaves the machine at all
  *    - Symbol signatures include: name, kind, signature, documentation, visibility, modifiers
  *    - Full source code content is NEVER included in embedding requests
  *    - File paths are NEVER included in embedding requests
@@ -41,7 +44,7 @@
  * Data sent to external services (when enabled):
  */
 export interface ExternalDataPolicy {
-  readonly service: "openai-embeddings" | "ai-enrichment";
+  readonly service: "ollama-embeddings" | "huggingface-embeddings" | "ai-enrichment";
   readonly dataTypes: readonly string[];
   readonly excludedData: readonly string[];
   readonly purpose: string;
@@ -49,7 +52,7 @@ export interface ExternalDataPolicy {
 
 export const EXTERNAL_DATA_POLICIES: readonly ExternalDataPolicy[] = [
   {
-    service: "openai-embeddings",
+    service: "ollama-embeddings",
     dataTypes: [
       "symbol name",
       "symbol kind",
@@ -70,6 +73,29 @@ export const EXTERNAL_DATA_POLICIES: readonly ExternalDataPolicy[] = [
       "runtime data",
     ],
     purpose: "Generate semantic embeddings for symbol and cluster search",
+  },
+  {
+    service: "huggingface-embeddings",
+    dataTypes: [
+      "symbol name",
+      "symbol kind",
+      "symbol signature",
+      "symbol documentation",
+      "symbol visibility",
+      "symbol modifiers",
+      "cluster name",
+      "cluster category",
+      "cluster confidence score",
+    ],
+    excludedData: [
+      "full source code",
+      "file paths",
+      "file content",
+      "implementation details",
+      "variable values",
+      "runtime data",
+    ],
+    purpose: "Generate semantic embeddings for symbol and cluster search (in-process, no network)",
   },
   {
     service: "ai-enrichment",
@@ -183,10 +209,12 @@ export interface PrivacyCompliance {
  * Get the current privacy compliance status.
  */
 export function getPrivacyCompliance(): PrivacyCompliance {
+  const embeddingPolicy = EXTERNAL_DATA_POLICIES.find(p => p.service === "ollama-embeddings");
+  const enrichmentPolicy = EXTERNAL_DATA_POLICIES.find(p => p.service === "ai-enrichment");
   return {
     localProcessing: true,
-    embeddingDataTypes: EXTERNAL_DATA_POLICIES[0].dataTypes,
-    enrichmentDataTypes: EXTERNAL_DATA_POLICIES[1].dataTypes,
+    embeddingDataTypes: embeddingPolicy?.dataTypes ?? [],
+    enrichmentDataTypes: enrichmentPolicy?.dataTypes ?? [],
     excludedData: [
       "full source code",
       "file paths",

@@ -5,8 +5,8 @@
 export { parseQueryIntent } from "./parse-intent.js";
 export { executeQuery } from "./execute-query.js";
 export { formatResponse } from "./format-response.js";
-export { executeImpactAnalysis, calculateImpactRisk } from "./impact-analysis.js";
-export { executeContextRetrieval } from "./context-retrieval.js";
-export { executeDataFlowTrace } from "./data-flow-trace.js";
+export { executeImpactAnalysis, calculateImpactRisk, type ImpactAnalysisResult } from "./impact-analysis.js";
+export { executeContextRetrieval, type ContextRetrievalResult } from "./context-retrieval.js";
+export { executeDataFlowTrace, type DataFlowTraceResult } from "./data-flow-trace.js";
 export { createQueryServer, startQueryServer, type QueryServerConfig } from "./server.js";
 export { preprocessQuery, isValidQuery } from "./preprocess.js";

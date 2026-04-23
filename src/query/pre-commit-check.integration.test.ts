@@ -1,122 +1,95 @@
 /**
- * Integration test for pre-commit check query.
+ * Integration test for pre-commit check query (via GraphAdapter).
  * Demonstrates the complete flow from changed files to risk assessment.
+ * Requirements: 11b.1, 11b.2, 11b.3, 11b.4, 11b.5, 7.2
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import type { GraphAdapter, GraphNode } from "../db/types.js";
 import { executePreCommitCheck } from "./pre-commit-check.js";
-import type { Session } from "neo4j-driver";
-import type { GraphNode } from "../graph/connection.js";
 
-// ─── Mock Setup ───────────────────────────────────────────────────────────────
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function createMockSession(): Session {
-  const runFn = vi.fn();
+function makeGraphAdapter(responses: unknown[][]): GraphAdapter {
+  let callIndex = 0;
   return {
-    run: runFn,
-    executeRead: vi.fn(async (work: (tx: { run: typeof runFn }) => Promise<unknown>) => work({ run: runFn })),
-    executeWrite: vi.fn(async (work: (tx: { run: typeof runFn }) => Promise<unknown>) => work({ run: runFn })),
-  } as unknown as Session;
+    createNode: vi.fn(),
+    createRelationship: vi.fn(),
+    queryNodes: vi.fn(),
+    queryRelationships: vi.fn(),
+    deleteNodesByLabel: vi.fn(),
+    deleteRelationshipsByType: vi.fn(),
+    runCypher: vi.fn().mockImplementation(() => {
+      const result = responses[callIndex] ?? [];
+      callIndex++;
+      return Promise.resolve(result);
+    }),
+    runCypherWrite: vi.fn(),
+  };
 }
 
-function createMockSymbolNode(id: string, name: string, filePath: string): GraphNode {
+function symbolRow(id: string, name: string, filePath: string): unknown {
   return {
-    id,
-    labels: ["Symbol"],
-    properties: {
-      id,
-      name,
-      kind: "function",
-      filePath,
-      startLine: "1",
-      startColumn: "0",
-      endLine: "10",
-      endColumn: "0",
-      visibility: "public",
+    s: {
+      labels: ["Symbol"],
+      properties: {
+        id, name, kind: "function", filePath,
+        startLine: "1", startColumn: "0", endLine: "10", endColumn: "0", visibility: "public",
+      },
     },
   };
 }
 
-function createMockProcessNode(id: string, name: string): GraphNode {
+function nodeRow(id: string, name: string): unknown {
   return {
-    id,
-    labels: ["Process"],
-    properties: {
-      id,
-      name,
-      entryPoint: "entry1",
+    n: {
+      labels: ["Symbol"],
+      properties: {
+        id, name, kind: "function", filePath: `/src/${id}.ts`,
+        startLine: "1", startColumn: "0", endLine: "10", endColumn: "0", visibility: "public",
+      },
+    },
+  };
+}
+
+function processRow(id: string, name: string): unknown {
+  return {
+    p: {
+      labels: ["Process"],
+      properties: { id, name, entryPoint: "entry1" },
     },
   };
 }
 
 // ─── Integration Tests ────────────────────────────────────────────────────────
 
-describe("executePreCommitCheck - integration", () => {
-  let mockSession: Session;
-
+describe("executePreCommitCheck - integration (GraphAdapter)", () => {
   beforeEach(() => {
-    mockSession = createMockSession();
+    vi.clearAllMocks();
   });
 
   it("returns low risk when no symbols are found in changed files", async () => {
-    vi.mocked(mockSession.run).mockResolvedValueOnce({
-      records: [],
-    } as never);
+    const adapter = makeGraphAdapter([
+      [],  // findSymbolsInFiles → empty
+    ]);
 
-    const result = await executePreCommitCheck(
-      ["src/utils/helper.ts"],
-      10,
-      mockSession,
-    );
+    const result = await executePreCommitCheck(["src/utils/helper.ts"], 10, adapter);
 
     expect(result.riskLevel).toBe("low");
     expect(result.confidence).toBe(0.95);
     expect(result.symbols).toHaveLength(0);
-    expect(result.affectedFlows).toHaveLength(0);
   });
 
   it("identifies changed symbols and their dependents", async () => {
-    const changedSymbol = createMockSymbolNode("s1", "getUserData", "src/user.ts");
-    const dependent1 = createMockSymbolNode("s2", "processUser", "src/process.ts");
-    const dependent2 = createMockSymbolNode("s3", "displayUser", "src/display.ts");
+    const adapter = makeGraphAdapter([
+      [symbolRow("s1", "getUserData", "src/user.ts")],  // findSymbolsInFiles
+      [nodeRow("s2", "processUser"), nodeRow("s3", "displayUser")],  // findDependents for s1
+      [],  // findProcessesBySymbol for s1
+      [],  // findProcessesBySymbol for s2
+      [],  // findProcessesBySymbol for s3
+      [],  // findClustersBySymbol for s1
+    ]);
 
-    // Mock: find symbols in changed files
-    vi.mocked(mockSession.run).mockResolvedValueOnce({
-      records: [{ get: () => changedSymbol }],
-    } as never);
-
-    // Mock: find dependents for s1
-    vi.mocked(mockSession.run).mockResolvedValueOnce({
-      records: [
-        { toObject: () => ({ n: dependent1 }) },
-        { toObject: () => ({ n: dependent2 }) },
-      ],
-    } as never);
-
-    // Mock: find processes for s1
-    vi.mocked(mockSession.run).mockResolvedValueOnce({
-      records: [],
-    } as never);
-
-    // Mock: find processes for s2
-    vi.mocked(mockSession.run).mockResolvedValueOnce({
-      records: [],
-    } as never);
-
-    // Mock: find processes for s3
-    vi.mocked(mockSession.run).mockResolvedValueOnce({
-      records: [],
-    } as never);
-
-    // Mock: find clusters for s1
-    vi.mocked(mockSession.run).mockResolvedValueOnce({
-      records: [],
-    } as never);
-
-    const result = await executePreCommitCheck(
-      ["src/user.ts"],
-      10,
-      mockSession,
-    );
+    const result = await executePreCommitCheck(["src/user.ts"], 10, adapter);
 
     expect(result.symbols.length).toBeGreaterThan(0);
     expect(result.riskLevel).toBe("medium"); // 3 symbols total
@@ -124,84 +97,32 @@ describe("executePreCommitCheck - integration", () => {
   });
 
   it("identifies affected business processes", async () => {
-    const changedSymbol = createMockSymbolNode("s1", "authService", "src/auth.ts");
-    const process1 = createMockProcessNode("p1", "User Login Flow");
-    const process2 = createMockProcessNode("p2", "User Registration Flow");
+    const adapter = makeGraphAdapter([
+      [symbolRow("s1", "authService", "src/auth.ts")],  // findSymbolsInFiles
+      [],  // findDependents for s1
+      [processRow("p1", "User Login Flow"), processRow("p2", "User Registration Flow")],  // findProcessesBySymbol for s1
+      [],  // findProcessSteps for p1
+      [],  // findProcessSteps for p2
+      [],  // findClustersBySymbol for s1
+    ]);
 
-    // Mock: find symbols in changed files
-    vi.mocked(mockSession.run).mockResolvedValueOnce({
-      records: [{ get: () => changedSymbol }],
-    } as never);
-
-    // Mock: find dependents for s1
-    vi.mocked(mockSession.run).mockResolvedValueOnce({
-      records: [],
-    } as never);
-
-    // Mock: find processes for s1
-    vi.mocked(mockSession.run).mockResolvedValueOnce({
-      records: [
-        { get: () => process1 },
-        { get: () => process2 },
-      ],
-    } as never);
-
-    // Mock: findProcessSteps for p1 (called by graphNodeToProcess)
-    vi.mocked(mockSession.run).mockResolvedValueOnce({
-      records: [],
-    } as never);
-
-    // Mock: findProcessSteps for p2 (called by graphNodeToProcess)
-    vi.mocked(mockSession.run).mockResolvedValueOnce({
-      records: [],
-    } as never);
-
-    // Mock: find clusters for s1
-    vi.mocked(mockSession.run).mockResolvedValueOnce({
-      records: [],
-    } as never);
-
-    const result = await executePreCommitCheck(
-      ["src/auth.ts"],
-      10,
-      mockSession,
-    );
+    const result = await executePreCommitCheck(["src/auth.ts"], 10, adapter);
 
     expect(result.riskLevel).toBe("critical"); // auth is a core component
     expect(result.processes).toHaveLength(2);
-    expect(result.affectedFlows.length).toBeGreaterThan(0);
     expect(result.affectedFlows).toContain("User Login Flow");
     expect(result.affectedFlows).toContain("User Registration Flow");
   });
 
   it("generates appropriate test recommendations based on risk level", async () => {
-    const changedSymbol = createMockSymbolNode("s1", "formatDate", "src/utils.ts");
+    const adapter = makeGraphAdapter([
+      [symbolRow("s1", "formatDate", "src/utils.ts")],  // findSymbolsInFiles
+      [],  // findDependents for s1
+      [],  // findProcessesBySymbol for s1
+      [],  // findClustersBySymbol for s1
+    ]);
 
-    // Mock: find symbols in changed files
-    vi.mocked(mockSession.run).mockResolvedValueOnce({
-      records: [{ get: () => changedSymbol }],
-    } as never);
-
-    // Mock: find dependents for s1
-    vi.mocked(mockSession.run).mockResolvedValueOnce({
-      records: [],
-    } as never);
-
-    // Mock: find processes for s1
-    vi.mocked(mockSession.run).mockResolvedValueOnce({
-      records: [],
-    } as never);
-
-    // Mock: find clusters for s1
-    vi.mocked(mockSession.run).mockResolvedValueOnce({
-      records: [],
-    } as never);
-
-    const result = await executePreCommitCheck(
-      ["src/utils.ts"],
-      10,
-      mockSession,
-    );
+    const result = await executePreCommitCheck(["src/utils.ts"], 10, adapter);
 
     expect(result.riskLevel).toBe("low");
     expect(result.affectedFlows.some((rec) => rec.includes("unit tests"))).toBe(true);

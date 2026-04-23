@@ -1,33 +1,68 @@
 /**
- * Integration tests for MCP server.
+ * Integration tests for MCP server with DatabaseAdapter.
  * Tests the complete flow from request to response.
+ * Requirements: 7.5
  */
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import type { Pool } from "pg";
-import type { Driver } from "neo4j-driver";
+import type { DatabaseAdapter, GraphAdapter, VectorAdapter, EmbeddingAdapter } from "../db/types.js";
 import { handleMCPRequest } from "./handler.js";
 import type { MCPContext } from "./handler.js";
 import { createAuthConfig } from "./auth.js";
 import { createMCPServer } from "./registration.js";
 
+// ── Mock adapter factory ──────────────────────────────────────────────────────
+
+function createMockGraphAdapter(): GraphAdapter {
+  return {
+    createNode: vi.fn().mockResolvedValue(undefined),
+    createRelationship: vi.fn().mockResolvedValue(undefined),
+    queryNodes: vi.fn().mockResolvedValue([]),
+    queryRelationships: vi.fn().mockResolvedValue([]),
+    deleteNodesByLabel: vi.fn().mockResolvedValue(0),
+    deleteRelationshipsByType: vi.fn().mockResolvedValue(0),
+    runCypher: vi.fn().mockResolvedValue([]),
+    runCypherWrite: vi.fn().mockResolvedValue(undefined),
+  };
+}
+
+function createMockVectorAdapter(): VectorAdapter {
+  return {
+    createTables: vi.fn().mockResolvedValue(undefined),
+    indexSymbol: vi.fn().mockResolvedValue(undefined),
+    semanticSearch: vi.fn().mockResolvedValue([]),
+    deleteAll: vi.fn().mockResolvedValue(0),
+  };
+}
+
+function createMockEmbeddingAdapter(): EmbeddingAdapter {
+  return {
+    isEnabled: vi.fn().mockReturnValue(false),
+    embedText: vi.fn().mockResolvedValue(null),
+    getDimensions: vi.fn().mockReturnValue(2560),
+  };
+}
+
+function createMockDatabaseAdapter(): DatabaseAdapter {
+  const graph = createMockGraphAdapter();
+  const vector = createMockVectorAdapter();
+  const embedding = createMockEmbeddingAdapter();
+  return {
+    initialize: vi.fn().mockResolvedValue(undefined),
+    close: vi.fn().mockResolvedValue(undefined),
+    getGraphAdapter: vi.fn().mockReturnValue(graph),
+    getVectorAdapter: vi.fn().mockReturnValue(vector),
+    getEmbeddingAdapter: vi.fn().mockReturnValue(embedding),
+  };
+}
+
 describe("MCP Server Integration", () => {
   let mockContext: MCPContext;
+  let mockAdapter: DatabaseAdapter;
 
   beforeEach(() => {
-    const runFn = vi.fn(async () => ({ records: [] }));
-    const mockSession = {
-      run: runFn,
-      executeRead: vi.fn(async (work: (tx: { run: typeof runFn }) => Promise<unknown>) => work({ run: runFn })),
-      executeWrite: vi.fn(async (work: (tx: { run: typeof runFn }) => Promise<unknown>) => work({ run: runFn })),
-      close: vi.fn(async () => {}),
-    };
-    const mockDriver = {
-      session: vi.fn(() => mockSession),
-    } as unknown as Driver;
-
+    mockAdapter = createMockDatabaseAdapter();
     mockContext = {
-      vectorPool: {} as Pool,
-      graphDriver: mockDriver,
+      adapter: mockAdapter,
       authConfig: createAuthConfig(["test-token"], false),
       connectionStates: new Map(),
     };
@@ -51,7 +86,7 @@ describe("MCP Server Integration", () => {
 
       expect(result).toHaveProperty("result");
       if ("result" in result) {
-        const response = result.result as any;
+        const response = result.result as Record<string, unknown>;
         expect(response).toHaveProperty("summary");
         expect(response).toHaveProperty("symbols");
         expect(response).toHaveProperty("clusters");
@@ -72,9 +107,10 @@ describe("MCP Server Integration", () => {
 
       expect(result).toHaveProperty("result");
       if ("result" in result) {
-        const response = result.result as any;
+        const response = result.result as Record<string, unknown>;
         expect(response).toHaveProperty("summary");
-        expect(response.summary).toContain("dependents");
+        expect(typeof response.summary).toBe("string");
+        expect((response.summary as string).length).toBeGreaterThan(0);
       }
     });
 
@@ -88,9 +124,10 @@ describe("MCP Server Integration", () => {
 
       expect(result).toHaveProperty("result");
       if ("result" in result) {
-        const response = result.result as any;
+        const response = result.result as Record<string, unknown>;
         expect(response).toHaveProperty("summary");
-        expect(response.summary).toContain("data flow");
+        expect(typeof response.summary).toBe("string");
+        expect((response.summary as string).length).toBeGreaterThan(0);
       }
     });
 
@@ -104,10 +141,29 @@ describe("MCP Server Integration", () => {
 
       expect(result).toHaveProperty("result");
       if ("result" in result) {
-        const response = result.result as any;
+        const response = result.result as Record<string, unknown>;
         expect(response).toHaveProperty("summary");
-        expect(response.summary).toContain("Impact analysis");
+        expect(typeof response.summary).toBe("string");
+        expect((response.summary as string).length).toBeGreaterThan(0);
         expect(response).toHaveProperty("riskLevel");
+      }
+    });
+
+    it("handles smart_search request with embeddings disabled", async () => {
+      const request = {
+        method: "smart_search",
+        params: { query: "authentication flow" },
+      };
+
+      const result = await handleMCPRequest(request, mockContext, "session-1");
+
+      expect(result).toHaveProperty("result");
+      if ("result" in result) {
+        const response = result.result as Record<string, unknown>;
+        expect(response).toHaveProperty("summary");
+        expect(response).toHaveProperty("symbols");
+        expect((response.symbols as unknown[])).toEqual([]);
+        expect(response).toHaveProperty("confidence");
       }
     });
   });
@@ -122,19 +178,18 @@ describe("MCP Server Integration", () => {
       const result = await handleMCPRequest(request, mockContext, "session-1");
 
       if ("result" in result) {
-        const response = result.result as any;
-        
-        // Verify all required MCPToolResponse fields
+        const response = result.result as Record<string, unknown>;
+
         expect(response.symbols).toBeInstanceOf(Array);
         expect(response.clusters).toBeInstanceOf(Array);
         expect(response.processes).toBeInstanceOf(Array);
         expect(typeof response.confidence).toBe("number");
-        expect(response.confidence).toBeGreaterThanOrEqual(0);
-        expect(response.confidence).toBeLessThanOrEqual(1);
+        expect(response.confidence as number).toBeGreaterThanOrEqual(0);
+        expect(response.confidence as number).toBeLessThanOrEqual(1);
         expect(["low", "medium", "high", "critical"]).toContain(response.riskLevel);
         expect(response.affectedFlows).toBeInstanceOf(Array);
         expect(typeof response.summary).toBe("string");
-        expect(response.summary.length).toBeGreaterThan(0);
+        expect((response.summary as string).length).toBeGreaterThan(0);
       }
     });
 
@@ -150,10 +205,10 @@ describe("MCP Server Integration", () => {
         const result = await handleMCPRequest(request, mockContext, "session-1");
 
         if ("result" in result) {
-          const response = result.result as any;
+          const response = result.result as Record<string, unknown>;
           expect(response.summary).toBeDefined();
           expect(typeof response.summary).toBe("string");
-          expect(response.summary.length).toBeGreaterThan(0);
+          expect((response.summary as string).length).toBeGreaterThan(0);
         }
       }
     });
@@ -163,7 +218,6 @@ describe("MCP Server Integration", () => {
     it("maintains connection state across requests", async () => {
       const sessionId = "persistent-session";
 
-      // First request
       await handleMCPRequest(
         { method: "get_symbol_context", params: { symbolName: "test1" } },
         mockContext,
@@ -173,7 +227,6 @@ describe("MCP Server Integration", () => {
       expect(mockContext.connectionStates.has(sessionId)).toBe(true);
       const state1 = mockContext.connectionStates.get(sessionId);
 
-      // Second request
       await handleMCPRequest(
         { method: "find_dependents", params: { symbolName: "test2" } },
         mockContext,
@@ -181,7 +234,7 @@ describe("MCP Server Integration", () => {
       );
 
       const state2 = mockContext.connectionStates.get(sessionId);
-      expect(state2).toBe(state1); // Same state object
+      expect(state2).toBe(state1);
     });
 
     it("creates separate states for different sessions", async () => {

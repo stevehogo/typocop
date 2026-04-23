@@ -10,7 +10,12 @@
  * Requirements: 3.4, 6.3, 6.4, 6.6, 22.2, 24.1, 24.2
  */
 import type { Cluster, ClusterCategory, Symbol } from "../../types/index.js";
+import type { EmbeddingAdapter } from "../../db/types.js";
 import { verifyEnrichmentPrompt } from "../../security/privacy.js";
+import {
+  SemanticClusterClassifier,
+  buildClusterText,
+} from "./semantic-classifier.js";
 
 // ─── Category keyword map ─────────────────────────────────────────────────────
 
@@ -91,7 +96,7 @@ export function classifyCluster(
 
 // ─── AI name inference ────────────────────────────────────────────────────────
 
-/** Minimal interface for an AI text generator (avoids hard OpenAI dependency). */
+/** Minimal interface for an AI text generator (avoids hard dependency on any provider). */
 export interface AIClient {
   generateText(prompt: string): Promise<string>;
 }
@@ -141,19 +146,27 @@ export async function inferClusterName(
 
 // ─── Cluster enrichment ───────────────────────────────────────────────────────
 
+// ─── Shared semantic classifier instance ──────────────────────────────────────
+
+let sharedClassifier: SemanticClusterClassifier | null = null;
+
 /**
- * Enrich a cluster with an AI-generated name and heuristic category.
+ * Enrich a cluster with an AI-generated name and category.
+ *
+ * When `embeddingAdapter?.isEnabled()` is true, uses semantic classification
+ * via Ollama embeddings. Otherwise falls back to keyword-based classification.
  *
  * Enforces minimum cluster size of 2 symbols (Req 6.4).
  * Returns the cluster unchanged if it has fewer than 2 symbols.
  *
- * Requirements: 3.4, 6.3, 6.4, 6.6, 24.1, 24.2
+ * Requirements: 3.4, 6.3, 6.4, 6.6, 10.4, 24.1, 24.2
  */
 export async function enrichCluster(
   cluster: Cluster,
   symbolMap: ReadonlyMap<string, Symbol>,
   heuristicLabel: string,
   aiClient?: AIClient,
+  embeddingAdapter?: EmbeddingAdapter,
 ): Promise<Cluster> {
   // Enforce minimum cluster size invariant
   if (cluster.symbols.length < 2) return cluster;
@@ -165,7 +178,28 @@ export async function enrichCluster(
     aiClient,
   );
 
-  const category = classifyCluster(cluster.symbols, symbolMap);
+  let category: ClusterCategory;
+
+  if (embeddingAdapter?.isEnabled()) {
+    // Semantic classification via Ollama (Req 10.1, 10.4)
+    if (!sharedClassifier || !sharedClassifier.isInitialized()) {
+      sharedClassifier = new SemanticClusterClassifier();
+      await sharedClassifier.initialize(embeddingAdapter);
+    }
+    const clusterText = buildClusterText(cluster.symbols, symbolMap);
+    category = await sharedClassifier.classify(clusterText);
+  } else {
+    // Keyword fallback (Req 10.4)
+    category = classifyCluster(cluster.symbols, symbolMap);
+  }
 
   return { ...cluster, name, category };
+}
+
+/**
+ * Reset the shared classifier instance. Useful for testing.
+ * @internal
+ */
+export function resetSharedClassifier(): void {
+  sharedClassifier = null;
 }

@@ -9,6 +9,8 @@ import { configurationManager, ConfigurationError, PrefixValidationError } from 
 import chalk from "chalk";
 import ora from "ora";
 import { executeObsidianExport } from "../obsidian-export/index.js";
+import { createDatabaseAdapter } from "../db/database-adapter.js";
+import { drainAllPools } from "../db/pool-registry.js";
 
 function formatConfigurationError(err: ConfigurationError): string {
   if (err instanceof PrefixValidationError) {
@@ -72,6 +74,7 @@ export async function runObsidianCLI(argv: string[]): Promise<void> {
     if (!existsSync(envPath)) {
       if (envExplicit) {
         process.stderr.write(`Error: env file not found: ${envPath}\n`);
+        await drainAllPools();
         process.exit(1);
       }
     } else {
@@ -85,6 +88,7 @@ export async function runObsidianCLI(argv: string[]): Promise<void> {
   } catch (err) {
     if (err instanceof ConfigurationError) {
       process.stderr.write(formatConfigurationError(err));
+      await drainAllPools();
       process.exit(1);
     }
     throw err;
@@ -98,10 +102,12 @@ export async function runObsidianCLI(argv: string[]): Promise<void> {
   } catch (err: unknown) {
     if (err instanceof CLIValidationError) {
       process.stderr.write(err.message + "\n");
+      await drainAllPools();
       process.exit(1);
     }
     const anyErr = err as { code?: string; exitCode?: number };
     if (anyErr?.code === "commander.helpDisplayed" || anyErr?.code === "commander.version") {
+      await drainAllPools();
       process.exit(anyErr.exitCode ?? 0);
     }
     throw err;
@@ -109,6 +115,7 @@ export async function runObsidianCLI(argv: string[]): Promise<void> {
 
   if (command.type !== "obsidian") {
     process.stderr.write("Unexpected command routed to obsidian handler\n");
+    await drainAllPools();
     process.exit(1);
     return;
   }
@@ -121,18 +128,26 @@ export async function runObsidianCLI(argv: string[]): Promise<void> {
     if (verbose) {
       spinner.info("Verbose mode enabled.");
     }
-    const result = await executeObsidianExport(command.config);
-    await ensureGitignore(outputPath);
-    spinner.succeed(chalk.green("Obsidian vault export completed."));
-    console.error(chalk.bold("\nExport Statistics:"));
-    console.error(`  Files written:       ${chalk.cyan(result.filesWritten)}`);
-    console.error(`  Directories created: ${chalk.cyan(result.directoriesCreated)}`);
-    console.error(`  Total bytes:         ${chalk.cyan(result.totalBytes)}`);
+    const adapterConfig = configurationManager.getConfiguration();
+    const adapter = await createDatabaseAdapter(adapterConfig);
+    try {
+      const result = await executeObsidianExport(command.config, adapter);
+      await ensureGitignore(outputPath);
+      spinner.succeed(chalk.green("Obsidian vault export completed."));
+      console.error(chalk.bold("\nExport Statistics:"));
+      console.error(`  Files written:       ${chalk.cyan(result.filesWritten)}`);
+      console.error(`  Directories created: ${chalk.cyan(result.directoriesCreated)}`);
+      console.error(`  Total bytes:         ${chalk.cyan(result.totalBytes)}`);
+    } finally {
+      await adapter.close();
+    }
+    await drainAllPools();
     process.exit(0);
   } catch (err) {
     spinner.fail(chalk.red("Obsidian export failed."));
     const msg = err instanceof Error ? err.message : String(err);
     process.stderr.write(msg + "\n");
+    await drainAllPools();
     process.exit(1);
   }
 }

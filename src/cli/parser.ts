@@ -9,7 +9,7 @@ export interface CLIConfig {
   outputPath?: string;
   verbose: boolean;
   /**
-   * When true, clears all existing Neo4j graph data and pgvector embeddings
+   * When true, clears all existing graph data and embeddings
    * for the configured prefix before starting the indexing pipeline.
    * This enables a complete rebuild of the knowledge graph and embeddings.
    * Defaults to false for incremental/update behavior.
@@ -26,7 +26,8 @@ export type CLICommand =
   | { type: "parse"; config: CLIConfig }
   | { type: "reindex"; dbPath: string }
   | { type: "status" }
-  | { type: "obsidian"; config: ObsidianExportConfig };
+  | { type: "obsidian"; config: ObsidianExportConfig }
+  | { type: "hf" };
 
 const supportedLanguages: Language[] = [
   "php", "typescript", "javascript", "python", "java",
@@ -129,6 +130,15 @@ export function parseArgs(rawArgs: string[]): CLICommand {
           outputPath: options.out,
           verbose: options.verbose,
         },
+      };
+    });
+
+  program
+    .command("hf")
+    .description("Configure HuggingFace embeddings provider and download model for caching")
+    .action(() => {
+      parsedCommand = {
+        type: "hf"
       };
     });
 

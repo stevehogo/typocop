@@ -1,12 +1,12 @@
 /**
  * Pre-commit check query logic.
- * Requirements: 11b.1, 11b.2, 11b.3, 11b.4, 11b.5
+ * Requirements: 11b.1, 11b.2, 11b.3, 11b.4, 11b.5, 7.2
  */
-import type { Session } from "neo4j-driver";
+import type { GraphAdapter, GraphNode } from "../db/types.js";
+import { prop } from "../db/types.js";
 import type { Symbol, Relationship, Process, QueryResult, RiskLevel, SymbolKind, Visibility } from "../types/index.js";
-import { findDependents, findProcessesBySymbol, findClustersBySymbol } from "../graph/query.js";
-import type { GraphNode } from "../graph/connection.js";
-import { graphNodeToProcess, graphNodeToCluster } from "./process-helpers.js";
+import { graphNodeToCluster } from "./process-helpers.js";
+import { MAX_TRAVERSAL_DEPTH } from "../utils/limits.js";
 
 /** Core component name patterns that elevate risk to CRITICAL. */
 const CORE_COMPONENT_PATTERNS = [
@@ -30,21 +30,119 @@ export function calculatePreCommitRisk(affectedSymbols: Symbol[]): RiskLevel {
 }
 
 function graphNodeToSymbol(node: GraphNode): Symbol {
-  const p = node.properties;
   return {
     id: node.id,
-    name: p["name"] ?? node.id,
-    kind: (p["kind"] ?? "function") as SymbolKind,
+    name: prop(node, "name", node.id),
+    kind: prop(node, "kind", "function") as SymbolKind,
     location: {
-      filePath: p["filePath"] ?? "",
-      startLine: parseInt(p["startLine"] ?? "0", 10),
-      startColumn: parseInt(p["startColumn"] ?? "0", 10),
-      endLine: parseInt(p["endLine"] ?? "0", 10),
-      endColumn: parseInt(p["endColumn"] ?? "0", 10),
+      filePath: prop(node, "filePath"),
+      startLine: parseInt(prop(node, "startLine", "0"), 10),
+      startColumn: parseInt(prop(node, "startColumn", "0"), 10),
+      endLine: parseInt(prop(node, "endLine", "0"), 10),
+      endColumn: parseInt(prop(node, "endColumn", "0"), 10),
     },
-    signature: p["signature"],
-    visibility: (p["visibility"] ?? "public") as Visibility,
+    signature: node.properties["signature"] as string | undefined,
+    visibility: prop(node, "visibility", "public") as Visibility,
     modifiers: [],
+  };
+}
+
+// ─── Graph query helpers using GraphAdapter ───────────────────────────────────
+
+interface CypherNodeRow {
+  n: { labels: string[]; properties: Record<string, string> };
+}
+
+interface CypherSymbolRow {
+  s: { labels: string[]; properties: Record<string, string> };
+}
+
+interface CypherProcessRow {
+  p: { labels: string[]; properties: Record<string, string> };
+}
+
+interface CypherClusterRow {
+  c: { labels: string[]; properties: Record<string, string> };
+}
+
+interface CypherStepRow {
+  symbolId: string;
+  stepOrder: number;
+  description: string | null;
+}
+
+function rowToNode(row: CypherNodeRow): GraphNode {
+  const n = row.n;
+  return { id: n.properties["id"] ?? "", labels: n.labels, properties: n.properties };
+}
+
+async function findSymbolsInFiles(graph: GraphAdapter, filePaths: string[]): Promise<GraphNode[]> {
+  if (filePaths.length === 0) return [];
+  const rows = await graph.runCypher<CypherSymbolRow>(
+    `MATCH (s:Symbol) WHERE s.filePath IN $filePaths RETURN s`,
+    { filePaths },
+  );
+  return rows.map((r) => ({
+    id: r.s.properties["id"] ?? "",
+    labels: r.s.labels,
+    properties: r.s.properties,
+  }));
+}
+
+async function findDependents(graph: GraphAdapter, symbolId: string): Promise<GraphNode[]> {
+  const rows = await graph.runCypher<CypherNodeRow>(
+    `MATCH (n:Symbol)-[e:CALLS*1..${MAX_TRAVERSAL_DEPTH}]->(t:Symbol) WHERE t.id = $val OR t.name = $val RETURN DISTINCT n`,
+    { val: symbolId },
+  );
+  return rows.map(rowToNode);
+}
+
+async function findProcessesBySymbol(graph: GraphAdapter, symbolId: string): Promise<GraphNode[]> {
+  const rows = await graph.runCypher<CypherProcessRow>(
+    `MATCH (p:Process)-[:HAS_STEP]->(s:Symbol) WHERE s.id = $val OR s.name = $val RETURN DISTINCT p`,
+    { val: symbolId },
+  );
+  return rows.map((r) => ({
+    id: r.p.properties["id"] ?? "",
+    labels: r.p.labels,
+    properties: r.p.properties,
+  }));
+}
+
+async function findClustersBySymbol(graph: GraphAdapter, symbolId: string): Promise<GraphNode[]> {
+  const rows = await graph.runCypher<CypherClusterRow>(
+    `MATCH (c:Cluster)-[:CONTAINS]->(s:Symbol) WHERE s.id = $val OR s.name = $val RETURN DISTINCT c`,
+    { val: symbolId },
+  );
+  return rows.map((r) => ({
+    id: r.c.properties["id"] ?? "",
+    labels: r.c.labels,
+    properties: r.c.properties,
+  }));
+}
+
+async function findProcessSteps(graph: GraphAdapter, processId: string): Promise<Array<{ order: number; symbolId: string; description: string }>> {
+  const rows = await graph.runCypher<CypherStepRow>(
+    `MATCH (p:Process {id: $processId})-[r:HAS_STEP]->(s:Symbol)
+     RETURN s.id AS symbolId, r.step_order AS stepOrder, s.name AS description
+     ORDER BY r.step_order ASC`,
+    { processId },
+  );
+  return rows.map((r) => ({
+    order: r.stepOrder,
+    symbolId: r.symbolId,
+    description: r.description ?? "",
+  }));
+}
+
+async function graphNodeToProcess(node: GraphNode, graph: GraphAdapter): Promise<Process> {
+  const steps = await findProcessSteps(graph, node.id);
+  return {
+    id: node.id,
+    name: prop(node, "name", node.id),
+    entryPoint: prop(node, "entryPoint"),
+    steps,
+    dataFlow: [],
   };
 }
 
@@ -64,25 +162,22 @@ function generateTestRecommendations(
     return recommendations;
   }
 
-  // Recommend testing all affected flows for high/critical risk
   if (riskLevel === "critical" || riskLevel === "high") {
     recommendations.push(`Test all ${processes.length} affected flow(s) end-to-end due to ${riskLevel.toUpperCase()} risk.`);
-    processes.forEach((p) => {
+    for (const p of processes) {
       recommendations.push(`- ${p.name}`);
-    });
+    }
   } else if (riskLevel === "medium") {
-    // For medium risk, recommend testing top 3 processes
     const topProcesses = processes.slice(0, 3);
     recommendations.push(`Test ${topProcesses.length} critical flow(s):`);
-    topProcesses.forEach((p) => {
+    for (const p of topProcesses) {
       recommendations.push(`- ${p.name}`);
-    });
+    }
   } else {
-    // For low risk, recommend unit tests + smoke test
     recommendations.push("Run unit tests for changed symbols:");
-    changedSymbols.forEach((s) => {
+    for (const s of changedSymbols) {
       recommendations.push(`- ${s.name} (${s.location.filePath})`);
-    });
+    }
     if (processes.length > 0) {
       recommendations.push(`Smoke test: ${processes[0].name}`);
     }
@@ -92,55 +187,32 @@ function generateTestRecommendations(
 }
 
 /**
- * Find all symbols defined in the given file paths.
- * Requirements: 11b.1
- */
-async function findSymbolsInFiles(
-  session: Session,
-  filePaths: string[],
-): Promise<GraphNode[]> {
-  if (filePaths.length === 0) return [];
-
-  const result = await session.run(
-    `MATCH (s:Symbol)
-     WHERE s.filePath IN $filePaths
-     RETURN s`,
-    { filePaths },
-  );
-
-  return result.records.map((r) => {
-    const n = r.get("s") as { labels: string[]; properties: Record<string, string> };
-    return { id: n.properties["id"] ?? "", labels: n.labels, properties: n.properties };
-  });
-}
-
-/**
- * Execute a pre-commit check query.
- * 
+ * Execute a pre-commit check query using GraphAdapter.runCypher().
+ *
  * Analyzes the blast radius of uncommitted changes:
  * 1. Identifies all symbols defined in changed files (Req 11b.1)
  * 2. Finds all direct and transitive dependents (Req 11b.2)
  * 3. Identifies affected business processes (Req 11b.3)
  * 4. Calculates risk assessment (Req 11b.4)
  * 5. Generates testing recommendations (Req 11b.5)
- * 
- * Requirements: 11b.1, 11b.2, 11b.3, 11b.4, 11b.5
+ *
+ * Requirements: 11b.1, 11b.2, 11b.3, 11b.4, 11b.5, 7.2
  */
 export async function executePreCommitCheck(
   changedFiles: string[],
   maxResults: number,
-  graphSession: Session,
+  graphAdapter: GraphAdapter,
 ): Promise<Pick<QueryResult, "symbols" | "relationships" | "clusters" | "processes" | "confidence" | "riskLevel" | "affectedFlows">> {
   // Req 11b.1 — identify all symbols defined in changed files
-  const changedSymbolNodes = await findSymbolsInFiles(graphSession, changedFiles);
-  
+  const changedSymbolNodes = await findSymbolsInFiles(graphAdapter, changedFiles);
+
   if (changedSymbolNodes.length === 0) {
     return {
       symbols: [],
       relationships: [],
       clusters: [],
       processes: [],
-      confidence: 0.95, // High confidence that no symbols are affected
+      confidence: 0.95,
       riskLevel: "low",
       affectedFlows: [],
     };
@@ -154,7 +226,7 @@ export async function executePreCommitCheck(
   const seenIds = new Set<string>();
 
   for (const symbolId of changedSymbolIds) {
-    const dependents = await findDependents(graphSession, symbolId);
+    const dependents = await findDependents(graphAdapter, symbolId);
     for (const dep of dependents) {
       if (!seenIds.has(dep.id)) {
         seenIds.add(dep.id);
@@ -169,11 +241,10 @@ export async function executePreCommitCheck(
   const allProcessNodes: GraphNode[] = [];
   const seenProcessIds = new Set<string>();
 
-  // Check processes for both changed symbols and their dependents
   const allAffectedSymbolIds = [...changedSymbolIds, ...dependentSymbols.map((s) => s.id)];
 
   for (const symbolId of allAffectedSymbolIds) {
-    const processNodes = await findProcessesBySymbol(graphSession, symbolId);
+    const processNodes = await findProcessesBySymbol(graphAdapter, symbolId);
     for (const proc of processNodes) {
       if (!seenProcessIds.has(proc.id)) {
         seenProcessIds.add(proc.id);
@@ -182,14 +253,14 @@ export async function executePreCommitCheck(
     }
   }
 
-  const processes = await Promise.all(allProcessNodes.map((n) => graphNodeToProcess(n, graphSession)));
+  const processes = await Promise.all(allProcessNodes.map((n) => graphNodeToProcess(n, graphAdapter)));
 
   // Collect clusters for context
   const allClusterNodes: GraphNode[] = [];
   const seenClusterIds = new Set<string>();
 
   for (const symbolId of changedSymbolIds) {
-    const clusterNodes = await findClustersBySymbol(graphSession, symbolId);
+    const clusterNodes = await findClustersBySymbol(graphAdapter, symbolId);
     for (const cluster of clusterNodes) {
       if (!seenClusterIds.has(cluster.id)) {
         seenClusterIds.add(cluster.id);
@@ -216,10 +287,10 @@ export async function executePreCommitCheck(
 
   // Combine changed symbols and their dependents
   const allAffectedSymbols = [...changedSymbols, ...dependentSymbols];
-  
+
   // Req 11b.4 — calculate risk assessment
   const riskLevel = calculatePreCommitRisk(allAffectedSymbols);
-  
+
   // Req 11b.5 — generate testing recommendations
   const testRecommendations = generateTestRecommendations(processes, riskLevel, changedSymbols);
   const affectedFlows = processes.map((p) => p.name);

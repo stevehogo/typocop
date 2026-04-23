@@ -1,137 +1,115 @@
 /**
  * Data flow tracing query logic.
- * Requirements: 13.1, 13.2, 13.3, 13.4, 13.5, 13.6, 13.7
+ * Requirements: 13.1, 13.2, 13.3, 13.4, 13.5, 13.6, 13.7, 7.2, 1.1, 1.2, 1.4, 1.5, 4.2, 4.3, 4.4, 4.5
  */
-import type { Session, ManagedTransaction } from "neo4j-driver";
-import type { Symbol, Relationship, QueryResult, SymbolKind, Visibility } from "../types/index.js";
-import { txFindNode, txFindDependencies } from "../graph/query.js";
-import type { GraphNode } from "../graph/connection.js";
+import type { GraphAdapter, GraphNode } from "../db/types.js";
+import type { Symbol, Relationship, QueryResult } from "../types/index.js";
+import { MAX_TRAVERSAL_DEPTH } from "../utils/limits.js";
+import { rowToNode, graphNodeToSymbol } from "./graph-helpers.js";
+import type { CypherNodeRow } from "./graph-helpers.js";
+import { resolveSymbol, type SymbolResolution } from "./symbol-resolver.js";
+import { classifyLayer } from "./framework-layers.js";
 
-/** Layer classification patterns */
-const LAYER_PATTERNS = {
-  api: [/endpoint/i, /route/i, /controller.*action/i, /api/i, /@get/i, /@post/i, /@put/i, /@delete/i],
-  controller: [/controller/i, /handler/i],
-  service: [/service/i, /manager/i, /business/i],
-  repository: [/repository/i, /dao/i, /store/i],
-  model: [/model/i, /entity/i, /schema/i, /table/i],
-};
+// ─── Graph query helpers using GraphAdapter ───────────────────────────────────
 
-function classifyLayer(node: GraphNode): "api" | "controller" | "service" | "repository" | "model" | "unknown" {
-  const name = node.properties["name"]?.toLowerCase() ?? "";
-  const filePath = node.properties["filePath"]?.toLowerCase() ?? "";
-  const signature = node.properties["signature"]?.toLowerCase() ?? "";
-  const combined = `${name} ${filePath} ${signature}`;
-
-  for (const [layer, patterns] of Object.entries(LAYER_PATTERNS)) {
-    if (patterns.some((p) => p.test(combined))) {
-      return layer as "api" | "controller" | "service" | "repository" | "model";
-    }
-  }
-  return "unknown";
+async function findDependencies(graph: GraphAdapter, symbolId: string): Promise<GraphNode[]> {
+  const rows = await graph.runCypher<CypherNodeRow>(
+    `MATCH (s:Symbol)-[e:CALLS*1..${MAX_TRAVERSAL_DEPTH}]->(n:Symbol) WHERE s.id = $val OR s.name = $val RETURN DISTINCT n`,
+    { val: symbolId },
+  );
+  return rows.map(rowToNode);
 }
 
-function graphNodeToSymbol(node: GraphNode): Symbol {
-  const p = node.properties;
-  return {
-    id: node.id,
-    name: p["name"] ?? node.id,
-    kind: (p["kind"] ?? "function") as SymbolKind,
-    location: {
-      filePath: p["filePath"] ?? "",
-      startLine: parseInt(p["startLine"] ?? "0", 10),
-      startColumn: parseInt(p["startColumn"] ?? "0", 10),
-      endLine: parseInt(p["endLine"] ?? "0", 10),
-      endColumn: parseInt(p["endColumn"] ?? "0", 10),
-    },
-    signature: p["signature"],
-    visibility: (p["visibility"] ?? "public") as Visibility,
-    modifiers: [],
-  };
-}
+/** Return type for executeDataFlowTrace, including resolution info for callers. */
+export type DataFlowTraceResult = { resolution: SymbolResolution } & Pick<QueryResult, "symbols" | "relationships" | "clusters" | "processes" | "confidence" | "riskLevel" | "affectedFlows">;
 
 /**
- * Execute a data flow tracing query.
- * All graph reads are consolidated into a single session.executeRead() transaction
- * to prevent "open transaction" errors in Neo4j driver v5+. (Req 2.6)
- *
+ * Execute a data flow tracing query using GraphAdapter.runCypher().
  * Traces from API endpoint through controllers, services, repositories to database models.
- * Requirements: 13.1, 13.2, 13.3, 13.4, 13.5, 13.6, 13.7, 2.6
+ * Uses resolveSymbol for exact → fuzzy fallback (Req 1.1, 1.2, 1.4, 1.5).
+ * Uses classifyLayer from framework-layers for framework-aware classification (Req 4.2, 4.3, 4.4, 4.5).
+ * Requirements: 13.1, 13.2, 13.3, 13.4, 13.5, 13.6, 13.7, 7.2, 1.1, 1.2, 1.4, 1.5, 4.2, 4.3, 4.4, 4.5
  */
 export async function executeDataFlowTrace(
   entryPoint: string,
   maxResults: number,
-  graphSession: Session,
-): Promise<Pick<QueryResult, "symbols" | "relationships" | "clusters" | "processes" | "confidence" | "riskLevel" | "affectedFlows">> {
-  return graphSession.executeRead(async (tx: ManagedTransaction) => {
-    // Req 13.1 — identify entry point symbol
-    const entryNode = await txFindNode(tx, entryPoint);
-    if (!entryNode) {
-      return {
-        symbols: [],
-        relationships: [],
-        clusters: [],
-        processes: [],
-        confidence: 0.5,
-        riskLevel: "low" as const,
-        affectedFlows: [],
-      };
-    }
+  graphAdapter: GraphAdapter,
+  framework?: string,
+): Promise<DataFlowTraceResult> {
+  // Req 13.1, 1.1, 1.2, 1.4 — resolve entry point symbol (exact → fuzzy → not_found)
+  const resolution = await resolveSymbol(entryPoint, graphAdapter);
 
-    // Req 13.2-13.5 — trace through all dependencies
-    const dependencyNodes = await txFindDependencies(tx, entryPoint);
-
-    // Classify nodes by layer
-    const layeredNodes = new Map<string, GraphNode[]>();
-    layeredNodes.set("api", [entryNode]);
-
-    for (const node of dependencyNodes) {
-      const layer = classifyLayer(node);
-      if (!layeredNodes.has(layer)) {
-        layeredNodes.set(layer, []);
-      }
-      layeredNodes.get(layer)!.push(node);
-    }
-
-    // Build ordered path: API → Controller → Service → Repository → Model
-    const orderedLayers = ["api", "controller", "service", "repository", "model"];
-    const pathSymbols: Symbol[] = [];
-    const relationships: Relationship[] = [];
-
-    for (const layer of orderedLayers) {
-      const nodes = layeredNodes.get(layer) ?? [];
-      pathSymbols.push(...nodes.map(graphNodeToSymbol));
-    }
-
-    // Build relationships between consecutive symbols
-    for (let i = 0; i < pathSymbols.length - 1; i++) {
-      relationships.push({
-        id: `${pathSymbols[i].id}->calls->${pathSymbols[i + 1].id}`,
-        source: pathSymbols[i].id,
-        target: pathSymbols[i + 1].id,
-        relType: "calls" as const,
-        metadata: {},
-      });
-    }
-
-    // Req 13.6 — return complete path
-    const allSymbols = pathSymbols.slice(0, maxResults);
-
-    // Req 13.7 — check for Full tracing (API + Controller + DB)
-    const hasApi = (layeredNodes.get("api") ?? []).length > 0;
-    const hasController = (layeredNodes.get("controller") ?? []).length > 0;
-    const hasModel = (layeredNodes.get("model") ?? []).length > 0;
-    const isFullTrace = hasApi && hasController && hasModel;
-
-    const confidence = isFullTrace ? 0.92 : pathSymbols.length > 1 ? 0.75 : 0.60;
-
+  if (resolution.kind === "not_found") {
     return {
-      symbols: allSymbols,
-      relationships,
+      resolution,
+      symbols: [],
+      relationships: [],
       clusters: [],
       processes: [],
-      confidence,
+      confidence: 0.5,
       riskLevel: "low" as const,
-      affectedFlows: orderedLayers.filter((l) => (layeredNodes.get(l) ?? []).length > 0),
+      affectedFlows: [],
     };
-  });
+  }
+
+  // Both "exact" and "fuzzy" provide a resolved node
+  const entryNode = resolution.node;
+
+  // Req 13.2-13.5 — trace through all dependencies
+  const dependencyNodes = await findDependencies(graphAdapter, entryPoint);
+
+  // Classify nodes by layer using framework-aware classification (Req 4.2, 4.3, 4.4, 4.5)
+  const layeredNodes = new Map<string, GraphNode[]>();
+  layeredNodes.set("api", [entryNode]);
+
+  for (const node of dependencyNodes) {
+    const layer = classifyLayer(node, framework);
+    if (!layeredNodes.has(layer)) {
+      layeredNodes.set(layer, []);
+    }
+    layeredNodes.get(layer)!.push(node);
+  }
+
+  // Build ordered path: API → Controller → Service → Repository → Model
+  const orderedLayers = ["api", "controller", "service", "repository", "model"];
+  const pathSymbols: Symbol[] = [];
+  const relationships: Relationship[] = [];
+
+  for (const layer of orderedLayers) {
+    const nodes = layeredNodes.get(layer) ?? [];
+    pathSymbols.push(...nodes.map(graphNodeToSymbol));
+  }
+
+  // Build relationships between consecutive symbols
+  for (let i = 0; i < pathSymbols.length - 1; i++) {
+    relationships.push({
+      id: `${pathSymbols[i].id}->calls->${pathSymbols[i + 1].id}`,
+      source: pathSymbols[i].id,
+      target: pathSymbols[i + 1].id,
+      relType: "calls" as const,
+      metadata: {},
+    });
+  }
+
+  // Req 13.6 — return complete path
+  const allSymbols = pathSymbols.slice(0, maxResults);
+
+  // Req 13.7 — check for Full tracing (API + Controller + DB)
+  const hasApi = (layeredNodes.get("api") ?? []).length > 0;
+  const hasController = (layeredNodes.get("controller") ?? []).length > 0;
+  const hasModel = (layeredNodes.get("model") ?? []).length > 0;
+  const isFullTrace = hasApi && hasController && hasModel;
+
+  const confidence = isFullTrace ? 0.92 : pathSymbols.length > 1 ? 0.75 : 0.60;
+
+  return {
+    resolution,
+    symbols: allSymbols,
+    relationships,
+    clusters: [],
+    processes: [],
+    confidence,
+    riskLevel: "low" as const,
+    affectedFlows: orderedLayers.filter((l) => (layeredNodes.get(l) ?? []).length > 0),
+  };
 }

@@ -1,6 +1,6 @@
 /**
- * MCP server main entry point — connects to query server via HTTP.
- * Requirements: 15.5, 15.7, 17.1, 17.2, 17.3
+ * MCP server main entry point — uses DatabaseAdapter for all database access.
+ * Requirements: 15.5, 15.7, 17.1, 17.2, 17.3, 7.1
  */
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
@@ -8,34 +8,11 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { createMCPServer } from "./registration.js";
 import { executeTool } from "./tools.js";
-import { SessionManager } from "./session-manager.js";
-import { createDriver } from "../graph/connection.js";
-import { createPool } from "../vector/connection.js";
+import { createDatabaseAdapter } from "../db/database-adapter.js";
+import { drainAllPools } from "../db/pool-registry.js";
 import { configurationManager, ConfigurationError, PrefixValidationError } from "../config/index.js";
 import type { MCPToolResponse } from "../types/index.js";
-
-/**
- * Get database configuration from environment variables.
- */
-function getDatabaseConfig(): {
-  neo4j: { uri: string; user: string; password: string };
-  postgres: { host: string; port: number; database: string; user: string; password: string };
-} {
-  const neo4jUri = process.env.NEO4J_URI || "bolt://localhost:8687";
-  const neo4jUser = process.env.NEO4J_USER || "neo4j";
-  const neo4jPassword = process.env.NEO4J_PASSWORD || "password";
-
-  const pgHost = process.env.POSTGRES_HOST || "localhost";
-  const pgPort = parseInt(process.env.POSTGRES_PORT || "5432", 10);
-  const pgDatabase = process.env.POSTGRES_DB || "typocop";
-  const pgUser = process.env.POSTGRES_USER || "postgres";
-  const pgPassword = process.env.POSTGRES_PASSWORD || "password";
-
-  return {
-    neo4j: { uri: neo4jUri, user: neo4jUser, password: neo4jPassword },
-    postgres: { host: pgHost, port: pgPort, database: pgDatabase, user: pgUser, password: pgPassword },
-  };
-}
+import type { DatabaseAdapter } from "../db/types.js";
 
 /**
  * Strip the configured prefix from relationship types in an MCP tool response.
@@ -56,8 +33,8 @@ function stripPrefixFromMCPResponse(response: MCPToolResponse, prefix: string): 
 }
 
 /**
- * Start the MCP server with database connections.
- * Requirements: 15.5, 15.7, 17.1, 17.2, 17.3
+ * Start the MCP server with DatabaseAdapter.
+ * Requirements: 15.5, 15.7, 17.1, 17.2, 17.3, 7.1
  */
 export async function startMCPServer(): Promise<void> {
   // Req 17.1, 18.1: Initialize configuration before database connections
@@ -83,16 +60,11 @@ export async function startMCPServer(): Promise<void> {
   }
 
   const prefix = configurationManager.getPrefix();
+  const config = configurationManager.getConfiguration();
   console.error(`[mcp] Using prefix: ${prefix}`);
 
-  const config = getDatabaseConfig();
-
-  // Create database connections
-  const driver = await createDriver(config.neo4j.uri, config.neo4j.user, config.neo4j.password);
-  const pool = await createPool(config.postgres);
-
-  // Session manager serializes Neo4j session access and cleans up on disconnect
-  const sessionManager = new SessionManager();
+  // Create DatabaseAdapter from FullConfig (Req 7.1)
+  const adapter: DatabaseAdapter = await createDatabaseAdapter(config);
 
   // Create MCP server
   const server = createMCPServer();
@@ -104,10 +76,7 @@ export async function startMCPServer(): Promise<void> {
       const result = await executeTool(
         request.params.name,
         request.params.arguments || {},
-        pool,
-        driver,
-        sessionManager,
-        prefix,
+        adapter,
       );
 
       // Req 17.2: Strip prefix from response before returning
@@ -157,10 +126,9 @@ export async function startMCPServer(): Promise<void> {
   // Start server with stdio transport
   const transport = new StdioServerTransport();
 
-  // Close all tracked sessions when the transport disconnects to prevent
-  // zombie transactions on the next reconnect. (Requirements: 2.2, 2.3, 2.4)
+  // Drain all pools when the transport disconnects (Req 11.1)
   transport.onclose = async () => {
-    await sessionManager.closeAll();
+    await drainAllPools();
   };
 
   await server.connect(transport);

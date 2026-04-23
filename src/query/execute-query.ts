@@ -1,12 +1,10 @@
 /**
  * Query execution engine.
- * Requirements: 9.3, 9.4, 9.5, 9.6, 9.7, 23.3
+ * Requirements: 9.3, 9.4, 9.5, 9.6, 9.7, 23.3, 7.1
  */
-import type { Pool } from "pg";
-import type { Session } from "neo4j-driver";
-import type { Query, QueryResult, QueryIntent, Symbol, Relationship, Cluster, Process } from "../types/index.js";
+import type { DatabaseAdapter } from "../db/types.js";
+import type { Query, QueryResult } from "../types/index.js";
 import { QUERY_TIMEOUT_MS } from "../utils/limits.js";
-import { findNode } from "../graph/query.js";
 import { parseQueryIntent } from "./parse-intent.js";
 import { executeImpactAnalysis, calculateImpactRisk } from "./impact-analysis.js";
 import { preprocessQuery, isValidQuery } from "./preprocess.js";
@@ -15,28 +13,25 @@ import { calculateConfidence } from "./confidence.js";
 
 /**
  * Execute a query with timeout enforcement.
- * Requirements: 9.3, 9.4, 9.5, 9.6, 9.7, 23.3
+ * Accepts a DatabaseAdapter instead of Pool + Session + prefix (Req 7.1).
+ * Requirements: 9.3, 9.4, 9.5, 9.6, 9.7, 23.3, 7.1
  */
 export async function executeQuery(
   query: Query,
-  vectorPool: Pool,
-  graphSession: Session,
-  prefix: string,
+  adapter: DatabaseAdapter,
 ): Promise<QueryResult> {
   const timeoutPromise = new Promise<never>((_, reject) =>
     setTimeout(() => reject(new Error("Query timeout")), QUERY_TIMEOUT_MS),
   );
 
-  const resultPromise = executeQueryInternal(query, vectorPool, graphSession, prefix);
+  const resultPromise = executeQueryInternal(query, adapter);
 
   return Promise.race([resultPromise, timeoutPromise]);
 }
 
 async function executeQueryInternal(
   query: Query,
-  vectorPool: Pool,
-  graphSession: Session,
-  prefix: string,
+  adapter: DatabaseAdapter,
 ): Promise<QueryResult> {
   // Preprocess and sanitize query text before intent parsing (Req 22.3)
   if (!isValidQuery(query.text)) {
@@ -52,24 +47,26 @@ async function executeQueryInternal(
     };
   }
   const processedText = preprocessQuery(sanitizeQuery(query.text));
-  const { intent, confidence: intentConfidence } = parseQueryIntent(processedText);
+  const { intent } = parseQueryIntent(processedText);
+
+  const graphAdapter = adapter.getGraphAdapter();
 
   // Route to specific query handler based on intent
   if (intent.type === "impactAnalysis") {
-    const result = await executeImpactAnalysis(intent.target, query.maxResults, graphSession);
+    const result = await executeImpactAnalysis(intent.target, query.maxResults, graphAdapter);
     return { intent, ...result };
   }
 
   if (intent.type === "smartSearch") {
     const { executeSmartSearch } = await import("./smart-search.js");
-    const { generateEmbedding } = await import("../vector/embed.js");
+    const embeddingAdapter = adapter.getEmbeddingAdapter();
+    const vectorAdapter = adapter.getVectorAdapter();
     const result = await executeSmartSearch(
       intent.query,
       query.maxResults,
-      vectorPool,
-      graphSession,
-      generateEmbedding,
-      prefix,
+      vectorAdapter,
+      graphAdapter,
+      embeddingAdapter,
     );
     const confidence = calculateConfidence(result.symbols, [], intent, result.searchResults);
     const riskLevel = calculateImpactRisk(result.symbols);
@@ -89,19 +86,19 @@ async function executeQueryInternal(
 
   if (intent.type === "preCommitCheck") {
     const { executePreCommitCheck } = await import("./pre-commit-check.js");
-    const result = await executePreCommitCheck(intent.changedFiles, query.maxResults, graphSession);
+    const result = await executePreCommitCheck(intent.changedFiles, query.maxResults, graphAdapter);
     return { intent, ...result };
   }
 
   if (intent.type === "contextRetrieval") {
     const { executeContextRetrieval } = await import("./context-retrieval.js");
-    const result = await executeContextRetrieval(intent.target, query.maxResults, graphSession);
+    const result = await executeContextRetrieval(intent.target, query.maxResults, graphAdapter);
     return { intent, ...result };
   }
 
   if (intent.type === "dataFlowTrace") {
     const { executeDataFlowTrace } = await import("./data-flow-trace.js");
-    const result = await executeDataFlowTrace(intent.entryPoint, query.maxResults, graphSession);
+    const result = await executeDataFlowTrace(intent.entryPoint, query.maxResults, graphAdapter);
     return { intent, ...result };
   }
 

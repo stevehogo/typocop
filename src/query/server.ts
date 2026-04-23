@@ -4,8 +4,7 @@
  */
 import Fastify from "fastify";
 import type { FastifyInstance } from "fastify";
-import type { Pool } from "pg";
-import type { Driver } from "neo4j-driver";
+import type { DatabaseAdapter } from "../db/types.js";
 import type { Query, QueryResult, RelationType } from "../types/index.js";
 import { executeQuery } from "./execute-query.js";
 import { sanitizeQuery } from "../security/sanitize.js";
@@ -14,8 +13,7 @@ import { configurationManager, ConfigurationError } from "../config/index.js";
 export interface QueryServerConfig {
   readonly port: number;
   readonly host: string;
-  readonly vectorPool: Pool;
-  readonly graphDriver: Driver;
+  readonly adapter: DatabaseAdapter;
   readonly prefix?: string;
 }
 
@@ -94,15 +92,10 @@ export function createQueryServer(config: QueryServerConfig): FastifyInstance {
     };
 
     try {
-      const session = config.graphDriver.session();
-      try {
-        const raw = await executeQuery(query, config.vectorPool, session, prefix);
-        // Req 9.3: strip prefix from relationship types and node labels in response
-        const result = stripPrefixFromResult(raw, prefix);
-        return result;
-      } finally {
-        await session.close();
-      }
+      const raw = await executeQuery(query, config.adapter);
+      // Req 9.3: strip prefix from relationship types and node labels in response
+      const result = stripPrefixFromResult(raw, prefix);
+      return result;
     } catch (error) {
       request.log.error(error, "Query execution failed");
       return reply.code(500).send({

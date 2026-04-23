@@ -14,13 +14,12 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as fc from "fast-check";
-import type { Driver, Session } from "neo4j-driver";
-import type { Pool } from "pg";
 
 // ─── Mock setup ───────────────────────────────────────────────────────────────
 
-const mockClearGraphData = vi.fn();
-const mockClearVectorData = vi.fn();
+const mockDeleteNodesByLabel = vi.fn();
+const mockDeleteRelationshipsByType = vi.fn();
+const mockDeleteAll = vi.fn();
 const mockRunIndexingPipeline = vi.fn();
 
 vi.mock("ora", () => {
@@ -34,29 +33,24 @@ vi.mock("ora", () => {
   return { default: vi.fn(() => oraMock) };
 });
 
-vi.mock("../graph/connection.js", () => ({
-  createDriver: vi.fn().mockImplementation(async () => ({
-    session: vi.fn().mockReturnValue({
-      run: vi.fn().mockResolvedValue({ records: [] }),
-      close: vi.fn().mockResolvedValue(undefined),
-    }),
+vi.mock("../db/database-adapter.js", () => ({
+  createDatabaseAdapter: vi.fn().mockImplementation(async () => ({
+    initialize: vi.fn().mockResolvedValue(undefined),
     close: vi.fn().mockResolvedValue(undefined),
+    getGraphAdapter: vi.fn().mockReturnValue({
+      deleteNodesByLabel: mockDeleteNodesByLabel,
+      deleteRelationshipsByType: mockDeleteRelationshipsByType,
+      runCypher: vi.fn().mockResolvedValue([]),
+    }),
+    getVectorAdapter: vi.fn().mockReturnValue({
+      deleteAll: mockDeleteAll,
+    }),
+    getEmbeddingAdapter: vi.fn().mockReturnValue({
+      isEnabled: vi.fn().mockReturnValue(false),
+      embedText: vi.fn().mockResolvedValue(null),
+      getDimensions: vi.fn().mockReturnValue(2560),
+    }),
   })),
-}));
-
-vi.mock("../vector/connection.js", () => ({
-  createPool: vi.fn().mockImplementation(async () => ({
-    end: vi.fn().mockResolvedValue(undefined),
-  })),
-  initVectorStore: vi.fn().mockResolvedValue(undefined),
-}));
-
-vi.mock("../graph/store.js", () => ({
-  clearGraphData: mockClearGraphData,
-}));
-
-vi.mock("../vector/index-store.js", () => ({
-  clearVectorData: mockClearVectorData,
 }));
 
 vi.mock("../indexer/pipeline.js", () => ({
@@ -67,6 +61,7 @@ vi.mock("../config/index.js", () => ({
   configurationManager: {
     initialize: vi.fn().mockResolvedValue(undefined),
     getPrefix: vi.fn().mockReturnValue("tpc_"),
+    getConfiguration: vi.fn().mockReturnValue({}),
   },
 }));
 
@@ -78,11 +73,9 @@ describe("Property-based tests: Refresh parameter functionality", () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
 
     // Default mock implementations
-    mockClearGraphData.mockResolvedValue({
-      nodesDeleted: 0,
-      relationshipsDeleted: 0,
-    });
-    mockClearVectorData.mockResolvedValue(0);
+    mockDeleteNodesByLabel.mockResolvedValue(0);
+    mockDeleteRelationshipsByType.mockResolvedValue(0);
+    mockDeleteAll.mockResolvedValue(0);
     mockRunIndexingPipeline.mockResolvedValue({
       symbols: [],
       relationships: [],
@@ -116,12 +109,6 @@ describe("Property-based tests: Refresh parameter functionality", () => {
         async (input) => {
           vi.clearAllMocks();
 
-          // Setup: mock clearing to return the counts
-          mockClearGraphData.mockResolvedValue({
-            nodesDeleted: input.nodeCount,
-            relationshipsDeleted: input.relCount,
-          });
-
           mockRunIndexingPipeline.mockResolvedValue({
             symbols: [{ id: "sym1" }],
             relationships: [{ id: "rel1" }],
@@ -143,11 +130,11 @@ describe("Property-based tests: Refresh parameter functionality", () => {
 
           await executeCLI(command);
 
-          // Assert: clearGraphData must be called exactly once when refresh is true
-          expect(mockClearGraphData).toHaveBeenCalledTimes(1);
+          // Assert: deleteNodesByLabel must be called when refresh is true
+          expect(mockDeleteNodesByLabel).toHaveBeenCalled();
 
-          // Assert: clearGraphData must be called before indexing pipeline
-          const clearGraphCallOrder = mockClearGraphData.mock.invocationCallOrder[0];
+          // Assert: graph clearing must be called before indexing pipeline
+          const clearGraphCallOrder = mockDeleteNodesByLabel.mock.invocationCallOrder[0];
           const pipelineCallOrder = mockRunIndexingPipeline.mock.invocationCallOrder[0];
           return clearGraphCallOrder < pipelineCallOrder;
         }
@@ -173,9 +160,6 @@ describe("Property-based tests: Refresh parameter functionality", () => {
         async (input) => {
           vi.clearAllMocks();
 
-          // Setup: mock clearing to return the embedding count
-          mockClearVectorData.mockResolvedValue(input.embeddingCount);
-
           mockRunIndexingPipeline.mockResolvedValue({
             symbols: [{ id: "sym1" }],
             relationships: [],
@@ -197,11 +181,11 @@ describe("Property-based tests: Refresh parameter functionality", () => {
 
           await executeCLI(command);
 
-          // Assert: clearVectorData must be called exactly once when refresh is true
-          expect(mockClearVectorData).toHaveBeenCalledTimes(1);
+          // Assert: deleteAll must be called when refresh is true
+          expect(mockDeleteAll).toHaveBeenCalledTimes(1);
 
-          // Assert: clearVectorData must be called before indexing pipeline
-          const clearVectorCallOrder = mockClearVectorData.mock.invocationCallOrder[0];
+          // Assert: vector clearing must be called before indexing pipeline
+          const clearVectorCallOrder = mockDeleteAll.mock.invocationCallOrder[0];
           const pipelineCallOrder = mockRunIndexingPipeline.mock.invocationCallOrder[0];
           return clearVectorCallOrder < pipelineCallOrder;
         }
@@ -263,7 +247,7 @@ describe("Property-based tests: Refresh parameter functionality", () => {
           expect(mockRunIndexingPipeline).toHaveBeenCalledTimes(1);
 
           // Assert: pipeline is called after clearing
-          const clearGraphCallOrder = mockClearGraphData.mock.invocationCallOrder[0];
+          const clearGraphCallOrder = mockDeleteNodesByLabel.mock.invocationCallOrder[0];
           const pipelineCallOrder = mockRunIndexingPipeline.mock.invocationCallOrder[0];
           return clearGraphCallOrder < pipelineCallOrder;
         }
@@ -310,9 +294,9 @@ describe("Property-based tests: Refresh parameter functionality", () => {
 
           await executeCLI(command);
 
-          // Assert: clearVectorData must be called before pipeline
-          expect(mockClearVectorData).toHaveBeenCalledTimes(1);
-          const clearVectorCallOrder = mockClearVectorData.mock.invocationCallOrder[0];
+          // Assert: deleteAll must be called before pipeline
+          expect(mockDeleteAll).toHaveBeenCalledTimes(1);
+          const clearVectorCallOrder = mockDeleteAll.mock.invocationCallOrder[0];
           const pipelineCallOrder = mockRunIndexingPipeline.mock.invocationCallOrder[0];
 
           // Assert: pipeline runs after clearing and produces embeddings
@@ -361,11 +345,11 @@ describe("Property-based tests: Refresh parameter functionality", () => {
 
           await executeCLI(command);
 
-          // Assert: clearGraphData must NOT be called when refresh is false
-          expect(mockClearGraphData).not.toHaveBeenCalled();
+          // Assert: deleteNodesByLabel must NOT be called when refresh is false
+          expect(mockDeleteNodesByLabel).not.toHaveBeenCalled();
 
-          // Assert: clearVectorData must NOT be called when refresh is false
-          expect(mockClearVectorData).not.toHaveBeenCalled();
+          // Assert: deleteAll must NOT be called when refresh is false
+          expect(mockDeleteAll).not.toHaveBeenCalled();
 
           // Assert: indexing pipeline must still run
           expect(mockRunIndexingPipeline).toHaveBeenCalledTimes(1);

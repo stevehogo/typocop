@@ -1,6 +1,6 @@
 /**
  * MCP Server — Model Context Protocol integration.
- * Requirements: 15.1–15.8, 22.5
+ * Requirements: 15.1–15.8, 22.5, 7.1
  */
 export { createMCPServer, registerTools, registerPrompts } from "./registration.js";
 export { handleMCPRequest, createConnectionState } from "./handler.js";

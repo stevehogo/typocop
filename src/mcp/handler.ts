@@ -1,16 +1,14 @@
 /**
  * MCP request handler.
- * Requirements: 15.3, 15.4, 15.5, 15.7
+ * Requirements: 15.3, 15.4, 15.5, 15.7, 7.1
  */
-import type { Pool } from "pg";
-import type { Driver } from "neo4j-driver";
+import type { DatabaseAdapter } from "../db/types.js";
 import type { MCPRequest, MCPResponse, MCPError } from "./types.js";
 import type { AuthConfig } from "./auth.js";
 import { MCPValidationError, MCPAuthenticationError } from "./types.js";
 import { validateMCPRequest, validateToolParams } from "./validation.js";
 import { validateAuthToken, extractAuthToken } from "./auth.js";
 import { executeTool } from "./tools.js";
-import { SessionManager } from "./session-manager.js";
 
 /**
  * Connection state for MCP server.
@@ -19,15 +17,13 @@ export interface ConnectionState {
   readonly sessionId: string;
   readonly connectedAt: Date;
   authenticated: boolean;
-  readonly sessionManager: SessionManager;
 }
 
 /**
- * MCP server context.
+ * MCP server context — uses DatabaseAdapter instead of Pool + Driver (Req 7.1).
  */
 export interface MCPContext {
-  readonly vectorPool: Pool;
-  readonly graphDriver: Driver;
+  readonly adapter: DatabaseAdapter;
   readonly authConfig: AuthConfig;
   readonly connectionStates: Map<string, ConnectionState>;
 }
@@ -40,13 +36,12 @@ export function createConnectionState(sessionId: string): ConnectionState {
     sessionId,
     connectedAt: new Date(),
     authenticated: false,
-    sessionManager: new SessionManager(),
   };
 }
 
 /**
  * Handle MCP request with validation and error handling.
- * Requirements: 15.3, 15.4, 15.5, 15.7, 22.5
+ * Requirements: 15.3, 15.4, 15.5, 15.7, 22.5, 7.1
  */
 export async function handleMCPRequest(
   request: unknown,
@@ -73,13 +68,11 @@ export async function handleMCPRequest(
     // Validate tool-specific parameters
     validateToolParams(request.method, request.params);
 
-    // Execute the tool
+    // Execute the tool via DatabaseAdapter
     const result = await executeTool(
       request.method,
       request.params,
-      context.vectorPool,
-      context.graphDriver,
-      state.sessionManager,
+      context.adapter,
     );
 
     return {

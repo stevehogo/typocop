@@ -2,9 +2,7 @@
  * Integration test for end-to-end wiring.
  * Tests that CLI → Pipeline → Databases → Query Server → MCP Server are properly connected.
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import type { Driver, Session } from "neo4j-driver";
-import type { Pool } from "pg";
+import { describe, it, expect } from "vitest";
 
 describe("Integration Wiring", () => {
   describe("Pipeline Orchestration", () => {
@@ -56,29 +54,16 @@ describe("Integration Wiring", () => {
     });
   });
 
-  describe("Database Connection Utilities", () => {
-    it("should export createDriver from graph module", async () => {
-      const { createDriver } = await import("../graph/connection.js");
-      expect(createDriver).toBeDefined();
-      expect(typeof createDriver).toBe("function");
+  describe("Database Adapter Wiring", () => {
+    it("should export createDatabaseAdapter from db module", async () => {
+      const { createDatabaseAdapter } = await import("../db/database-adapter.js");
+      expect(createDatabaseAdapter).toBeDefined();
+      expect(typeof createDatabaseAdapter).toBe("function");
     });
 
-    it("should export createPool from vector module", async () => {
-      const { createPool } = await import("../vector/connection.js");
-      expect(createPool).toBeDefined();
-      expect(typeof createPool).toBe("function");
-    });
-
-    it("should export storeNodes from graph module", async () => {
-      const { storeNodes } = await import("../graph/store.js");
-      expect(storeNodes).toBeDefined();
-      expect(typeof storeNodes).toBe("function");
-    });
-
-    it("should export indexSymbol from vector module", async () => {
-      const { indexSymbol } = await import("../vector/index-store.js");
-      expect(indexSymbol).toBeDefined();
-      expect(typeof indexSymbol).toBe("function");
+    it("should export DatabaseAdapter types from db module", async () => {
+      const module = await import("../db/types.js");
+      expect(module).toBeDefined();
     });
   });
 
@@ -86,8 +71,7 @@ describe("Integration Wiring", () => {
     it("should have compatible types between pipeline and CLI", async () => {
       const { runIndexingPipeline } = await import("../indexer/pipeline.js");
       const { executeCLI } = await import("../cli/executor.js");
-      
-      // Both should be functions
+
       expect(typeof runIndexingPipeline).toBe("function");
       expect(typeof executeCLI).toBe("function");
     });
@@ -95,8 +79,7 @@ describe("Integration Wiring", () => {
     it("should have compatible types between query server and MCP", async () => {
       const { executeQuery } = await import("../query/execute-query.js");
       const { executeTool } = await import("../mcp/tools.js");
-      
-      // Both should be functions
+
       expect(typeof executeQuery).toBe("function");
       expect(typeof executeTool).toBe("function");
     });

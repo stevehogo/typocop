@@ -24,3 +24,25 @@ export class PrefixValidationError extends ConfigurationError {
     this.name = "PrefixValidationError";
   }
 }
+
+export class OllamaConfigError extends ConfigurationError {
+  constructor(field: string, value: string, reason: string) {
+    super(
+      `Invalid Ollama config: ${field}="${value}". ${reason}`,
+      field,
+      reason,
+    );
+    this.name = "OllamaConfigError";
+  }
+}
+
+export class EmbeddingConfigError extends ConfigurationError {
+  constructor(field: string, value: string, reason: string) {
+    super(
+      `Invalid embedding config: ${field}="${value}". ${reason}`,
+      field,
+      reason,
+    );
+    this.name = "EmbeddingConfigError";
+  }
+}

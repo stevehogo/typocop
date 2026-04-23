@@ -7,11 +7,11 @@ Typocop is a high-performance indexing and query engine that avoids the slow, mu
 ## 🚀 Key Features
 
 - **Precomputed Intelligence**: No more iterative `grep` or `find`. Get immediate context on callers, callees, clusters, and processes.
-- **Relational Knowledge Graph**: Powered by Neo4j and AST parsing (via tree-sitter) for deep symbol resolution.
-- **Hybrid Search**: Semantic search with `pgvector` (Postgres) combined with keyword indexing.
+- **Relational Knowledge Graph**: Powered by LadybugDB (embedded Kùzu) and AST parsing (via tree-sitter) for deep symbol resolution.
+- **Hybrid Search**: Semantic search with LadybugDB vector storage combined with keyword indexing.
 - **Multi-Phase Indexing**: A robust 6-phase pipeline that walks, parses, resolves, clusters, traces, and indexes your code.
 - **Polyglot Support**: Native parsing for 12 languages including TypeScript, PHP (Magento 2 / Laravel), Python (FastAPI / Django), Java (Spring Boot), Go, Rust, and more.
-- **MCP Integration**: First-class Model Context Protocol (MCP) server for deep integration with AI-powered editors like Claude, Cursor, and Antigravity.
+- **MCP Integration**: First-class Model Context Protocol (MCP) server for deep integration with AI-powered editors like Kiro, Claude, Cursor, and Windsurf.
 
 ## 🏗️ Architecture
 
@@ -25,11 +25,9 @@ graph TD
     Phase4 --> Phase5[Phase 5: Processes]
     Phase5 --> Phase6[Phase 6: Search Index]
 
-    Phase6 --> GraphDB[(Neo4j Graph DB)]
-    Phase6 --> VectorDB[(PostgreSQL + pgvector)]
+    Phase6 --> LadybugDB[(LadybugDB - Kùzu)]
 
-    GraphDB --> QueryServer[Query Server]
-    VectorDB --> QueryServer
+    LadybugDB --> QueryServer[Query Server]
 
     QueryServer --> MCPServer[MCP Server]
 ```
@@ -47,22 +45,22 @@ pnpm build
 
 Before running the indexer, ensure you have:
 
-1. **Neo4j** running (default: `bolt://localhost:8687`)
-2. **PostgreSQL with pgvector** extension enabled (default: `postgresql://localhost:5432/typocop`)
-3. **OpenAI API key** (optional, for AI enrichment features)
+1. **Ollama** running locally (optional — for semantic embeddings)
 
-Set environment variables:
+Set environment variables in `.env-typocop`:
 ```bash
-export NEO4J_URI=bolt://localhost:8687
-export NEO4J_USER=neo4j
-export NEO4J_PASSWORD=your-password
-export POSTGRES_URI=postgresql://localhost:5432/typocop
-export OPENAI_API_KEY=sk-...  # Optional
+TYPOCOP_PREFIX=tpc_
+
+# Ollama local embeddings (optional — disabled by default)
+OLLAMA_ENABLED=true
+OLLAMA_URL=http://localhost:11434
+OLLAMA_MODEL=mxbai-embed-large
+OLLAMA_DIMENSIONS=1024
 ```
 
 ### Schema Prefix Configuration
 
-Typocop uses a configurable prefix for all PostgreSQL table names and Neo4j node labels/relationship types. This allows multiple Typocop instances to share the same database infrastructure without data conflicts.
+Typocop uses a configurable prefix for all LadybugDB node labels and relationship types. This allows multiple Typocop instances to share the same database infrastructure without data conflicts.
 
 **Environment variable:** `TYPOCOP_PREFIX`
 
@@ -85,9 +83,9 @@ Typocop uses a configurable prefix for all PostgreSQL table names and Neo4j node
 | `dev_` | `dev_` | `dev_embeddings` |
 
 **What it affects:**
-- PostgreSQL table names: `{prefix}embeddings`, `{prefix}metadata`
-- Neo4j node labels: `{prefix}Symbol`, `{prefix}File`, `{prefix}Cluster`, `{prefix}Process`, `{prefix}Metadata`
-- Neo4j relationship types: `{prefix}CALLS`, `{prefix}IMPORTS`, `{prefix}INHERITS`, `{prefix}IMPLEMENTS`, `{prefix}CONTAINS`, `{prefix}REFERENCES`, `{prefix}DEFINES`
+- LadybugDB node labels: `{prefix}Symbol`, `{prefix}File`, `{prefix}Cluster`, `{prefix}Process`, `{prefix}Metadata`
+- LadybugDB relationship types: `{prefix}CALLS`, `{prefix}IMPORTS`, `{prefix}INHERITS`, `{prefix}IMPLEMENTS`, `{prefix}CONTAINS`, `{prefix}REFERENCES`, `{prefix}DEFINES`
+- Vector table names: `{prefix}embeddings`, `{prefix}metadata`
 
 Set it in your `.env-typocop` file or as a system environment variable:
 
@@ -136,8 +134,8 @@ node dist/cli/index.js parse --path ./src --lang typescript --refresh
 
 **What happens during refresh:**
 
-1. All Neo4j nodes and relationships for the current prefix are deleted
-2. All pgvector embeddings for the current prefix are deleted
+1. All LadybugDB nodes and relationships for the current prefix are deleted
+2. All vector embeddings for the current prefix are deleted
 3. The indexing pipeline runs normally (Phases 1-6)
 4. Graph and embeddings are rebuilt from scratch
 
@@ -176,7 +174,7 @@ The indexing pipeline (`src/indexer/pipeline.ts`) orchestrates all phases:
 5. **Phase 5: Processes** — Trace execution flows from entry points through call chains
 6. **Phase 6: Search** — Build hybrid indexes (vector + keyword) for fast retrieval
 
-Each phase builds on the previous, with results stored in Neo4j (graph structure) and PostgreSQL with pgvector (semantic search).
+Each phase builds on the previous, with results stored in LadybugDB (graph structure and semantic search).
 
 ## ✅ Correctness Principles
 
@@ -231,13 +229,11 @@ Once the audit is complete and the markdown file is synced, proceed to code exec
 - `7.1 Implement import resolution`
 - `7.2 Implement call resolution`
 - `7.3 Implement inheritance and interface resolution`
-- ` 7.4 Write property tests for relationship resolution`
+- `7.4 Write property tests for relationship resolution`
 
 **Implementation Constraints:**
 1. **EARS Compliance & Architecture:** Your logic MUST satisfy the "WHEN/THE SYSTEM SHALL" conditions defined in `requirements.md`. You are absolutely **forbidden** from introducing patterns not defined in `design.md`.
 2. **Strict Mode Scope:** As per the constitution, do NOT edit files outside the Active Spec Path / global config, and do NOT touch code outside the immediate scope of Task 7.
 3. **Skill Utilization:** If the task description mentions specific Agent Skills (e.g., `tdd-workflow`, `lint-and-validate`), you **MUST** utilize those skills before marking the task complete.
 4. **Testing:** Write unit/integration tests alongside your implementation, adhering to the project's testing strategy context.
-
-
 ```

@@ -1,8 +1,8 @@
 /**
- * GraphReader — fetches all graph data from Neo4j in a single read transaction.
+ * GraphReader — fetches all graph data via GraphAdapter.
  * Requirements: 2.1–2.9
  */
-import type { Session } from "neo4j-driver";
+import type { GraphAdapter, GraphNode } from "../db/types.js";
 
 export interface ExportedSymbol {
   readonly id: string;
@@ -74,31 +74,26 @@ function toNumber(value: unknown): number {
 }
 
 /**
- * Fetch all graph data from Neo4j in a single read transaction.
+ * Fetch all graph data via GraphAdapter.
  * Requirements: 2.1–2.8
  */
-export async function fetchAllGraphData(session: Session, prefix: string): Promise<GraphData> {
-  return session.executeRead(async (tx) => {
+export async function fetchAllGraphData(graphAdapter: GraphAdapter, prefix: string): Promise<GraphData> {
     // 2.1 Fetch all Symbol nodes
-    const symbolResult = await tx.run(
-      `MATCH (s:\`${prefix}Symbol\`) RETURN s`,
+    const symbolRows = await graphAdapter.runCypher<Record<string, unknown>>(
+      `MATCH (s:\`${prefix}Symbol\`) RETURN s.id AS id, s.name AS name, s.kind AS kind, s.filePath AS filePath, s.startLine AS startLine, s.endLine AS endLine, s.visibility AS visibility, s.signature AS signature, s.documentation AS documentation`,
     );
 
-    const symbols: ExportedSymbol[] = symbolResult.records.map((record) => {
-      const node = record.get("s");
-      const props = node.properties;
-      return {
-        id: props.id ?? "",
-        name: props.name ?? "",
-        kind: props.kind ?? "",
-        filePath: props.filePath ?? "",
-        startLine: toNumber(props.startLine),
-        endLine: toNumber(props.endLine),
-        visibility: props.visibility ?? "public",
-        signature: props.signature ?? "",
-        documentation: props.documentation ?? "",
-      };
-    });
+    const symbols: ExportedSymbol[] = symbolRows.map((row) => ({
+      id: (row.id as string) ?? "",
+      name: (row.name as string) ?? "",
+      kind: (row.kind as string) ?? "",
+      filePath: (row.filePath as string) ?? "",
+      startLine: toNumber(row.startLine),
+      endLine: toNumber(row.endLine),
+      visibility: (row.visibility as string) ?? "public",
+      signature: (row.signature as string) ?? "",
+      documentation: (row.documentation as string) ?? "",
+    }));
 
     // 2.9 Handle empty graph
     if (symbols.length === 0) {
@@ -106,67 +101,59 @@ export async function fetchAllGraphData(session: Session, prefix: string): Promi
     }
 
     // 2.2 Fetch all Cluster nodes
-    const clusterResult = await tx.run(
-      `MATCH (c:\`${prefix}Cluster\`) RETURN c`,
+    const clusterRows = await graphAdapter.runCypher<Record<string, unknown>>(
+      `MATCH (c:\`${prefix}Cluster\`) RETURN c.id AS id, c.name AS name, c.category AS category, c.confidence AS confidence, c.symbolCount AS symbolCount`,
     );
 
-    const clusters: ExportedCluster[] = clusterResult.records.map((record) => {
-      const node = record.get("c");
-      const props = node.properties;
-      return {
-        id: props.id ?? "",
-        name: props.name ?? "",
-        category: props.category ?? "unknown",
-        confidence: typeof props.confidence === "number" ? props.confidence : 0,
-        symbolCount: toNumber(props.symbolCount),
-      };
-    });
+    const clusters: ExportedCluster[] = clusterRows.map((row) => ({
+      id: (row.id as string) ?? "",
+      name: (row.name as string) ?? "",
+      category: (row.category as string) ?? "unknown",
+      confidence: typeof row.confidence === "number" ? row.confidence : 0,
+      symbolCount: toNumber(row.symbolCount),
+    }));
 
     // 2.3 Fetch all Process nodes
-    const processResult = await tx.run(
-      `MATCH (p:\`${prefix}Process\`) RETURN p`,
+    const processRows = await graphAdapter.runCypher<Record<string, unknown>>(
+      `MATCH (p:\`${prefix}Process\`) RETURN p.id AS id, p.name AS name, p.entryPoint AS entryPoint, p.stepCount AS stepCount`,
     );
 
-    const processes: ExportedProcess[] = processResult.records.map((record) => {
-      const node = record.get("p");
-      const props = node.properties;
-      return {
-        id: props.id ?? "",
-        name: props.name ?? "",
-        entryPoint: props.entryPoint ?? "",
-        stepCount: toNumber(props.stepCount),
-      };
-    });
+    const processes: ExportedProcess[] = processRows.map((row) => ({
+      id: (row.id as string) ?? "",
+      name: (row.name as string) ?? "",
+      entryPoint: (row.entryPoint as string) ?? "",
+      stepCount: toNumber(row.stepCount),
+    }));
 
     // 2.4 Fetch relationships with name resolution
     const relationships: ExportedRelationship[] = [];
     for (const relType of RELATIONSHIP_TYPES) {
-      const relResult = await tx.run(
+      const relRows = await graphAdapter.runCypher<Record<string, unknown>>(
         `MATCH (src:\`${prefix}Symbol\`)-[r:\`${prefix}${relType}\`]->(tgt:\`${prefix}Symbol\`)
          RETURN src.id AS sourceId, src.name AS sourceName,
                 tgt.id AS targetId, tgt.name AS targetName`,
       );
-      for (const record of relResult.records) {
+      for (const row of relRows) {
         relationships.push({
-          sourceId: record.get("sourceId") ?? "",
-          targetId: record.get("targetId") ?? "",
+          sourceId: (row.sourceId as string) ?? "",
+          targetId: (row.targetId as string) ?? "",
           relType,
-          sourceName: record.get("sourceName") ?? "",
-          targetName: record.get("targetName") ?? "",
+          sourceName: (row.sourceName as string) ?? "",
+          targetName: (row.targetName as string) ?? "",
         });
       }
     }
 
     // 2.5 Fetch cluster memberships (CONTAINS)
-    const membershipResult = await tx.run(
+    const membershipRows = await graphAdapter.runCypher<Record<string, unknown>>(
       `MATCH (c:\`${prefix}Cluster\`)-[:\`${prefix}CONTAINS\`]->(s:\`${prefix}Symbol\`)
        RETURN c.id AS clusterId, s.id AS symbolId`,
     );
 
     const clusterMemberships = new Map<string, string[]>();
-    for (const record of membershipResult.records) {
-      const clusterId: string = record.get("clusterId") ?? "";
-      const symbolId: string = record.get("symbolId") ?? "";
+    for (const row of membershipRows) {
+      const clusterId = (row.clusterId as string) ?? "";
+      const symbolId = (row.symbolId as string) ?? "";
       const members = clusterMemberships.get(clusterId);
       if (members) {
         members.push(symbolId);
@@ -176,19 +163,19 @@ export async function fetchAllGraphData(session: Session, prefix: string): Promi
     }
 
     // 2.6 Fetch process steps (HAS_STEP) with order property
-    const stepsResult = await tx.run(
+    const stepsRows = await graphAdapter.runCypher<Record<string, unknown>>(
       `MATCH (p:\`${prefix}Process\`)-[r:\`${prefix}HAS_STEP\`]->(s:\`${prefix}Symbol\`)
-       RETURN p.id AS processId, s.id AS symbolId, s.name AS symbolName, r.order AS stepOrder
-       ORDER BY p.id, r.order`,
+       RETURN p.id AS processId, s.id AS symbolId, s.name AS symbolName, r.step_order AS stepOrder
+       ORDER BY p.id, r.step_order`,
     );
 
     const processSteps = new Map<string, ExportedProcessStep[]>();
-    for (const record of stepsResult.records) {
-      const processId: string = record.get("processId") ?? "";
+    for (const row of stepsRows) {
+      const processId = (row.processId as string) ?? "";
       const step: ExportedProcessStep = {
-        order: toNumber(record.get("stepOrder")),
-        symbolId: record.get("symbolId") ?? "",
-        symbolName: record.get("symbolName") ?? "",
+        order: toNumber(row.stepOrder),
+        symbolId: (row.symbolId as string) ?? "",
+        symbolName: (row.symbolName as string) ?? "",
       };
       const steps = processSteps.get(processId);
       if (steps) {
@@ -206,5 +193,4 @@ export async function fetchAllGraphData(session: Session, prefix: string): Promi
       clusterMemberships,
       processSteps,
     };
-  });
 }

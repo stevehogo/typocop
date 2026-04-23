@@ -30,7 +30,8 @@ lerna-debug.log*
 *.sqlite
 *.db
 legacy-parser/
-
+ingestion/
 # Local database storage
 .db-storages/
 .kiro/~hooks~/
+.typocop-obsidian

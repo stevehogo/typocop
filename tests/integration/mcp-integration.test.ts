@@ -1,16 +1,14 @@
 /**
- * Integration tests — MCP natural language search (smart_search).
+ * Integration tests — MCP tools with DatabaseAdapter.
  *
  * Covers:
  *   6.1 tools/list response includes smart_search (Req 1.8)
- *   6.2 smart_search against live pgvector returns results (Req 1.2, 2.1)
- *   6.3 Existing four tools still return valid MCPToolResponse (Req 3.1)
+ *   6.2 smart_search with DatabaseAdapter (Req 7.3, 7.4)
+ *   6.3 Existing four tools still return valid MCPToolResponse (Req 3.1, 7.1)
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import type { Driver, Session } from "neo4j-driver";
-import type { Pool, PoolClient } from "pg";
+import type { DatabaseAdapter, GraphAdapter, VectorAdapter, EmbeddingAdapter } from "../../src/db/types.js";
 import { createMCPServer } from "../../src/mcp/registration.js";
-import { SessionManager } from "../../src/mcp/session-manager.js";
 import { executeTool } from "../../src/mcp/tools.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
@@ -37,7 +35,10 @@ import { executeDataFlowTrace } from "../../src/query/data-flow-trace.js";
 // Helpers
 // ---------------------------------------------------------------------------
 
+const STUB_RESOLUTION = { kind: "exact" as const, node: { id: "sym-1", labels: ["Symbol"], properties: { id: "sym-1", name: "RateLimiter" } } };
+
 const STUB_QUERY_RESULT = {
+  resolution: STUB_RESOLUTION,
   symbols: [
     {
       id: "sym-1",
@@ -56,17 +57,35 @@ const STUB_QUERY_RESULT = {
   affectedFlows: [],
 };
 
-function makeMockSession(): Session {
-  return { close: vi.fn().mockResolvedValue(undefined) } as unknown as Session;
-}
-
-function makeMockDriver(session?: Session): Driver {
-  const s = session ?? makeMockSession();
-  return { session: vi.fn().mockReturnValue(s) } as unknown as Driver;
-}
-
-function makeMockPool(): Pool {
-  return {} as unknown as Pool;
+function createMockAdapter(): DatabaseAdapter {
+  const graph: GraphAdapter = {
+    createNode: vi.fn().mockResolvedValue(undefined),
+    createRelationship: vi.fn().mockResolvedValue(undefined),
+    queryNodes: vi.fn().mockResolvedValue([]),
+    queryRelationships: vi.fn().mockResolvedValue([]),
+    deleteNodesByLabel: vi.fn().mockResolvedValue(0),
+    deleteRelationshipsByType: vi.fn().mockResolvedValue(0),
+    runCypher: vi.fn().mockResolvedValue([]),
+    runCypherWrite: vi.fn().mockResolvedValue(undefined),
+  };
+  const vector: VectorAdapter = {
+    createTables: vi.fn().mockResolvedValue(undefined),
+    indexSymbol: vi.fn().mockResolvedValue(undefined),
+    semanticSearch: vi.fn().mockResolvedValue([]),
+    deleteAll: vi.fn().mockResolvedValue(0),
+  };
+  const embedding: EmbeddingAdapter = {
+    isEnabled: vi.fn().mockReturnValue(false),
+    embedText: vi.fn().mockResolvedValue(null),
+    getDimensions: vi.fn().mockReturnValue(2560),
+  };
+  return {
+    initialize: vi.fn().mockResolvedValue(undefined),
+    close: vi.fn().mockResolvedValue(undefined),
+    getGraphAdapter: vi.fn().mockReturnValue(graph),
+    getVectorAdapter: vi.fn().mockReturnValue(vector),
+    getEmbeddingAdapter: vi.fn().mockReturnValue(embedding),
+  };
 }
 
 beforeEach(() => {
@@ -133,78 +152,24 @@ describe("6.1 tools/list includes smart_search", () => {
 });
 
 // ---------------------------------------------------------------------------
-// 6.2 — smart_search against live pgvector (Req 1.2, 2.1)
+// 6.2 — smart_search with DatabaseAdapter (Req 7.3, 7.4)
 // ---------------------------------------------------------------------------
 
-describe("6.2 smart_search against live pgvector", () => {
-  it("returns symbols.length > 0 and confidence >= 0.5 for 'ip rate limiting'", async () => {
-    // Attempt live DB connection — skip gracefully if unavailable
-    const pg = await import("pg");
-    const pool = new pg.Pool({
-      host: "localhost",
-      port: 8432,
-      database: "tpc_teravexa",
-      user: "typocop",
-      password: "typocop1234QWA",
-      connectionTimeoutMillis: 3000,
-    });
+describe("6.2 smart_search with DatabaseAdapter", () => {
+  it("returns empty results with confidence 0.5 when embeddings are disabled", async () => {
+    const adapter = createMockAdapter();
 
-    let client: PoolClient | undefined;
-    try {
-      client = await pool.connect();
-    } catch {
-      await pool.end();
-      return; // skip — DB not available
-    } finally {
-      client?.release();
-    }
+    const response = await executeTool("smart_search", { query: "ip rate limiting" }, adapter);
 
-    // DB is available — also need Neo4j
-    const neo4j = await import("neo4j-driver");
-    const driver = neo4j.default.driver(
-      "bolt://localhost:8687",
-      neo4j.default.auth.basic("neo4j", "353LMz9vkNhhu"),
-      { connectionTimeout: 3000 },
-    );
-
-    let neo4jAvailable = false;
-    try {
-      await driver.verifyConnectivity();
-      neo4jAvailable = true;
-    } catch {
-      // Neo4j unavailable — skip
-    }
-
-    if (!neo4jAvailable) {
-      await driver.close();
-      await pool.end();
-      return;
-    }
-
-    const sessionManager = new SessionManager();
-    try {
-      const response = await executeTool(
-        "smart_search",
-        { query: "ip rate limiting" },
-        pool,
-        driver,
-        sessionManager,
-      );
-
-      expect(response.symbols.length).toBeGreaterThan(0);
-      expect(response.confidence).toBeGreaterThanOrEqual(0.5);
-      expect(typeof response.summary).toBe("string");
-      expect(response.summary.length).toBeGreaterThan(0);
-    } finally {
-      await sessionManager.closeAll();
-      await driver.close();
-      await pool.end();
-    }
+    expect(response.symbols).toEqual([]);
+    expect(response.confidence).toBe(0.5);
+    expect(typeof response.summary).toBe("string");
+    expect(response.summary.length).toBeGreaterThan(0);
   });
 });
 
 // ---------------------------------------------------------------------------
-// 6.3 — Non-regression: existing tools return valid MCPToolResponse (Req 3.1)
+// 6.3 — Non-regression: existing tools return valid MCPToolResponse (Req 3.1, 7.1)
 // ---------------------------------------------------------------------------
 
 describe("6.3 existing tools return valid MCPToolResponse", () => {
@@ -217,11 +182,9 @@ describe("6.3 existing tools return valid MCPToolResponse", () => {
 
   for (const [toolName, params] of EXISTING_TOOLS) {
     it(`${toolName} returns MCPToolResponse with summary field`, async () => {
-      const sessionManager = new SessionManager();
-      const driver = makeMockDriver();
-      const pool = makeMockPool();
+      const adapter = createMockAdapter();
 
-      const response = await executeTool(toolName, params, pool, driver, sessionManager);
+      const response = await executeTool(toolName, params, adapter);
 
       expect(typeof response.summary).toBe("string");
       expect(response.summary.length).toBeGreaterThan(0);

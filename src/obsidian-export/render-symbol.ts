@@ -13,7 +13,7 @@ export interface SymbolRenderContext {
 
 export function sourcePathToVaultPath(filePath: string): string {
   // Strip leading slash to ensure vault paths are always relative.
-  // Neo4j may store absolute file paths (e.g. /home/user/project/src/app.ts).
+  // LadybugDB may store absolute file paths (e.g. /home/user/project/src/app.ts).
   const relative = filePath.startsWith("/") ? filePath.slice(1) : filePath;
   return relative.replace(/\.[^.]+$/, ".md");
 }

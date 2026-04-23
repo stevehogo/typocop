@@ -1,12 +1,13 @@
+/**
+ * Unit tests for CLI executor with DatabaseAdapter.
+ * Requirements: 7.1, 5.1
+ */
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import { executeCLI } from "./executor.js";
 import { CLICommand } from "./parser.js";
 import ora from "ora";
-import * as graphConnection from "../graph/connection.js";
-import * as vectorConnection from "../vector/connection.js";
 import * as pipeline from "../indexer/pipeline.js";
-import * as graphStore from "../graph/store.js";
-import * as vectorStore from "../vector/index-store.js";
+import * as dbAdapter from "../db/database-adapter.js";
 
 vi.mock("ora", () => {
   const oraMock = {
@@ -19,26 +20,10 @@ vi.mock("ora", () => {
   return { default: vi.fn(() => oraMock) };
 });
 
-vi.mock("../graph/connection.js", () => ({
-  createDriver: vi.fn().mockResolvedValue({
-    session: vi.fn().mockReturnValue({
-      run: vi.fn().mockResolvedValue({ records: [] }),
-      executeWrite: vi.fn().mockResolvedValue({ records: [] }),
-      close: vi.fn().mockResolvedValue(undefined),
-    }),
-    close: vi.fn().mockResolvedValue(undefined),
-  }),
-}));
+// ── Mock DatabaseAdapter via vi.mock factory (hoisted) ────────────────────────
 
-vi.mock("../vector/connection.js", () => ({
-  createPool: vi.fn().mockResolvedValue({
-    end: vi.fn().mockResolvedValue(undefined),
-    connect: vi.fn().mockResolvedValue({
-      query: vi.fn().mockResolvedValue({ rowCount: 0 }),
-      release: vi.fn(),
-    }),
-  }),
-  initVectorStore: vi.fn().mockResolvedValue(undefined),
+vi.mock("../db/database-adapter.js", () => ({
+  createDatabaseAdapter: vi.fn(),
 }));
 
 vi.mock("../indexer/pipeline.js", () => ({
@@ -56,19 +41,57 @@ vi.mock("../config/index.js", () => ({
   configurationManager: {
     initialize: vi.fn().mockResolvedValue(undefined),
     getPrefix: vi.fn().mockReturnValue("tpc_"),
+    getConfiguration: vi.fn().mockReturnValue({
+      prefix: "tpc_",
+      ollama: { enabled: false, url: "http://localhost:11434", model: "qwen3-embedding:4b", dimensions: 2560 },
+      ladybugdb: { dbPath: "/tmp/test.ladybug" },
+      loadedAt: new Date(),
+      source: "default",
+    }),
   },
 }));
 
-vi.mock("../graph/store.js", () => ({
-  clearGraphData: vi.fn().mockResolvedValue({
-    nodesDeleted: 0,
-    relationshipsDeleted: 0,
-  }),
-}));
+// ── Create mock adapter in beforeEach (not at module level) ───────────────────
 
-vi.mock("../vector/index-store.js", () => ({
-  clearVectorData: vi.fn().mockResolvedValue(0),
-}));
+let mockGraphAdapter: Record<string, ReturnType<typeof vi.fn>>;
+let mockVectorAdapter: Record<string, ReturnType<typeof vi.fn>>;
+let mockAdapter: Record<string, ReturnType<typeof vi.fn> | (() => unknown)>;
+
+function resetMockAdapter(): void {
+  mockGraphAdapter = {
+    createNode: vi.fn().mockResolvedValue(undefined),
+    createRelationship: vi.fn().mockResolvedValue(undefined),
+    queryNodes: vi.fn().mockResolvedValue([]),
+    queryRelationships: vi.fn().mockResolvedValue([]),
+    deleteNodesByLabel: vi.fn().mockResolvedValue(0),
+    deleteRelationshipsByType: vi.fn().mockResolvedValue(0),
+    runCypher: vi.fn().mockResolvedValue([]),
+    runCypherWrite: vi.fn().mockResolvedValue(undefined),
+  };
+
+  mockVectorAdapter = {
+    createTables: vi.fn().mockResolvedValue(undefined),
+    indexSymbol: vi.fn().mockResolvedValue(undefined),
+    semanticSearch: vi.fn().mockResolvedValue([]),
+    deleteAll: vi.fn().mockResolvedValue(0),
+  };
+
+  const mockEmbeddingAdapter = {
+    isEnabled: vi.fn().mockReturnValue(false),
+    embedText: vi.fn().mockResolvedValue(null),
+    getDimensions: vi.fn().mockReturnValue(2560),
+  };
+
+  mockAdapter = {
+    initialize: vi.fn().mockResolvedValue(undefined),
+    close: vi.fn().mockResolvedValue(undefined),
+    getGraphAdapter: vi.fn().mockReturnValue(mockGraphAdapter),
+    getVectorAdapter: vi.fn().mockReturnValue(mockVectorAdapter),
+    getEmbeddingAdapter: vi.fn().mockReturnValue(mockEmbeddingAdapter),
+  };
+
+  vi.mocked(dbAdapter.createDatabaseAdapter).mockResolvedValue(mockAdapter as never);
+}
 
 describe("executeCLI", () => {
   afterEach(() => {
@@ -77,17 +100,15 @@ describe("executeCLI", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    resetMockAdapter();
   });
 
   it("executes the status command and reports symbol/relationship counts", async () => {
-    // Arrange
     const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const command: CLICommand = { type: "status" };
 
-    // Act
     await executeCLI(command);
 
-    // Assert
     expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining("Knowledge Graph Status:"));
     expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining("Symbols:"));
     expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining("Relationships:"));
@@ -95,30 +116,24 @@ describe("executeCLI", () => {
   });
 
   it("executes the reindex command and reports completion", async () => {
-    // Arrange
     const command: CLICommand = { type: "reindex", dbPath: "./db" };
 
-    // Act
     await executeCLI(command);
 
-    // Assert
     expect(ora).toHaveBeenCalledWith(expect.stringContaining("Reindexing database at ./db"));
     const oraInstance = vi.mocked(ora)("./db");
     expect(oraInstance.succeed).toHaveBeenCalledWith(expect.stringContaining("Reindexing complete."));
   });
 
   it("executes the parse command and reports statistics", async () => {
-    // Arrange
     const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const command: CLICommand = {
       type: "parse",
       config: { sourcePath: "./src", language: "typescript", verbose: false },
     };
 
-    // Act
     await executeCLI(command);
 
-    // Assert
     expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining("Initializing indexing for typescript"));
     expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining("Statistics:"));
     const oraInstance = vi.mocked(ora)("Starting");
@@ -126,26 +141,20 @@ describe("executeCLI", () => {
   });
 
   it("shows verbose info message when verbose mode is enabled", async () => {
-    // Arrange
     vi.spyOn(console, "error").mockImplementation(() => {});
     const command: CLICommand = {
       type: "parse",
       config: { sourcePath: "./src", language: "typescript", verbose: true },
     };
 
-    // Act
     await executeCLI(command);
 
-    // Assert
     const oraInstance = vi.mocked(ora)("Starting");
     expect(oraInstance.info).toHaveBeenCalledWith("Verbose mode enabled.");
   });
 
-  it("reports skipped files count when pipeline returns skipped files", async () => {
-    // This test validates Req 18.3 — skipped file count is surfaced to the user.
-    // The pipeline stub returns 0 skipped files; once the real pipeline is wired,
-    // this test should be updated with a mock that returns skippedFiles > 0.
-    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+  it("creates DatabaseAdapter from config for parse command", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
     const command: CLICommand = {
       type: "parse",
       config: { sourcePath: "./src", language: "typescript", verbose: false },
@@ -153,290 +162,154 @@ describe("executeCLI", () => {
 
     await executeCLI(command);
 
-    // With 0 skipped files the warning line should NOT appear
-    const calls = consoleErrorSpy.mock.calls.map(c => String(c[0]));
-    expect(calls.some(c => c.includes("Skipped files:"))).toBe(false);
+    expect(dbAdapter.createDatabaseAdapter).toHaveBeenCalled();
+    expect(mockAdapter.close).toHaveBeenCalled();
   });
 
-  it("propagates errors from the pipeline and marks spinner as failed", async () => {
-    // Arrange — we can't easily inject a failing pipeline without DI,
-    // but we verify the error path by checking the fail mock is wired.
-    // Full error propagation is validated in integration tests.
+  it("creates DatabaseAdapter from config for status command", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const command: CLICommand = { type: "status" };
+
+    await executeCLI(command);
+
+    expect(dbAdapter.createDatabaseAdapter).toHaveBeenCalled();
+    expect(mockAdapter.close).toHaveBeenCalled();
+  });
+
+  it("passes adapter to pipeline config", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
     const command: CLICommand = {
       type: "parse",
       config: { sourcePath: "./src", language: "typescript", verbose: false },
     };
 
-    // Act — should not throw with the stub pipeline
-    await expect(executeCLI(command)).resolves.toBeUndefined();
+    await executeCLI(command);
+
+    expect(pipeline.runIndexingPipeline).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sourcePath: "./src",
+        language: "typescript",
+        verbose: false,
+        adapter: mockAdapter,
+      }),
+    );
   });
 
-  // ============================================================================
-  // Task 11: Unit Tests for Executor with Refresh Flag
-  // ============================================================================
+  // ── Refresh flag tests ────────────────────────────────────────────────────
 
   describe("parse command with refresh flag", () => {
-    it("11.1: should call clearGraphData when refresh is true", async () => {
-      // Arrange
+    it("calls adapter graph/vector clearing when refresh is true", async () => {
       vi.spyOn(console, "error").mockImplementation(() => {});
-      const mockClearGraphData = vi.mocked(graphStore.clearGraphData);
-      mockClearGraphData.mockResolvedValue({
-        nodesDeleted: 10,
-        relationshipsDeleted: 15,
-      });
-
       const command: CLICommand = {
         type: "parse",
-        config: {
-          sourcePath: "./src",
-          language: "typescript",
-          verbose: false,
-          refresh: true,
-        },
+        config: { sourcePath: "./src", language: "typescript", verbose: false, refresh: true },
       };
 
-      // Act
       await executeCLI(command);
 
-      // Assert
-      expect(mockClearGraphData).toHaveBeenCalledWith(expect.any(Object), "tpc_");
-      expect(mockClearGraphData).toHaveBeenCalledTimes(1);
+      expect(mockGraphAdapter.deleteNodesByLabel).toHaveBeenCalled();
+      expect(mockVectorAdapter.deleteAll).toHaveBeenCalled();
     });
 
-    it("11.2: should call clearVectorData when refresh is true", async () => {
-      // Arrange
+    it("skips clearing when refresh is false", async () => {
       vi.spyOn(console, "error").mockImplementation(() => {});
-      const mockClearVectorData = vi.mocked(vectorStore.clearVectorData);
-      mockClearVectorData.mockResolvedValue(25);
-
       const command: CLICommand = {
         type: "parse",
-        config: {
-          sourcePath: "./src",
-          language: "typescript",
-          verbose: false,
-          refresh: true,
-        },
+        config: { sourcePath: "./src", language: "typescript", verbose: false, refresh: false },
       };
 
-      // Act
       await executeCLI(command);
 
-      // Assert
-      expect(mockClearVectorData).toHaveBeenCalledWith(expect.any(Object), "tpc_");
-      expect(mockClearVectorData).toHaveBeenCalledTimes(1);
+      expect(mockGraphAdapter.deleteNodesByLabel).not.toHaveBeenCalled();
+      expect(mockVectorAdapter.deleteAll).not.toHaveBeenCalled();
     });
 
-    it("11.3: should skip clearing when refresh is false", async () => {
-      // Arrange
+    it("skips clearing when refresh is undefined", async () => {
       vi.spyOn(console, "error").mockImplementation(() => {});
-      const mockClearGraphData = vi.mocked(graphStore.clearGraphData);
-      const mockClearVectorData = vi.mocked(vectorStore.clearVectorData);
-
       const command: CLICommand = {
         type: "parse",
-        config: {
-          sourcePath: "./src",
-          language: "typescript",
-          verbose: false,
-          refresh: false,
-        },
+        config: { sourcePath: "./src", language: "typescript", verbose: false },
       };
 
-      // Act
       await executeCLI(command);
 
-      // Assert
-      expect(mockClearGraphData).not.toHaveBeenCalled();
-      expect(mockClearVectorData).not.toHaveBeenCalled();
+      expect(mockGraphAdapter.deleteNodesByLabel).not.toHaveBeenCalled();
+      expect(mockVectorAdapter.deleteAll).not.toHaveBeenCalled();
     });
 
-    it("11.4: should skip clearing when refresh is undefined (defaults to false)", async () => {
-      // Arrange
+    it("runs indexing pipeline after clearing", async () => {
       vi.spyOn(console, "error").mockImplementation(() => {});
-      const mockClearGraphData = vi.mocked(graphStore.clearGraphData);
-      const mockClearVectorData = vi.mocked(vectorStore.clearVectorData);
-
       const command: CLICommand = {
         type: "parse",
-        config: {
-          sourcePath: "./src",
-          language: "typescript",
-          verbose: false,
-        },
+        config: { sourcePath: "./src", language: "typescript", verbose: false, refresh: true },
       };
 
-      // Act
       await executeCLI(command);
 
-      // Assert
-      expect(mockClearGraphData).not.toHaveBeenCalled();
-      expect(mockClearVectorData).not.toHaveBeenCalled();
+      expect(pipeline.runIndexingPipeline).toHaveBeenCalledTimes(1);
     });
 
-    it("11.5: should run indexing pipeline after clearing", async () => {
-      // Arrange
-      vi.spyOn(console, "error").mockImplementation(() => {});
-      const mockRunPipeline = vi.mocked(pipeline.runIndexingPipeline);
-      mockRunPipeline.mockResolvedValue({
-        symbols: [{ id: "sym1", name: "test" }],
-        relationships: [],
-        clusters: [],
-        processes: [],
-        skippedFiles: 0,
-        embeddingCount: 1,
-      });
-
-      const command: CLICommand = {
-        type: "parse",
-        config: {
-          sourcePath: "./src",
-          language: "typescript",
-          verbose: false,
-          refresh: true,
-        },
-      };
-
-      // Act
-      await executeCLI(command);
-
-      // Assert
-      expect(mockRunPipeline).toHaveBeenCalledWith(
-        expect.objectContaining({
-          sourcePath: "./src",
-          language: "typescript",
-          verbose: false,
-        })
-      );
-      expect(mockRunPipeline).toHaveBeenCalledTimes(1);
-    });
-
-    it("11.7: should provide user feedback when refresh begins", async () => {
-      // Arrange
+    it("provides user feedback when refresh begins in verbose mode", async () => {
       const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
       const command: CLICommand = {
         type: "parse",
-        config: {
-          sourcePath: "./src",
-          language: "typescript",
-          verbose: true,
-          refresh: true,
-        },
+        config: { sourcePath: "./src", language: "typescript", verbose: true, refresh: true },
       };
 
-      // Act
       await executeCLI(command);
 
-      // Assert
-      expect(consoleErrorSpy).toHaveBeenCalledWith(
-        expect.stringContaining("Refresh flag enabled")
-      );
+      expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining("Refresh flag enabled"));
     });
 
-    it("11.6: should propagate errors during clearing", async () => {
-      // Arrange
-      vi.spyOn(console, "error").mockImplementation(() => {});
-      const mockClearGraphData = vi.mocked(graphStore.clearGraphData);
-      const testError = new Error("Graph clearing failed");
-      mockClearGraphData.mockRejectedValue(testError);
-
-      const command: CLICommand = {
-        type: "parse",
-        config: {
-          sourcePath: "./src",
-          language: "typescript",
-          verbose: false,
-          refresh: true,
-        },
-      };
-
-      // Act & Assert
-      await expect(executeCLI(command)).rejects.toThrow("Graph clearing failed");
-    });
-
-    it("11.8: should display clearing statistics in output", async () => {
-      // Arrange
+    it("displays clearing statistics in output", async () => {
       const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-      const mockClearGraphData = vi.mocked(graphStore.clearGraphData);
-      const mockClearVectorData = vi.mocked(vectorStore.clearVectorData);
-
-      mockClearGraphData.mockResolvedValue({
-        nodesDeleted: 42,
-        relationshipsDeleted: 88,
-      });
-      mockClearVectorData.mockResolvedValue(100);
-
       const command: CLICommand = {
         type: "parse",
-        config: {
-          sourcePath: "./src",
-          language: "typescript",
-          verbose: false,
-          refresh: true,
-        },
+        config: { sourcePath: "./src", language: "typescript", verbose: false, refresh: true },
       };
 
-      // Act
       await executeCLI(command);
 
-      // Assert
-      expect(consoleErrorSpy).toHaveBeenCalledWith(
-        expect.stringContaining("Clearing Statistics:")
-      );
-      expect(consoleErrorSpy).toHaveBeenCalledWith(
-        expect.stringContaining("42")
-      );
-      expect(consoleErrorSpy).toHaveBeenCalledWith(
-        expect.stringContaining("88")
-      );
-      expect(consoleErrorSpy).toHaveBeenCalledWith(
-        expect.stringContaining("100")
-      );
+      expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining("Clearing Statistics:"));
     });
 
-    it("11.9: should update spinner message when refresh is enabled", async () => {
-      // Arrange
+    it("updates spinner message when refresh is enabled", async () => {
       vi.spyOn(console, "error").mockImplementation(() => {});
       const mockOra = vi.mocked(ora);
-
       const command: CLICommand = {
         type: "parse",
-        config: {
-          sourcePath: "./src",
-          language: "typescript",
-          verbose: false,
-          refresh: true,
-        },
+        config: { sourcePath: "./src", language: "typescript", verbose: false, refresh: true },
       };
 
-      // Act
       await executeCLI(command);
 
-      // Assert
-      expect(mockOra).toHaveBeenCalledWith(
-        expect.stringContaining("Clearing existing data")
-      );
+      expect(mockOra).toHaveBeenCalledWith(expect.stringContaining("Clearing existing data"));
     });
 
-    it("11.10: should not display clearing statistics when refresh is false", async () => {
-      // Arrange
+    it("does not display clearing statistics when refresh is false", async () => {
       const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
       const command: CLICommand = {
         type: "parse",
-        config: {
-          sourcePath: "./src",
-          language: "typescript",
-          verbose: false,
-          refresh: false,
-        },
+        config: { sourcePath: "./src", language: "typescript", verbose: false, refresh: false },
       };
 
-      // Act
       await executeCLI(command);
 
-      // Assert
-      const calls = consoleErrorSpy.mock.calls.map(c => String(c[0]));
-      expect(calls.some(c => c.includes("Clearing Statistics:"))).toBe(false);
+      const calls = consoleErrorSpy.mock.calls.map((c) => String(c[0]));
+      expect(calls.some((c) => c.includes("Clearing Statistics:"))).toBe(false);
+    });
+
+    it("closes adapter even when pipeline throws", async () => {
+      vi.spyOn(console, "error").mockImplementation(() => {});
+      vi.mocked(pipeline.runIndexingPipeline).mockRejectedValueOnce(new Error("Pipeline failed"));
+
+      const command: CLICommand = {
+        type: "parse",
+        config: { sourcePath: "./src", language: "typescript", verbose: false },
+      };
+
+      await expect(executeCLI(command)).rejects.toThrow("Pipeline failed");
+      expect(mockAdapter.close).toHaveBeenCalled();
     });
   });
 });

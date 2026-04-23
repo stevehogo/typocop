@@ -240,7 +240,7 @@ describe("buildSearchIndex", () => {
     expect(index.embeddings).toEqual([]);
   });
 
-  it("calls embedFn for each cluster", async () => {
+  it("calls embedFn for each symbol and each cluster", async () => {
     const symbols = [
       makeSymbol({ id: "s1", name: "login" }),
       makeSymbol({ id: "s2", name: "logout" }),
@@ -248,7 +248,8 @@ describe("buildSearchIndex", () => {
     const clusters = [makeCluster({ symbols: ["s1", "s2"] })];
     const embedFn = vi.fn().mockResolvedValue(null);
     await buildSearchIndex(symbols, clusters, embedFn);
-    expect(embedFn).toHaveBeenCalledTimes(1);
+    // 2 symbols + 1 cluster = 3 calls
+    expect(embedFn).toHaveBeenCalledTimes(3);
   });
 
   it("handles embedFn returning null gracefully (keyword-only fallback)", async () => {
@@ -268,7 +269,7 @@ describe("buildSearchIndex", () => {
     expect(index.symbolCount).toBe(1);
   });
 
-  it("collects non-null embeddings with cluster.symbols[0] as symbolId", async () => {
+  it("collects non-null embeddings for symbols and clusters", async () => {
     const embedding: Embedding = { vector: new Array(1536).fill(0.1), dimensions: 1536 };
     const symbols = [
       makeSymbol({ id: "s1", name: "login" }),
@@ -277,12 +278,16 @@ describe("buildSearchIndex", () => {
     const clusters = [makeCluster({ id: "c1", symbols: ["s1", "s2"] })];
     const embedFn = vi.fn().mockResolvedValue(embedding);
     const index = await buildSearchIndex(symbols, clusters, embedFn);
-    expect(index.embeddings).toHaveLength(1);
+    // 2 symbol embeddings + 1 cluster embedding = 3
+    expect(index.embeddings).toHaveLength(3);
     expect(index.embeddings[0].symbolId).toBe("s1");
-    expect(index.embeddings[0].embedding).toEqual(embedding);
+    expect(index.embeddings[1].symbolId).toBe("s2");
+    expect(index.embeddings[2].symbolId).toBe("cluster:c1");
+    expect(index.embeddings[2].metadata).toHaveProperty("clusterId", "c1");
+    expect(index.embeddings[2].metadata).toHaveProperty("symbolId", "s1");
   });
 
-  it("skips clusters where embedFn returns null", async () => {
+  it("skips symbols and clusters where embedFn returns null", async () => {
     const embedding: Embedding = { vector: new Array(1536).fill(0.5), dimensions: 1536 };
     const symbols = [
       makeSymbol({ id: "s1", name: "login" }),
@@ -292,12 +297,16 @@ describe("buildSearchIndex", () => {
       makeCluster({ id: "c1", symbols: ["s1"] }),
       makeCluster({ id: "c2", symbols: ["s2"] }),
     ];
+    // null for s1, embedding for s2, null for c1, embedding for c2
     const embedFn = vi.fn()
-      .mockResolvedValueOnce(null)
-      .mockResolvedValueOnce(embedding);
+      .mockResolvedValueOnce(null)       // s1 symbol
+      .mockResolvedValueOnce(embedding)  // s2 symbol
+      .mockResolvedValueOnce(null)       // c1 cluster
+      .mockResolvedValueOnce(embedding); // c2 cluster
     const index = await buildSearchIndex(symbols, clusters, embedFn);
-    expect(index.embeddings).toHaveLength(1);
+    expect(index.embeddings).toHaveLength(2);
     expect(index.embeddings[0].symbolId).toBe("s2");
+    expect(index.embeddings[1].symbolId).toBe("cluster:c2");
   });
 });
 
@@ -373,8 +382,8 @@ describe("Property 14: Embedding Dimensionality — Validates: Requirements 8.3"
           for (const result of index.embeddings) {
             if (result.embedding.vector.length !== 1536 || result.embedding.dimensions !== 1536) return false;
           }
-          // Number of collected embeddings must not exceed number of clusters
-          if (index.embeddings.length > clusters.length) return false;
+          // Number of collected embeddings must not exceed symbols + clusters
+          if (index.embeddings.length > symbols.length + clusters.length) return false;
           return true;
         },
       ),

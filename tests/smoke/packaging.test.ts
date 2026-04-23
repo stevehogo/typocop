@@ -54,6 +54,20 @@ describe(".env.example assertions", () => {
   const envExample = readFileSync(resolve(root, ".env.example"), "utf-8");
 
   const requiredVars = [
+    "LADYBUGDB_PATH",
+    "OLLAMA_ENABLED",
+    "OLLAMA_URL",
+    "OLLAMA_MODEL",
+    "OLLAMA_DIMENSIONS",
+  ];
+
+  for (const varName of requiredVars) {
+    it(`contains ${varName}`, () => {
+      expect(envExample).toContain(varName);
+    });
+  }
+
+  const removedVars = [
     "NEO4J_URI",
     "NEO4J_USER",
     "NEO4J_PASSWORD",
@@ -65,9 +79,12 @@ describe(".env.example assertions", () => {
     "OPENAI_API_KEY",
   ];
 
-  for (const varName of requiredVars) {
-    it(`contains ${varName}`, () => {
-      expect(envExample).toContain(varName);
+  for (const varName of removedVars) {
+    it(`does not contain removed var ${varName}`, () => {
+      // These vars should not appear as active env vars (may appear in comments)
+      const lines = envExample.split("\n").filter(l => !l.startsWith("#"));
+      const hasActiveVar = lines.some(l => l.includes(varName));
+      expect(hasActiveVar).toBe(false);
     });
   }
 });

@@ -7,15 +7,24 @@
  * Requirements: 3.4, 6.1–6.6, 21.5, 24.1, 24.2
  */
 import type { Symbol, Relationship, Cluster } from "../../types/index.js";
+import type { EmbeddingAdapter } from "../../db/types.js";
 import { buildClusterGraph, calculateCohesion } from "./graph.js";
 import { louvainClustering, generateHeuristicLabel } from "./louvain.js";
 import { enrichCluster } from "./enrichment.js";
 import type { AIClient } from "./enrichment.js";
 
 export type { AIClient } from "./enrichment.js";
-export { classifyCluster, inferClusterName } from "./enrichment.js";
+export { classifyCluster, inferClusterName, resetSharedClassifier } from "./enrichment.js";
 export { buildClusterGraph, calculateCohesion } from "./graph.js";
 export { louvainClustering, generateHeuristicLabel } from "./louvain.js";
+export {
+  SemanticClusterClassifier,
+  buildClusterText,
+  cosineSimilarity,
+  SEMANTIC_THRESHOLD,
+  ALL_CATEGORIES,
+  CATEGORY_REFERENCE_TEXTS,
+} from "./semantic-classifier.js";
 
 // ─── Phase 4 entry point ──────────────────────────────────────────────────────
 
@@ -34,6 +43,7 @@ export async function clusterSymbols(
   symbols: Symbol[],
   relationships: Relationship[],
   aiClient?: AIClient,
+  embeddingAdapter?: EmbeddingAdapter,
 ): Promise<Cluster[]> {
   const graph = buildClusterGraph(symbols, relationships);
   const communities = louvainClustering(graph);
@@ -78,6 +88,7 @@ export async function clusterSymbols(
       symbolMap,
       heuristicLabel,
       aiClient,
+      embeddingAdapter,
     );
 
     clusters.push(enriched);

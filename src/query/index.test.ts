@@ -13,41 +13,45 @@
  *   When confidence >= 0.90, at least one symbol must be returned.
  *   Validates: Requirements 9.7, 21.3, 21.4
  */
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import * as fc from "fast-check";
 import { parseQueryIntent } from "./parse-intent.js";
 import { executeQuery } from "./execute-query.js";
 import { formatResponse } from "./format-response.js";
 import { calculateConfidence } from "./confidence.js";
 import type { Query, QueryResult, Symbol, Relationship, QueryIntent } from "../types/index.js";
-
-// ─── Mocks ────────────────────────────────────────────────────────────────────
-
-// Mock the embedding module to avoid OpenAI API calls
-vi.mock("../vector/embed.js", () => ({
-  generateEmbedding: vi.fn(async () => ({
-    vector: new Array(1536).fill(0),
-    dimensions: 1536,
-  })),
-}));
-
-// Mock semantic search to control scores in tests
-vi.mock("../vector/search.js", () => ({
-  semanticSearch: vi.fn(async () => []),
-}));
+import type { DatabaseAdapter, GraphAdapter, VectorAdapter, EmbeddingAdapter } from "../db/types.js";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function mockVectorPool() {
-  return { query: vi.fn(async () => ({ rows: [] })) };
-}
-
-function mockGraphSession() {
-  const runFn = vi.fn(async () => ({ records: [] }));
+function mockDatabaseAdapter(): DatabaseAdapter {
+  const graph: GraphAdapter = {
+    createNode: vi.fn(),
+    createRelationship: vi.fn(),
+    queryNodes: vi.fn(),
+    queryRelationships: vi.fn(),
+    deleteNodesByLabel: vi.fn(),
+    deleteRelationshipsByType: vi.fn(),
+    runCypher: vi.fn().mockResolvedValue([]),
+    runCypherWrite: vi.fn(),
+  };
+  const vector: VectorAdapter = {
+    createTables: vi.fn(),
+    indexSymbol: vi.fn(),
+    semanticSearch: vi.fn().mockResolvedValue([]),
+    deleteAll: vi.fn(),
+  };
+  const embedding: EmbeddingAdapter = {
+    isEnabled: vi.fn().mockReturnValue(false),
+    embedText: vi.fn().mockResolvedValue(null),
+    getDimensions: vi.fn().mockReturnValue(2560),
+  };
   return {
-    run: runFn,
-    executeRead: vi.fn(async (work: (tx: { run: typeof runFn }) => Promise<unknown>) => work({ run: runFn })),
-    executeWrite: vi.fn(async (work: (tx: { run: typeof runFn }) => Promise<unknown>) => work({ run: runFn })),
+    initialize: vi.fn(),
+    close: vi.fn(),
+    getGraphAdapter: vi.fn().mockReturnValue(graph),
+    getVectorAdapter: vi.fn().mockReturnValue(vector),
+    getEmbeddingAdapter: vi.fn().mockReturnValue(embedding),
   };
 }
 
@@ -61,11 +65,8 @@ describe("executeQuery (Property 9: Result Limit)", () => {
         fc.integer({ min: 1, max: 100 }),
         async (text, maxResults) => {
           const query: Query = { text, maxResults };
-          const pool = mockVectorPool();
-          const session = mockGraphSession();
-
-          const result = await executeQuery(query, pool as never, session as never, "tpc_");
-
+          const adapter = mockDatabaseAdapter();
+          const result = await executeQuery(query, adapter);
           return result.symbols.length <= maxResults;
         },
       ),
@@ -74,7 +75,7 @@ describe("executeQuery (Property 9: Result Limit)", () => {
 
   it("respects maxResults=1", async () => {
     const query: Query = { text: "find user functions", maxResults: 1 };
-    const result = await executeQuery(query, mockVectorPool() as never, mockGraphSession() as never, "tpc_");
+    const result = await executeQuery(query, mockDatabaseAdapter());
     expect(result.symbols.length).toBeLessThanOrEqual(1);
   });
 });
@@ -86,11 +87,8 @@ describe("executeQuery (Property 10: Confidence Bounds)", () => {
     await fc.assert(
       fc.asyncProperty(fc.string({ minLength: 1 }), async (text) => {
         const query: Query = { text, maxResults: 10 };
-        const pool = mockVectorPool();
-        const session = mockGraphSession();
-
-        const result = await executeQuery(query, pool as never, session as never, "tpc_");
-
+        const adapter = mockDatabaseAdapter();
+        const result = await executeQuery(query, adapter);
         return result.confidence >= 0.0 && result.confidence <= 1.0;
       }),
     );
@@ -104,12 +102,7 @@ describe("executeQuery (Property 10: Confidence Bounds)", () => {
     ];
 
     for (const text of queries) {
-      const result = await executeQuery(
-        { text, maxResults: 10 },
-        mockVectorPool() as never,
-        mockGraphSession() as never,
-        "tpc_",
-      );
+      const result = await executeQuery({ text, maxResults: 10 }, mockDatabaseAdapter());
       expect(result.confidence).toBeGreaterThanOrEqual(0.0);
       expect(result.confidence).toBeLessThanOrEqual(1.0);
     }
@@ -120,14 +113,11 @@ describe("executeQuery (Property 10: Confidence Bounds)", () => {
 
 describe("executeQuery (Property 11: High Confidence Completeness)", () => {
   it("Property 11: confidence >= 0.90 implies at least one symbol returned", async () => {
-    // Inverse: if symbols.length === 0, confidence must be < 0.90
     await fc.assert(
       fc.asyncProperty(fc.string({ minLength: 1 }), async (text) => {
         const query: Query = { text, maxResults: 10 };
-        const pool = mockVectorPool();
-        const session = mockGraphSession();
-
-        const result = await executeQuery(query, pool as never, session as never, "tpc_");
+        const adapter = mockDatabaseAdapter();
+        const result = await executeQuery(query, adapter);
 
         if (result.symbols.length === 0) {
           return result.confidence < 0.90;
@@ -160,7 +150,6 @@ describe("calculateConfidence", () => {
       { score: 0.95 },
       { score: 0.85 },
     ]);
-    // avg = 0.90, no structural bonus → 0.90
     expect(score).toBeCloseTo(0.90, 5);
   });
 
@@ -170,7 +159,6 @@ describe("calculateConfidence", () => {
       id: "r1", source: "s1", target: "s2", relType: "calls", metadata: {},
     };
     const score = calculateConfidence(symbols, [rel], intent, [{ score: 0.90 }]);
-    // 0.90 + 0.05 = 0.95
     expect(score).toBeCloseTo(0.95, 5);
   });
 
@@ -244,12 +232,9 @@ describe("formatResponse", () => {
       intent: { type: "impactAnalysis", target: "foo" },
       symbols: [
         {
-          id: "1",
-          name: "getUserById",
-          kind: "function",
+          id: "1", name: "getUserById", kind: "function",
           location: { filePath: "user.ts", startLine: 10, startColumn: 0, endLine: 20, endColumn: 0 },
-          visibility: "public",
-          modifiers: [],
+          visibility: "public", modifiers: [],
         },
       ],
       relationships: [],

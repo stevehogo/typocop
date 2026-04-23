@@ -1,6 +1,20 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { ConfigurationManager } from "./configuration-manager.js";
-import { PrefixValidationError } from "./errors.js";
+import { PrefixValidationError, OllamaConfigError, EmbeddingConfigError } from "./errors.js";
+
+// Mock node:fs/promises to avoid real filesystem operations
+vi.mock("node:fs/promises", () => ({
+  mkdir: vi.fn().mockResolvedValue(undefined),
+}));
+
+// Mock node:os to control homedir in tests
+vi.mock("node:os", () => ({
+  homedir: vi.fn(() => "/mock-home"),
+}));
+
+import { mkdir } from "node:fs/promises";
+
+const mockMkdir = mkdir as ReturnType<typeof vi.fn>;
 
 describe("ConfigurationManager", () => {
   let manager: ConfigurationManager;
@@ -10,6 +24,7 @@ describe("ConfigurationManager", () => {
     process.env = { ...originalEnv };
     manager = new ConfigurationManager();
     vi.spyOn(console, "log").mockImplementation(() => undefined);
+    mockMkdir.mockClear();
   });
 
   afterEach(() => {
@@ -17,7 +32,7 @@ describe("ConfigurationManager", () => {
     vi.restoreAllMocks();
   });
 
-  // ── 2.2 Default resolution ────────────────────────────────────────────────
+  // ── Prefix defaults ──────────────────────────────────────────────────────
 
   it("defaults to tpc_ when TYPOCOP_PREFIX is not set", async () => {
     delete process.env["TYPOCOP_PREFIX"];
@@ -37,7 +52,7 @@ describe("ConfigurationManager", () => {
     expect(manager.getConfiguration().source).toBe("default");
   });
 
-  // ── 2.1 / 2.3 Env var reading and normalization ───────────────────────────
+  // ── Prefix env var reading and normalization ──────────────────────────────
 
   it("uses env var value when TYPOCOP_PREFIX is a valid prefix with underscore", async () => {
     process.env["TYPOCOP_PREFIX"] = "myapp_";
@@ -45,89 +60,352 @@ describe("ConfigurationManager", () => {
     expect(manager.getPrefix()).toBe("myapp_");
   });
 
-  it("normalizes prefix without trailing underscore (tpc → tpc_)", async () => {
-    process.env["TYPOCOP_PREFIX"] = "tpc";
-    await manager.initialize();
-    expect(manager.getPrefix()).toBe("tpc_");
+  // ── Ollama config defaults (Req 5.1, 5.2, 5.3, 5.4) ─────────────────────
+
+  describe("Ollama config defaults", () => {
+    beforeEach(() => {
+      delete process.env["OLLAMA_ENABLED"];
+      delete process.env["OLLAMA_URL"];
+      delete process.env["OLLAMA_MODEL"];
+      delete process.env["OLLAMA_DIMENSIONS"];
+    });
+
+    it("defaults OLLAMA_ENABLED to false when unset", async () => {
+      await manager.initialize();
+      expect(manager.getConfiguration().ollama.enabled).toBe(false);
+    });
+
+    it("defaults OLLAMA_URL to http://localhost:11434 when unset", async () => {
+      await manager.initialize();
+      expect(manager.getConfiguration().ollama.url).toBe(
+        "http://localhost:11434",
+      );
+    });
+
+    it("defaults OLLAMA_MODEL to mxbai-embed-large when unset", async () => {
+      await manager.initialize();
+      expect(manager.getConfiguration().ollama.model).toBe(
+        "mxbai-embed-large",
+      );
+    });
+
+    it("defaults OLLAMA_DIMENSIONS to 1024 when unset", async () => {
+      await manager.initialize();
+      expect(manager.getConfiguration().ollama.dimensions).toBe(1024);
+    });
   });
 
-  it("reports source as environment when env var is set", async () => {
-    process.env["TYPOCOP_PREFIX"] = "myapp_";
-    await manager.initialize();
-    expect(manager.getConfiguration().source).toBe("environment");
+  // ── Ollama config from env vars ───────────────────────────────────────────
+
+  describe("Ollama config from env vars", () => {
+    it("enables embeddings when OLLAMA_ENABLED=true", async () => {
+      process.env["OLLAMA_ENABLED"] = "true";
+      await manager.initialize();
+      expect(manager.getConfiguration().ollama.enabled).toBe(true);
+    });
+
+    it("enables embeddings when OLLAMA_ENABLED=TRUE (case-insensitive)", async () => {
+      process.env["OLLAMA_ENABLED"] = "TRUE";
+      await manager.initialize();
+      expect(manager.getConfiguration().ollama.enabled).toBe(true);
+    });
+
+    it("keeps disabled when OLLAMA_ENABLED=false", async () => {
+      process.env["OLLAMA_ENABLED"] = "false";
+      await manager.initialize();
+      expect(manager.getConfiguration().ollama.enabled).toBe(false);
+    });
+
+    it("overrides OLLAMA_URL from env var", async () => {
+      process.env["OLLAMA_URL"] = "https://ollama.example.com:8080";
+      await manager.initialize();
+      expect(manager.getConfiguration().ollama.url).toBe(
+        "https://ollama.example.com:8080",
+      );
+    });
+
+    it("overrides OLLAMA_MODEL from env var", async () => {
+      process.env["OLLAMA_MODEL"] = "nomic-embed-text";
+      await manager.initialize();
+      expect(manager.getConfiguration().ollama.model).toBe("nomic-embed-text");
+    });
+
+    it("overrides OLLAMA_DIMENSIONS from env var", async () => {
+      process.env["OLLAMA_DIMENSIONS"] = "768";
+      await manager.initialize();
+      expect(manager.getConfiguration().ollama.dimensions).toBe(768);
+    });
   });
 
-  // ── 2.3 Invalid prefix throws ConfigurationError ─────────────────────────
+  // ── Ollama validation (Req 5.4, 5.7) ─────────────────────────────────────
 
-  it("throws PrefixValidationError for uppercase prefix", async () => {
-    process.env["TYPOCOP_PREFIX"] = "MyApp";
-    await expect(manager.initialize()).rejects.toBeInstanceOf(PrefixValidationError);
+  describe("Ollama validation", () => {
+    it("throws OllamaConfigError for non-http URL", async () => {
+      process.env["OLLAMA_URL"] = "ftp://ollama.local";
+      await expect(manager.initialize()).rejects.toThrow(OllamaConfigError);
+    });
+
+    it("throws OllamaConfigError for completely invalid URL", async () => {
+      process.env["OLLAMA_URL"] = "not-a-url";
+      await expect(manager.initialize()).rejects.toThrow(OllamaConfigError);
+    });
+
+    it("throws OllamaConfigError for non-integer dimensions", async () => {
+      process.env["OLLAMA_DIMENSIONS"] = "3.14";
+      await expect(manager.initialize()).rejects.toThrow(OllamaConfigError);
+    });
+
+    it("throws OllamaConfigError for zero dimensions", async () => {
+      process.env["OLLAMA_DIMENSIONS"] = "0";
+      await expect(manager.initialize()).rejects.toThrow(OllamaConfigError);
+    });
+
+    it("throws OllamaConfigError for negative dimensions", async () => {
+      process.env["OLLAMA_DIMENSIONS"] = "-512";
+      await expect(manager.initialize()).rejects.toThrow(OllamaConfigError);
+    });
+
+    it("throws OllamaConfigError for non-numeric dimensions", async () => {
+      process.env["OLLAMA_DIMENSIONS"] = "abc";
+      await expect(manager.initialize()).rejects.toThrow(OllamaConfigError);
+    });
+
+    it("accepts valid http URL", async () => {
+      process.env["OLLAMA_URL"] = "http://192.168.1.100:11434";
+      await manager.initialize();
+      expect(manager.getConfiguration().ollama.url).toBe(
+        "http://192.168.1.100:11434",
+      );
+    });
+
+    it("accepts valid https URL", async () => {
+      process.env["OLLAMA_URL"] = "https://ollama.example.com";
+      await manager.initialize();
+      expect(manager.getConfiguration().ollama.url).toBe(
+        "https://ollama.example.com",
+      );
+    });
   });
 
-  it("throws PrefixValidationError for prefix with special characters", async () => {
-    process.env["TYPOCOP_PREFIX"] = "my-app";
-    await expect(manager.initialize()).rejects.toBeInstanceOf(PrefixValidationError);
+  // ── LadybugDB config (Req 5.5, 5.6) ──────────────────────────────────────
+
+  describe("LadybugDB config", () => {
+    it("overrides default path when LADYBUGDB_PATH is set", async () => {
+      process.env["LADYBUGDB_PATH"] = "/custom/path/db.ladybug";
+      await manager.initialize();
+      expect(manager.getConfiguration().ladybugdb.dbPath).toBe(
+        "/custom/path/db.ladybug",
+      );
+    });
+
+    it("uses default path ~/.typocop/{prefix}/db.ladybug when LADYBUGDB_PATH is unset", async () => {
+      delete process.env["LADYBUGDB_PATH"];
+      delete process.env["TYPOCOP_PREFIX"];
+      await manager.initialize();
+      const config = manager.getConfiguration();
+      expect(config.ladybugdb.dbPath).toContain("/mock-home/");
+      expect(config.ladybugdb.dbPath).toContain(".typocop");
+      expect(config.ladybugdb.dbPath).toContain("tpc");
+      expect(config.ladybugdb.dbPath.endsWith("db.ladybug")).toBe(true);
+    });
+
+    it("auto-creates database directory with recursive: true", async () => {
+      delete process.env["LADYBUGDB_PATH"];
+      await manager.initialize();
+      expect(mockMkdir).toHaveBeenCalledWith(
+        expect.any(String),
+        { recursive: true },
+      );
+    });
+
+    it("auto-creates directory for custom LADYBUGDB_PATH", async () => {
+      process.env["LADYBUGDB_PATH"] = "/custom/deep/path/db.ladybug";
+      await manager.initialize();
+      expect(mockMkdir).toHaveBeenCalledWith("/custom/deep/path", {
+        recursive: true,
+      });
+    });
   });
 
-  it("thrown error includes the invalid prefix value", async () => {
-    process.env["TYPOCOP_PREFIX"] = "BAD";
-    const err = await manager.initialize().catch((e: unknown) => e);
-    expect(err).toBeInstanceOf(PrefixValidationError);
-    expect((err as PrefixValidationError).prefix).toBe("BAD");
+  // ── Embedding config defaults ─────────────────────────────────────────────
+
+  describe("Embedding config defaults", () => {
+    beforeEach(() => {
+      delete process.env["EMBEDDING_PROVIDER"];
+      delete process.env["HF_MODEL"];
+      delete process.env["HF_DTYPE"];
+      delete process.env["HF_DIMENSIONS"];
+      delete process.env["HF_POOLING"];
+      delete process.env["OLLAMA_ENABLED"];
+    });
+
+    it("defaults to provider huggingface, model mxbai-embed-large-v1, dtype fp32, dimensions 1024, pooling cls", async () => {
+      await manager.initialize();
+      const { embedding } = manager.getConfiguration();
+      expect(embedding.provider).toBe("huggingface");
+      expect(embedding.huggingface.model).toBe("mixedbread-ai/mxbai-embed-large-v1");
+      expect(embedding.huggingface.dtype).toBe("fp32");
+      expect(embedding.huggingface.dimensions).toBe(1024);
+      expect(embedding.huggingface.pooling).toBe("cls");
+    });
   });
 
-  it("thrown error includes a reason string", async () => {
-    process.env["TYPOCOP_PREFIX"] = "MyApp";
-    const err = await manager.initialize().catch((e: unknown) => e);
-    expect(err).toBeInstanceOf(PrefixValidationError);
-    expect((err as PrefixValidationError).reason).toBeTruthy();
+  // ── Embedding provider env var parsing ────────────────────────────────────
+
+  describe("Embedding provider env var parsing", () => {
+    beforeEach(() => {
+      delete process.env["EMBEDDING_PROVIDER"];
+      delete process.env["OLLAMA_ENABLED"];
+      delete process.env["HF_MODEL"];
+      delete process.env["HF_DTYPE"];
+      delete process.env["HF_DIMENSIONS"];
+      delete process.env["HF_POOLING"];
+    });
+
+    it("EMBEDDING_PROVIDER=huggingface → provider is huggingface", async () => {
+      process.env["EMBEDDING_PROVIDER"] = "huggingface";
+      await manager.initialize();
+      expect(manager.getConfiguration().embedding.provider).toBe("huggingface");
+    });
+
+    it("EMBEDDING_PROVIDER=ollama → provider is ollama", async () => {
+      process.env["EMBEDDING_PROVIDER"] = "ollama";
+      await manager.initialize();
+      expect(manager.getConfiguration().embedding.provider).toBe("ollama");
+    });
+
+    it("EMBEDDING_PROVIDER=none → provider is none", async () => {
+      process.env["EMBEDDING_PROVIDER"] = "none";
+      await manager.initialize();
+      expect(manager.getConfiguration().embedding.provider).toBe("none");
+    });
   });
 
-  it("thrown error includes a suggestion for uppercase prefix", async () => {
-    process.env["TYPOCOP_PREFIX"] = "MyApp";
-    const err = await manager.initialize().catch((e: unknown) => e);
-    expect(err).toBeInstanceOf(PrefixValidationError);
-    expect((err as PrefixValidationError).suggestion).toBe("myapp");
+  // ── HuggingFace config env var parsing ────────────────────────────────────
+
+  describe("HuggingFace config env var parsing", () => {
+    beforeEach(() => {
+      delete process.env["EMBEDDING_PROVIDER"];
+      delete process.env["OLLAMA_ENABLED"];
+      delete process.env["HF_MODEL"];
+      delete process.env["HF_DTYPE"];
+      delete process.env["HF_DIMENSIONS"];
+      delete process.env["HF_POOLING"];
+    });
+
+    it("HF_MODEL=custom-model → model is custom-model", async () => {
+      process.env["HF_MODEL"] = "custom-model";
+      await manager.initialize();
+      expect(manager.getConfiguration().embedding.huggingface.model).toBe("custom-model");
+    });
+
+    it("HF_DTYPE=fp16 → dtype is fp16", async () => {
+      process.env["HF_DTYPE"] = "fp16";
+      await manager.initialize();
+      expect(manager.getConfiguration().embedding.huggingface.dtype).toBe("fp16");
+    });
+
+    it("HF_DTYPE=q8 → dtype is q8", async () => {
+      process.env["HF_DTYPE"] = "q8";
+      await manager.initialize();
+      expect(manager.getConfiguration().embedding.huggingface.dtype).toBe("q8");
+    });
+
+    it("HF_DIMENSIONS=512 → dimensions is 512", async () => {
+      process.env["HF_DIMENSIONS"] = "512";
+      await manager.initialize();
+      expect(manager.getConfiguration().embedding.huggingface.dimensions).toBe(512);
+    });
+
+    it("HF_POOLING=mean → pooling is mean", async () => {
+      process.env["HF_POOLING"] = "mean";
+      await manager.initialize();
+      expect(manager.getConfiguration().embedding.huggingface.pooling).toBe("mean");
+    });
   });
 
-  it("thrown error is a ConfigurationError (base class check)", async () => {
-    const { ConfigurationError } = await import("./errors.js");
-    process.env["TYPOCOP_PREFIX"] = "BAD!";
-    const err = await manager.initialize().catch((e: unknown) => e);
-    expect(err).toBeInstanceOf(ConfigurationError);
+  // ── Backward compatibility (Req 5.1, 5.2, 5.3) ──────────────────────────
+
+  describe("Backward compatibility (Req 5.1, 5.2, 5.3)", () => {
+    beforeEach(() => {
+      delete process.env["EMBEDDING_PROVIDER"];
+      delete process.env["OLLAMA_ENABLED"];
+      delete process.env["HF_MODEL"];
+      delete process.env["HF_DTYPE"];
+      delete process.env["HF_DIMENSIONS"];
+      delete process.env["HF_POOLING"];
+    });
+
+    it("OLLAMA_ENABLED=true without EMBEDDING_PROVIDER → provider defaults to ollama", async () => {
+      process.env["OLLAMA_ENABLED"] = "true";
+      await manager.initialize();
+      expect(manager.getConfiguration().embedding.provider).toBe("ollama");
+    });
+
+    it("OLLAMA_ENABLED=false without EMBEDDING_PROVIDER → provider defaults to huggingface", async () => {
+      process.env["OLLAMA_ENABLED"] = "false";
+      await manager.initialize();
+      expect(manager.getConfiguration().embedding.provider).toBe("huggingface");
+    });
+
+    it("OLLAMA_ENABLED unset without EMBEDDING_PROVIDER → provider defaults to huggingface", async () => {
+      await manager.initialize();
+      expect(manager.getConfiguration().embedding.provider).toBe("huggingface");
+    });
+
+    it("EMBEDDING_PROVIDER=none overrides OLLAMA_ENABLED=true", async () => {
+      process.env["EMBEDDING_PROVIDER"] = "none";
+      process.env["OLLAMA_ENABLED"] = "true";
+      await manager.initialize();
+      expect(manager.getConfiguration().embedding.provider).toBe("none");
+    });
   });
 
-  // ── 2.1 getPrefix() throws before initialize() ───────────────────────────
+  // ── Embedding validation errors ───────────────────────────────────────────
 
-  it("getPrefix() throws if initialize() has not been called", () => {
-    expect(() => manager.getPrefix()).toThrow(
-      "ConfigurationManager has not been initialized",
-    );
-  });
+  describe("Embedding validation errors", () => {
+    beforeEach(() => {
+      delete process.env["EMBEDDING_PROVIDER"];
+      delete process.env["OLLAMA_ENABLED"];
+      delete process.env["HF_MODEL"];
+      delete process.env["HF_DTYPE"];
+      delete process.env["HF_DIMENSIONS"];
+      delete process.env["HF_POOLING"];
+    });
 
-  it("getConfiguration() throws if initialize() has not been called", () => {
-    expect(() => manager.getConfiguration()).toThrow(
-      "ConfigurationManager has not been initialized",
-    );
-  });
+    it("throws EmbeddingConfigError for invalid provider", async () => {
+      process.env["EMBEDDING_PROVIDER"] = "invalid";
+      await expect(manager.initialize()).rejects.toThrow(EmbeddingConfigError);
+    });
 
-  // ── getConfiguration() shape ─────────────────────────────────────────────
+    it("throws EmbeddingConfigError for HF_DTYPE=bf16", async () => {
+      process.env["HF_DTYPE"] = "bf16";
+      await expect(manager.initialize()).rejects.toThrow(EmbeddingConfigError);
+    });
 
-  it("getConfiguration() returns a Date for loadedAt", async () => {
-    delete process.env["TYPOCOP_PREFIX"];
-    await manager.initialize();
-    expect(manager.getConfiguration().loadedAt).toBeInstanceOf(Date);
-  });
+    it("throws EmbeddingConfigError for HF_DTYPE=invalid", async () => {
+      process.env["HF_DTYPE"] = "invalid";
+      await expect(manager.initialize()).rejects.toThrow(EmbeddingConfigError);
+    });
 
-  // ── validate() delegates to PrefixValidator ───────────────────────────────
+    it("throws EmbeddingConfigError for HF_DIMENSIONS=0", async () => {
+      process.env["HF_DIMENSIONS"] = "0";
+      await expect(manager.initialize()).rejects.toThrow(EmbeddingConfigError);
+    });
 
-  it("validate() returns valid result for a good prefix", () => {
-    const result = manager.validate("myapp_");
-    expect(result.valid).toBe(true);
-  });
+    it("throws EmbeddingConfigError for HF_DIMENSIONS=-1", async () => {
+      process.env["HF_DIMENSIONS"] = "-1";
+      await expect(manager.initialize()).rejects.toThrow(EmbeddingConfigError);
+    });
 
-  it("validate() returns invalid result for an uppercase prefix", () => {
-    const result = manager.validate("MyApp");
-    expect(result.valid).toBe(false);
+    it("throws EmbeddingConfigError for HF_DIMENSIONS=3.14", async () => {
+      process.env["HF_DIMENSIONS"] = "3.14";
+      await expect(manager.initialize()).rejects.toThrow(EmbeddingConfigError);
+    });
+
+    it("throws EmbeddingConfigError for HF_DIMENSIONS=abc", async () => {
+      process.env["HF_DIMENSIONS"] = "abc";
+      await expect(manager.initialize()).rejects.toThrow(EmbeddingConfigError);
+    });
   });
 });

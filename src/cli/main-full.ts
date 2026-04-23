@@ -5,6 +5,7 @@
 import { existsSync } from "node:fs";
 import { parseArgs, executeCLI, CLIValidationError } from "./index.js";
 import { configurationManager, ConfigurationError, PrefixValidationError } from "../config/index.js";
+import { drainAllPools } from "../db/pool-registry.js";
 
 function formatConfigurationError(err: ConfigurationError): string {
   if (err instanceof PrefixValidationError) {
@@ -42,6 +43,7 @@ export async function runFullCLI(argv: string[]): Promise<void> {
     if (!existsSync(envPath)) {
       if (envExplicit) {
         process.stderr.write(`Error: env file not found: ${envPath}\n`);
+        await drainAllPools();
         process.exit(1);
       }
     } else {
@@ -55,6 +57,7 @@ export async function runFullCLI(argv: string[]): Promise<void> {
   } catch (err) {
     if (err instanceof ConfigurationError) {
       process.stderr.write(formatConfigurationError(err));
+      await drainAllPools();
       process.exit(1);
     }
     throw err;
@@ -68,9 +71,11 @@ export async function runFullCLI(argv: string[]): Promise<void> {
   } catch (err: any) {
     if (err instanceof CLIValidationError) {
       process.stderr.write(err.message + "\n");
+      await drainAllPools();
       process.exit(1);
     }
     if (err?.code === "commander.helpDisplayed" || err?.code === "commander.version") {
+      await drainAllPools();
       process.exit(err.exitCode ?? 0);
     }
     throw err;
@@ -78,10 +83,12 @@ export async function runFullCLI(argv: string[]): Promise<void> {
 
   try {
     await executeCLI(command);
+    await drainAllPools();
     process.exit(0);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     process.stderr.write(msg + "\n");
+    await drainAllPools();
     process.exit(1);
   }
 }

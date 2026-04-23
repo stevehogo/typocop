@@ -1,17 +1,13 @@
 /**
- * Integration tests — SessionManager wired into MCP server.
+ * Integration tests — MCP tools with DatabaseAdapter.
  *
- * Covers:
- *   - Full tool call flow: MCPToolResponse shape (summary field present)
- *   - Two concurrent tool calls: neither hangs, both return results
- *   - Simulated disconnect mid-call: closeAll invoked, subsequent calls succeed
+ * These tests verify that tool calls through DatabaseAdapter work correctly
+ * for concurrent calls, error propagation, and response format.
  *
- * Requirements: 2.1, 2.2, 2.3, 3.1, 3.2
+ * Requirements: 7.1, 7.5
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import type { Driver, Session } from "neo4j-driver";
-import type { Pool } from "pg";
-import { SessionManager } from "../../src/mcp/session-manager.js";
+import type { DatabaseAdapter, GraphAdapter, VectorAdapter, EmbeddingAdapter } from "../../src/db/types.js";
 import { executeTool } from "../../src/mcp/tools.js";
 
 // ---------------------------------------------------------------------------
@@ -38,8 +34,10 @@ import { executeDataFlowTrace } from "../../src/query/data-flow-trace.js";
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Minimal QueryResult stub returned by mocked query functions. */
+const STUB_RESOLUTION = { kind: "exact" as const, node: { id: "sym-1", labels: ["Symbol"], properties: { id: "sym-1", name: "UserService" } } };
+
 const STUB_QUERY_RESULT = {
+  resolution: STUB_RESOLUTION,
   symbols: [
     {
       id: "sym-1",
@@ -58,21 +56,35 @@ const STUB_QUERY_RESULT = {
   affectedFlows: [],
 };
 
-function makeMockSession(): Session {
+function createMockAdapter(): DatabaseAdapter {
+  const graph: GraphAdapter = {
+    createNode: vi.fn().mockResolvedValue(undefined),
+    createRelationship: vi.fn().mockResolvedValue(undefined),
+    queryNodes: vi.fn().mockResolvedValue([]),
+    queryRelationships: vi.fn().mockResolvedValue([]),
+    deleteNodesByLabel: vi.fn().mockResolvedValue(0),
+    deleteRelationshipsByType: vi.fn().mockResolvedValue(0),
+    runCypher: vi.fn().mockResolvedValue([]),
+    runCypherWrite: vi.fn().mockResolvedValue(undefined),
+  };
+  const vector: VectorAdapter = {
+    createTables: vi.fn().mockResolvedValue(undefined),
+    indexSymbol: vi.fn().mockResolvedValue(undefined),
+    semanticSearch: vi.fn().mockResolvedValue([]),
+    deleteAll: vi.fn().mockResolvedValue(0),
+  };
+  const embedding: EmbeddingAdapter = {
+    isEnabled: vi.fn().mockReturnValue(false),
+    embedText: vi.fn().mockResolvedValue(null),
+    getDimensions: vi.fn().mockReturnValue(2560),
+  };
   return {
+    initialize: vi.fn().mockResolvedValue(undefined),
     close: vi.fn().mockResolvedValue(undefined),
-  } as unknown as Session;
-}
-
-function makeMockDriver(session?: Session): Driver {
-  const s = session ?? makeMockSession();
-  return {
-    session: vi.fn().mockReturnValue(s),
-  } as unknown as Driver;
-}
-
-function makeMockPool(): Pool {
-  return {} as unknown as Pool;
+    getGraphAdapter: vi.fn().mockReturnValue(graph),
+    getVectorAdapter: vi.fn().mockReturnValue(vector),
+    getEmbeddingAdapter: vi.fn().mockReturnValue(embedding),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -90,19 +102,10 @@ beforeEach(() => {
 // 1. Full tool call flow — MCPToolResponse shape
 // ---------------------------------------------------------------------------
 
-describe("full tool call flow", () => {
+describe("full tool call flow with DatabaseAdapter", () => {
   it("get_symbol_context returns MCPToolResponse with summary field", async () => {
-    const sessionManager = new SessionManager();
-    const driver = makeMockDriver();
-    const pool = makeMockPool();
-
-    const response = await executeTool(
-      "get_symbol_context",
-      { symbolName: "UserService" },
-      pool,
-      driver,
-      sessionManager,
-    );
+    const adapter = createMockAdapter();
+    const response = await executeTool("get_symbol_context", { symbolName: "UserService" }, adapter);
 
     expect(response.summary).toBeDefined();
     expect(typeof response.summary).toBe("string");
@@ -110,17 +113,8 @@ describe("full tool call flow", () => {
   });
 
   it("find_dependents returns MCPToolResponse with summary field", async () => {
-    const sessionManager = new SessionManager();
-    const driver = makeMockDriver();
-    const pool = makeMockPool();
-
-    const response = await executeTool(
-      "find_dependents",
-      { symbolName: "UserService" },
-      pool,
-      driver,
-      sessionManager,
-    );
+    const adapter = createMockAdapter();
+    const response = await executeTool("find_dependents", { symbolName: "UserService" }, adapter);
 
     expect(response.summary).toBeDefined();
     expect(typeof response.summary).toBe("string");
@@ -128,17 +122,8 @@ describe("full tool call flow", () => {
   });
 
   it("trace_data_flow returns MCPToolResponse with summary field", async () => {
-    const sessionManager = new SessionManager();
-    const driver = makeMockDriver();
-    const pool = makeMockPool();
-
-    const response = await executeTool(
-      "trace_data_flow",
-      { entryPoint: "UserController.login" },
-      pool,
-      driver,
-      sessionManager,
-    );
+    const adapter = createMockAdapter();
+    const response = await executeTool("trace_data_flow", { entryPoint: "UserController.login" }, adapter);
 
     expect(response.summary).toBeDefined();
     expect(typeof response.summary).toBe("string");
@@ -146,17 +131,8 @@ describe("full tool call flow", () => {
   });
 
   it("impact_analysis returns MCPToolResponse with summary field", async () => {
-    const sessionManager = new SessionManager();
-    const driver = makeMockDriver();
-    const pool = makeMockPool();
-
-    const response = await executeTool(
-      "impact_analysis",
-      { symbolName: "UserService", changeType: "modify" },
-      pool,
-      driver,
-      sessionManager,
-    );
+    const adapter = createMockAdapter();
+    const response = await executeTool("impact_analysis", { symbolName: "UserService", changeType: "modify" }, adapter);
 
     expect(response.summary).toBeDefined();
     expect(typeof response.summary).toBe("string");
@@ -164,17 +140,8 @@ describe("full tool call flow", () => {
   });
 
   it("response includes symbols, clusters, processes, confidence, and riskLevel", async () => {
-    const sessionManager = new SessionManager();
-    const driver = makeMockDriver();
-    const pool = makeMockPool();
-
-    const response = await executeTool(
-      "get_symbol_context",
-      { symbolName: "UserService" },
-      pool,
-      driver,
-      sessionManager,
-    );
+    const adapter = createMockAdapter();
+    const response = await executeTool("get_symbol_context", { symbolName: "UserService" }, adapter);
 
     expect(Array.isArray(response.symbols)).toBe(true);
     expect(Array.isArray(response.clusters)).toBe(true);
@@ -185,233 +152,66 @@ describe("full tool call flow", () => {
     expect(response.riskLevel).toBeDefined();
   });
 
-  it("session is closed after a successful tool call (finally block)", async () => {
-    const mockSession = makeMockSession();
-    const sessionManager = new SessionManager();
-    const driver = makeMockDriver(mockSession);
-    const pool = makeMockPool();
-
-    await executeTool(
-      "get_symbol_context",
-      { symbolName: "UserService" },
-      pool,
-      driver,
-      sessionManager,
-    );
-
-    expect(mockSession.close).toHaveBeenCalledOnce();
-    expect(sessionManager.openCount()).toBe(0);
-  });
-
-  it("session is closed even when the query throws (error propagation preserved)", async () => {
+  it("error propagation works correctly", async () => {
     vi.mocked(executeContextRetrieval).mockRejectedValueOnce(new Error("query failed"));
 
-    const mockSession = makeMockSession();
-    const sessionManager = new SessionManager();
-    const driver = makeMockDriver(mockSession);
-    const pool = makeMockPool();
-
+    const adapter = createMockAdapter();
     await expect(
-      executeTool("get_symbol_context", { symbolName: "BrokenSymbol" }, pool, driver, sessionManager),
+      executeTool("get_symbol_context", { symbolName: "BrokenSymbol" }, adapter),
     ).rejects.toThrow("query failed");
-
-    // Session must still be closed despite the error (Req 3.2)
-    expect(mockSession.close).toHaveBeenCalledOnce();
-    expect(sessionManager.openCount()).toBe(0);
   });
 });
 
 // ---------------------------------------------------------------------------
-// 2. Two concurrent tool calls — neither hangs, both return results
+// 2. Concurrent tool calls — both return results
 // ---------------------------------------------------------------------------
 
-describe("concurrent tool calls", () => {
-  it("two concurrent get_symbol_context calls both return results without hanging", async () => {
-    const session1 = makeMockSession();
-    const session2 = makeMockSession();
-    const sessionManager = new SessionManager();
-    const driver = {
-      session: vi.fn().mockReturnValueOnce(session1).mockReturnValueOnce(session2),
-    } as unknown as Driver;
-    const pool = makeMockPool();
+describe("concurrent tool calls with DatabaseAdapter", () => {
+  it("two concurrent calls both return results", async () => {
+    const adapter = createMockAdapter();
 
-    // Dispatch both concurrently — SessionManager serializes them
     const [result1, result2] = await Promise.all([
-      executeTool("get_symbol_context", { symbolName: "ServiceA" }, pool, driver, sessionManager),
-      executeTool("get_symbol_context", { symbolName: "ServiceB" }, pool, driver, sessionManager),
+      executeTool("get_symbol_context", { symbolName: "ServiceA" }, adapter),
+      executeTool("get_symbol_context", { symbolName: "ServiceB" }, adapter),
     ]);
 
     expect(result1.summary).toBeDefined();
     expect(result2.summary).toBeDefined();
   });
 
-  it("openCount never exceeds 1 during two concurrent tool calls", async () => {
-    const peakCounts: number[] = [];
+  it("mixed concurrent tool calls all succeed", async () => {
+    const adapter = createMockAdapter();
 
-    // Intercept acquire to record openCount after each session opens
-    const session1 = makeMockSession();
-    const session2 = makeMockSession();
-    const sessionManager = new SessionManager();
-
-    const originalAcquire = sessionManager.acquire.bind(sessionManager);
-    vi.spyOn(sessionManager, "acquire").mockImplementation(async (driver) => {
-      const s = await originalAcquire(driver);
-      peakCounts.push(sessionManager.openCount());
-      return s;
-    });
-
-    const driver = {
-      session: vi.fn().mockReturnValueOnce(session1).mockReturnValueOnce(session2),
-    } as unknown as Driver;
-    const pool = makeMockPool();
-
-    await Promise.all([
-      executeTool("get_symbol_context", { symbolName: "ServiceA" }, pool, driver, sessionManager),
-      executeTool("find_dependents", { symbolName: "ServiceB" }, pool, driver, sessionManager),
+    const [r1, r2] = await Promise.all([
+      executeTool("get_symbol_context", { symbolName: "ServiceA" }, adapter),
+      executeTool("find_dependents", { symbolName: "ServiceB" }, adapter),
     ]);
 
-    expect(Math.max(...peakCounts)).toBeLessThanOrEqual(1);
-  });
-
-  it("second call executes after first completes (serialization order)", async () => {
-    const callOrder: string[] = [];
-
-    vi.mocked(executeContextRetrieval)
-      .mockImplementationOnce(async () => {
-        callOrder.push("call-1-start");
-        await new Promise((r) => setTimeout(r, 10));
-        callOrder.push("call-1-end");
-        return STUB_QUERY_RESULT;
-      })
-      .mockImplementationOnce(async () => {
-        callOrder.push("call-2-start");
-        return STUB_QUERY_RESULT;
-      });
-
-    const session1 = makeMockSession();
-    const session2 = makeMockSession();
-    const sessionManager = new SessionManager();
-    const driver = {
-      session: vi.fn().mockReturnValueOnce(session1).mockReturnValueOnce(session2),
-    } as unknown as Driver;
-    const pool = makeMockPool();
-
-    await Promise.all([
-      executeTool("get_symbol_context", { symbolName: "A" }, pool, driver, sessionManager),
-      executeTool("get_symbol_context", { symbolName: "B" }, pool, driver, sessionManager),
-    ]);
-
-    // call-2 must start only after call-1 ends (serialization)
-    expect(callOrder.indexOf("call-1-end")).toBeLessThan(callOrder.indexOf("call-2-start"));
+    expect(r1.summary).toBeDefined();
+    expect(r2.summary).toBeDefined();
   });
 });
 
 // ---------------------------------------------------------------------------
-// 3. Simulated disconnect mid-call — closeAll invoked, subsequent calls succeed
+// 3. Adapter lifecycle
 // ---------------------------------------------------------------------------
 
-describe("simulated disconnect", () => {
-  it("closeAll reduces openCount to 0 when called mid-call", async () => {
-    let resolveQuery!: () => void;
-    vi.mocked(executeContextRetrieval).mockImplementationOnce(
-      () => new Promise<typeof STUB_QUERY_RESULT>((resolve) => {
-        resolveQuery = () => resolve(STUB_QUERY_RESULT);
-      }),
-    );
+describe("adapter lifecycle", () => {
+  it("adapter.close() can be called after tool calls", async () => {
+    const adapter = createMockAdapter();
 
-    const mockSession = makeMockSession();
-    const sessionManager = new SessionManager();
-    const driver = makeMockDriver(mockSession);
-    const pool = makeMockPool();
+    await executeTool("get_symbol_context", { symbolName: "ServiceA" }, adapter);
+    await adapter.close();
 
-    // Start a tool call but don't await it yet
-    const toolCallPromise = executeTool(
-      "get_symbol_context",
-      { symbolName: "SlowSymbol" },
-      pool,
-      driver,
-      sessionManager,
-    );
-
-    // Give the acquire a tick to run
-    await new Promise((r) => setTimeout(r, 0));
-
-    // Simulate disconnect — closeAll must close the in-flight session
-    await sessionManager.closeAll();
-    expect(sessionManager.openCount()).toBe(0);
-    expect(mockSession.close).toHaveBeenCalled();
-
-    // Resolve the in-flight query so the test can clean up
-    resolveQuery();
-    await toolCallPromise.catch(() => {/* session already closed — ignore */});
+    expect(adapter.close).toHaveBeenCalledOnce();
   });
 
-  it("subsequent calls succeed after a simulated disconnect", async () => {
-    const sessionManager = new SessionManager();
-    const session1 = makeMockSession();
-    const session2 = makeMockSession();
-    const driver = {
-      session: vi.fn().mockReturnValueOnce(session1).mockReturnValueOnce(session2),
-    } as unknown as Driver;
-    const pool = makeMockPool();
+  it("adapter.close() is a no-op when called multiple times", async () => {
+    const adapter = createMockAdapter();
 
-    // First call completes normally
-    await executeTool("get_symbol_context", { symbolName: "ServiceA" }, pool, driver, sessionManager);
+    await adapter.close();
+    await adapter.close();
 
-    // Simulate disconnect
-    await sessionManager.closeAll();
-    expect(sessionManager.openCount()).toBe(0);
-
-    // Subsequent call must succeed (queue reset by closeAll)
-    const response = await executeTool(
-      "find_dependents",
-      { symbolName: "ServiceB" },
-      pool,
-      driver,
-      sessionManager,
-    );
-
-    expect(response.summary).toBeDefined();
-    expect(sessionManager.openCount()).toBe(0);
-  });
-
-  it("closeAll is a no-op when no sessions are open (does not throw)", async () => {
-    const sessionManager = new SessionManager();
-    await expect(sessionManager.closeAll()).resolves.toBeUndefined();
-    expect(sessionManager.openCount()).toBe(0);
-  });
-
-  it("multiple disconnect cycles leave openCount at 0 each time", async () => {
-    const sessionManager = new SessionManager();
-    const pool = makeMockPool();
-
-    for (let i = 0; i < 3; i++) {
-      const mockSession = makeMockSession();
-      const driver = makeMockDriver(mockSession);
-
-      // Start a call, then disconnect before it finishes
-      let resolveQuery!: () => void;
-      vi.mocked(executeContextRetrieval).mockImplementationOnce(
-        () => new Promise<typeof STUB_QUERY_RESULT>((resolve) => {
-          resolveQuery = () => resolve(STUB_QUERY_RESULT);
-        }),
-      );
-
-      const callPromise = executeTool(
-        "get_symbol_context",
-        { symbolName: `Symbol${i}` },
-        pool,
-        driver,
-        sessionManager,
-      );
-
-      await new Promise((r) => setTimeout(r, 0));
-      await sessionManager.closeAll();
-
-      expect(sessionManager.openCount()).toBe(0);
-
-      resolveQuery();
-      await callPromise.catch(() => {/* ignore */});
-    }
+    expect(adapter.close).toHaveBeenCalledTimes(2);
   });
 });

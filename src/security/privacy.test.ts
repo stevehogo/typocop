@@ -158,8 +158,8 @@ describe("getPrivacyCompliance", () => {
 });
 
 describe("EXTERNAL_DATA_POLICIES", () => {
-  it("defines policy for openai-embeddings", () => {
-    const policy = EXTERNAL_DATA_POLICIES.find(p => p.service === "openai-embeddings");
+  it("defines policy for ollama-embeddings", () => {
+    const policy = EXTERNAL_DATA_POLICIES.find(p => p.service === "ollama-embeddings");
     
     expect(policy).toBeDefined();
     expect(policy?.dataTypes).toContain("symbol name");

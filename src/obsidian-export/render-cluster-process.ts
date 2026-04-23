@@ -9,7 +9,7 @@ import type {
   ExportedSymbol,
   GraphData,
 } from "./graph-reader.js";
-import { slugify, sourcePathToVaultPath } from "./render-symbol.js";
+import { slugify } from "./render-symbol.js";
 
 function sanitizeMermaidId(name: string): string {
   return name.replace(/[^a-zA-Z0-9_]/g, "_");
@@ -31,7 +31,7 @@ export function renderClusterFile(cluster: ExportedCluster, members: readonly Ex
     "",
     "## Members",
     "",
-    ...members.map((m) => `- [[${sourcePathToVaultPath(m.filePath)}]] > \`${m.name}\``),
+    ...members.map((m) => `- [[03-symbols/${slugify(cluster.name)}/${slugify(m.name)}|${m.name}]]`),
     "",
   ];
   return lines.join("\n");
@@ -46,6 +46,8 @@ export function renderClusterIndex(clusters: readonly ExportedCluster[]): string
     "---",
     "",
     "# Clusters",
+    "",
+    "Functional communities of related symbols. Each cluster represents a cohesive area of functionality.",
     "",
     ...clusters.map((c) => `- [[${slugify(c.name)}]] (${c.category}, ${c.symbolCount} symbols)`),
     "",
@@ -119,8 +121,6 @@ export function renderProcessIndex(processes: readonly ExportedProcess[]): strin
 
 /** Requirements 6.1–6.4: Navigation index with stats and source directories */
 export function renderNavigationIndex(data: GraphData): string {
-  const sourceDirectories = extractSourceDirectories(data.symbols);
-
   const lines = [
     "---",
     "type: navigation",
@@ -133,26 +133,23 @@ export function renderNavigationIndex(data: GraphData): string {
     "",
     `**Symbols**: ${data.symbols.length}  |  **Clusters**: ${data.clusters.length}  |  **Processes**: ${data.processes.length}`,
     "",
-    "## Quick Links",
+    "## Navigation",
     "",
-    "- [[_clusters/_index|Clusters]]",
-    "- [[_processes/_index|Processes]]",
+    "This vault organizes your code graph by functional clusters and execution processes, optimized for Obsidian's graph view and backlink features.",
     "",
-    "## Source Directories",
+    "### Start Here",
     "",
-    ...sourceDirectories.map((dir) => `- [[${dir}]]`),
+    "- **[[01-clusters/_index|Clusters]]** — Functional communities of related symbols",
+    "- **[[02-processes/_index|Processes]]** — Execution flows from entry points through call chains",
+    "- **[[03-symbols|Symbols]]** — Individual functions, classes, and methods organized by cluster",
+    "",
+    "### How to Use This Vault",
+    "",
+    "1. **Explore by Cluster** — Start with [[01-clusters/_index]] to understand functional areas",
+    "2. **Trace Execution** — Use [[02-processes/_index]] to follow data flows",
+    "3. **Dive Deep** — Click into individual symbols to see callers, callees, and relationships",
+    "4. **Use Graph View** — Open the graph view (Ctrl+G) to visualize connections",
     "",
   ];
   return lines.join("\n");
-}
-
-function extractSourceDirectories(symbols: readonly ExportedSymbol[]): string[] {
-  const dirs = new Set<string>();
-  for (const symbol of symbols) {
-    const lastSlash = symbol.filePath.lastIndexOf("/");
-    if (lastSlash > 0) {
-      dirs.add(symbol.filePath.slice(0, lastSlash));
-    }
-  }
-  return [...dirs].sort();
 }

@@ -1,4 +1,4 @@
-// Unified prefix validation for PostgreSQL tables and Neo4j labels/relationship types.
+// Unified prefix validation for LadybugDB node labels and relationship types.
 // Rules satisfy both databases: lowercase letter start, alphanumeric + underscores, max 32 chars.
 
 const PREFIX_PATTERN = /^[a-z][a-z0-9_]*$/;
