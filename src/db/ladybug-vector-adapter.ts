@@ -51,7 +51,7 @@ export class LadybugVectorAdapter implements VectorAdapter {
     embedding: Embedding,
     metadata: Record<string, string> = {},
   ): Promise<void> {
-    const vecStr = `[${embedding.vector.join(",")}]`;
+    const vecStr = toDoubleArrayLiteral(embedding.vector);
     const metaStr = JSON.stringify(JSON.stringify(metadata));
     await this.sql(
       `MERGE (n:${this.tableName} {symbol_id: "${symbolId}"})
@@ -64,7 +64,7 @@ export class LadybugVectorAdapter implements VectorAdapter {
     limit: number,
   ): Promise<SearchResult[]> {
     // Use Cypher-based cosine similarity computation
-    const vecStr = `[${queryEmbedding.vector.join(",")}]`;
+    const vecStr = toDoubleArrayLiteral(queryEmbedding.vector);
     const rows = await this.sql(
       `MATCH (n:${this.tableName})
        WHERE n.embedding IS NOT NULL
@@ -93,4 +93,10 @@ export class LadybugVectorAdapter implements VectorAdapter {
     await this.sql(`MATCH (n:${this.tableName}) DETACH DELETE n`);
     return count;
   }
+}
+
+function toDoubleArrayLiteral(vector: readonly number[]): string {
+  return `[${vector.map((value) => (
+    Number.isInteger(value) ? value.toFixed(1) : String(value)
+  )).join(",")}]`;
 }

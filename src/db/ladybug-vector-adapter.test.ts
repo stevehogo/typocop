@@ -141,6 +141,17 @@ describe("LadybugVectorAdapter", () => {
       const query = mockQuery.mock.calls[0][0] as string;
       expect(query).toContain("dev_embeddings");
     });
+
+    it("emits DOUBLE[] literals for integer-valued embeddings", async () => {
+      const adapter = createAdapter("tpc_");
+      await adapter.indexSymbol("sym1", {
+        vector: [1, 0, -2],
+        dimensions: 3,
+      });
+
+      const query = mockQuery.mock.calls[0][0] as string;
+      expect(query).toContain("[1.0,0.0,-2.0]");
+    });
   });
 
   // ── semanticSearch (Req 3.4) ───────────────────────────────────────────
@@ -215,6 +226,17 @@ describe("LadybugVectorAdapter", () => {
 
       const query = mockQuery.mock.calls[0][0] as string;
       expect(query).toContain("dev_embeddings");
+    });
+
+    it("emits DOUBLE[] literals for integer-valued query embeddings", async () => {
+      const adapter = createAdapter("tpc_");
+      await adapter.semanticSearch({
+        vector: [1, 0],
+        dimensions: 2,
+      }, 10);
+
+      const query = mockQuery.mock.calls[0][0] as string;
+      expect(query).toContain("[1.0,0.0]");
     });
   });
 

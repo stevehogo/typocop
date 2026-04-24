@@ -28,7 +28,7 @@ async function main(): Promise<void> {
       // default file missing is fine — skip silently
     } else {
       const { config } = await import("dotenv");
-      config({ path: envPath });
+      config({ path: envPath, quiet: true });
     }
   }
 

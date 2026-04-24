@@ -12,11 +12,12 @@ describe("package.json field assertions", () => {
     expect(pkg.bin).toEqual({
       typocop: "dist/cli/main.js",
       "typocop-mcp": "dist/mcp/main.js",
+      "typocop-ladybug-server": "dist/db-server/main.js",
     });
   });
 
   it("declares files field with dist and README.md", () => {
-    expect(pkg.files).toEqual(["dist", "README.md"]);
+    expect(pkg.files).toEqual(["dist", "proto", "README.md"]);
   });
 
   it("declares engines with node >=20.0.0", () => {
@@ -33,7 +34,7 @@ describe("package.json field assertions", () => {
 
   it("declares scripts.postbuild with chmod on both entry points", () => {
     expect(pkg.scripts.postbuild).toBe(
-      "chmod +x dist/cli/main.js dist/mcp/main.js"
+      "chmod +x dist/cli/main.js dist/mcp/main.js dist/db-server/main.js"
     );
   });
 

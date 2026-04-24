@@ -7,10 +7,12 @@
   "types": "dist/index.d.ts",
   "bin": {
     "typocop": "dist/cli/main.js",
-    "typocop-mcp": "dist/mcp/main.js"
+    "typocop-mcp": "dist/mcp/main.js",
+    "typocop-ladybug-server": "dist/db-server/main.js"
   },
   "files": [
     "dist",
+    "proto",
     "README.md"
   ],
   "engines": {
@@ -18,7 +20,7 @@
   },
   "scripts": {
     "build": "tsc",
-    "postbuild": "chmod +x dist/cli/main.js dist/mcp/main.js",
+    "postbuild": "chmod +x dist/cli/main.js dist/mcp/main.js dist/db-server/main.js",
     "postinstall": "pnpm approve-builds",
     "prepublishOnly": "pnpm run build",
     "clean": "rm -rf dist",
@@ -42,6 +44,8 @@
     "vitest": "^4.1.5"
   },
   "dependencies": {
+    "@grpc/grpc-js": "^1.14.0",
+    "@grpc/proto-loader": "^0.8.0",
     "@huggingface/transformers": "^4.2.0",
     "@ladybugdb/core": "^0.15.3",
     "@modelcontextprotocol/sdk": "^1.29.0",

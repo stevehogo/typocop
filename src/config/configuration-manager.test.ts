@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { ConfigurationManager } from "./configuration-manager.js";
-import { PrefixValidationError, OllamaConfigError, EmbeddingConfigError } from "./errors.js";
+import { PrefixValidationError, OllamaConfigError, EmbeddingConfigError, LadybugConfigError } from "./errors.js";
 
 // Mock node:fs/promises to avoid real filesystem operations
 vi.mock("node:fs/promises", () => ({
@@ -19,11 +19,13 @@ const mockMkdir = mkdir as ReturnType<typeof vi.fn>;
 describe("ConfigurationManager", () => {
   let manager: ConfigurationManager;
   const originalEnv = process.env;
+  let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
     process.env = { ...originalEnv };
     manager = new ConfigurationManager();
     vi.spyOn(console, "log").mockImplementation(() => undefined);
+    consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
     mockMkdir.mockClear();
   });
 
@@ -50,6 +52,14 @@ describe("ConfigurationManager", () => {
     delete process.env["TYPOCOP_PREFIX"];
     await manager.initialize();
     expect(manager.getConfiguration().source).toBe("default");
+  });
+
+  it("writes startup diagnostics to stderr instead of stdout", async () => {
+    await manager.initialize();
+    expect(console.log).not.toHaveBeenCalled();
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      expect.stringContaining("[typocop] prefix="),
+    );
   });
 
   // ── Prefix env var reading and normalization ──────────────────────────────
@@ -224,6 +234,64 @@ describe("ConfigurationManager", () => {
       expect(mockMkdir).toHaveBeenCalledWith("/custom/deep/path", {
         recursive: true,
       });
+    });
+
+    it("applies documented defaults for connection-server settings", async () => {
+      delete process.env["LADYBUG_RUNTIME_MODE"];
+      delete process.env["LADYBUG_SERVER_URL"];
+      delete process.env["LADYBUG_SERVER_HOST"];
+      delete process.env["LADYBUG_SERVER_PORT"];
+      delete process.env["LADYBUG_SERVER_AUTH_TOKEN"];
+      delete process.env["LADYBUG_SERVER_MAX_CONCURRENCY"];
+      delete process.env["LADYBUG_SERVER_MAX_QUEUE"];
+      delete process.env["LADYBUG_SERVER_AUTOSTART"];
+      delete process.env["LADYBUG_SERVER_STARTUP_TIMEOUT_MS"];
+      delete process.env["LADYBUG_SERVER_LOCK_PATH"];
+      delete process.env["LADYBUG_SERVER_DISCOVERY_PATH"];
+      delete process.env["LADYBUG_SERVER_IDLE_TTL_MS"];
+
+      await manager.initialize();
+      const config = manager.getConfiguration().ladybugdb;
+
+      expect(config.runtimeMode).toBe("server");
+      expect(config.serverUrl).toBe("grpc://127.0.0.1:7617");
+      expect(config.serverHost).toBe("127.0.0.1");
+      expect(config.serverPort).toBe(7617);
+      expect(config.serverAuthToken).toBe("");
+      expect(config.serverMaxConcurrency).toBe(4);
+      expect(config.serverMaxQueue).toBe(256);
+      expect(config.serverAutostart).toBe(false);
+      expect(config.serverStartupTimeoutMs).toBe(10_000);
+      expect(config.serverIdleTtlMs).toBe(0);
+      expect(config.serverLockPath).toContain("/mock-home/.typocop/locks/");
+      expect(config.serverLockPath).toContain("tpc_-ladybug-server.lock");
+      expect(config.serverDiscoveryPath).toContain("/mock-home/.typocop/tpc_/");
+      expect(config.serverDiscoveryPath.endsWith("ladybug-server.json")).toBe(true);
+    });
+
+    it("validates grpc urls in client mode", async () => {
+      process.env["LADYBUG_RUNTIME_MODE"] = "client";
+      process.env["LADYBUG_SERVER_URL"] = "http://127.0.0.1:7617";
+
+      await expect(manager.initialize()).rejects.toThrow(LadybugConfigError);
+    });
+
+    it("rejects ports outside the valid grpc range", async () => {
+      process.env["LADYBUG_SERVER_PORT"] = "70000";
+
+      await expect(manager.initialize()).rejects.toThrow(LadybugConfigError);
+    });
+
+    it("rejects maxConcurrency below one", async () => {
+      process.env["LADYBUG_SERVER_MAX_CONCURRENCY"] = "0";
+
+      await expect(manager.initialize()).rejects.toThrow(LadybugConfigError);
+    });
+
+    it("rejects maxQueue below one", async () => {
+      process.env["LADYBUG_SERVER_MAX_QUEUE"] = "0";
+
+      await expect(manager.initialize()).rejects.toThrow(LadybugConfigError);
     });
   });
 

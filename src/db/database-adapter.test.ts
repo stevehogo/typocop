@@ -56,6 +56,12 @@ vi.mock("./huggingface-embedding-adapter.js", () => ({
     this.__type = "huggingface-embedding"; this.isEnabled = () => true;
   }),
 }));
+const { mockEnsureServerAndConnect } = vi.hoisted(() => ({
+  mockEnsureServerAndConnect: vi.fn(),
+}));
+vi.mock("./autostart.js", () => ({
+  ensureServerAndConnect: mockEnsureServerAndConnect,
+}));
 
 import { getPool } from "./pool-registry.js";
 import { LadybugGraphAdapter } from "./ladybug-graph-adapter.js";
@@ -83,7 +89,21 @@ function makeProviderConfig(provider: EmbeddingProvider): FullConfig {
     prefix: "TEST_",
     ollama: { enabled: provider === "ollama", url: "http://localhost:11434", model: "mxbai-embed-large", dimensions: 1024 },
     embedding: { provider, huggingface: HF_DEFAULTS },
-    ladybugdb: { dbPath: "/tmp/test.ladybug" },
+    ladybugdb: {
+      dbPath: "/tmp/test.ladybug",
+      runtimeMode: "server",
+      serverUrl: "grpc://127.0.0.1:7617",
+      serverHost: "127.0.0.1",
+      serverPort: 7617,
+      serverAuthToken: "",
+      serverMaxConcurrency: 4,
+      serverMaxQueue: 256,
+      serverAutostart: false,
+      serverStartupTimeoutMs: 10_000,
+      serverLockPath: "/tmp/ladybug-server.lock",
+      serverDiscoveryPath: "/tmp/ladybug-server.json",
+      serverIdleTtlMs: 0,
+    },
     loadedAt: new Date(),
     source: "default",
   };
@@ -211,6 +231,63 @@ describe("createDatabaseAdapter", () => {
     const adapter = await createDatabaseAdapter(makeConfig(false));
     expect(MockedNoOpAdapter).toHaveBeenCalled();
     expect((adapter.getEmbeddingAdapter() as Record<string, unknown>).__type).toBe("noop-embedding");
+  });
+
+  it("returns a remote adapter in client mode after ensuring the server", async () => {
+    const remoteAdapter = {
+      initialize: vi.fn(),
+      close: vi.fn(),
+      getGraphAdapter: vi.fn(),
+      getVectorAdapter: vi.fn(),
+      getEmbeddingAdapter: vi.fn(),
+    };
+    mockEnsureServerAndConnect.mockResolvedValue(remoteAdapter);
+    const config = {
+      ...makeConfig(false),
+      ladybugdb: {
+        ...makeConfig(false).ladybugdb,
+        runtimeMode: "client" as const,
+        serverAutostart: true,
+        serverAuthToken: "secret-token",
+      },
+    };
+
+    const adapter = await createDatabaseAdapter(config);
+
+    expect(mockEnsureServerAndConnect).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runtimeMode: "client",
+        prefix: "TEST_",
+        dbPath: "/tmp/test.ladybug",
+        serverUrl: "grpc://127.0.0.1:7617",
+        authToken: "secret-token",
+        autostart: true,
+        startupTimeoutMs: 10_000,
+        lockPath: "/tmp/ladybug-server.lock",
+        discoveryPath: "/tmp/ladybug-server.json",
+      }),
+      expect.objectContaining({
+        embeddingConfig: config.embedding,
+        ollamaConfig: config.ollama,
+      }),
+    );
+    expect(adapter).toBe(remoteAdapter);
+    expect(mockedGetPool).not.toHaveBeenCalled();
+  });
+
+  it("validates client mode serverUrl before creating a remote adapter", async () => {
+    const config = {
+      ...makeConfig(false),
+      ladybugdb: {
+        ...makeConfig(false).ladybugdb,
+        runtimeMode: "client" as const,
+        serverUrl: "http://127.0.0.1:7617",
+      },
+    };
+
+    await expect(createDatabaseAdapter(config)).rejects.toThrow(
+      "ladybugdb.serverUrl must be a valid grpc:// URL",
+    );
   });
 });
 

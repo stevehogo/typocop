@@ -46,3 +46,14 @@ export class EmbeddingConfigError extends ConfigurationError {
     this.name = "EmbeddingConfigError";
   }
 }
+
+export class LadybugConfigError extends ConfigurationError {
+  constructor(field: string, value: string, reason: string) {
+    super(
+      `Invalid LadybugDB config: ${field}="${value}". ${reason}`,
+      field,
+      reason,
+    );
+    this.name = "LadybugConfigError";
+  }
+}

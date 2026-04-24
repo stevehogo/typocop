@@ -22,6 +22,7 @@ const mockExecuteCLI = vi.fn();
 const mockStartMCPServer = vi.fn();
 const mockExistsSync = vi.fn();
 const mockDotenvConfig = vi.fn();
+const mockDrainAllPools = vi.fn().mockResolvedValue(undefined);
 
 class MockCLIValidationError extends Error {
   constructor(message: string) {
@@ -40,8 +41,20 @@ vi.mock("../mcp/index.js", () => ({
   startMCPServer: mockStartMCPServer,
 }));
 
+vi.mock("../db/pool-registry.js", () => ({
+  drainAllPools: mockDrainAllPools,
+}));
+
 vi.mock("node:fs", () => ({
   existsSync: mockExistsSync,
+}));
+
+vi.mock("node:fs/promises", () => ({
+  mkdir: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock("node:os", () => ({
+  homedir: vi.fn(() => "/mock-home"),
 }));
 
 vi.mock("dotenv", () => ({
@@ -52,11 +65,10 @@ vi.mock("dotenv", () => ({
 
 async function runCLIMain(argv: string[]): Promise<void> {
   process.argv = ["node", "typocop", ...argv];
-  const suppressRejection = (): void => { /* intentionally empty */ };
-  process.on("unhandledRejection", suppressRejection);
-  await import("./main.js");
-  await new Promise((resolve) => setTimeout(resolve, 0));
-  process.off("unhandledRejection", suppressRejection);
+  // main.ts is a thin dispatcher; main-full.ts is the full CLI entry point.
+  // Import and run it directly to make this property deterministic.
+  const { runFullCLI } = await import("./main-full.js");
+  await runFullCLI(argv);
 }
 
 async function runMCPMain(argv: string[]): Promise<void> {
@@ -64,7 +76,9 @@ async function runMCPMain(argv: string[]): Promise<void> {
   const suppressRejection = (): void => { /* intentionally empty */ };
   process.on("unhandledRejection", suppressRejection);
   await import("../mcp/main.js");
-  await new Promise((resolve) => setTimeout(resolve, 0));
+  for (let i = 0; i < 3; i++) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
   process.off("unhandledRejection", suppressRejection);
 }
 
@@ -107,6 +121,11 @@ describe("Property-based tests: CLI and MCP entry points", () => {
 
         await runCLIMain(["status"]);
 
+        const deadline = Date.now() + 50;
+        while (Date.now() < deadline && exitSpy.mock.calls.length === 0) {
+          await new Promise((resolve) => setImmediate(resolve));
+        }
+
         const stderrCalls = stderrSpy.mock.calls.map((c) => String(c[0]));
         const wroteMsg = stderrCalls.some((s) => s.includes(msg));
         const exitedWith1 = exitSpy.mock.calls.some((c) => c[0] === 1);
@@ -133,6 +152,11 @@ describe("Property-based tests: CLI and MCP entry points", () => {
         mockStartMCPServer.mockRejectedValue(new Error(msg));
 
         await runMCPMain([]);
+
+        const deadline = Date.now() + 50;
+        while (Date.now() < deadline && exitSpy.mock.calls.length === 0) {
+          await new Promise((resolve) => setImmediate(resolve));
+        }
 
         const stderrCalls = stderrSpy.mock.calls.map((c) => String(c[0]));
         const wroteMsg = stderrCalls.some((s) => s.includes(msg));

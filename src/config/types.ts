@@ -44,12 +44,52 @@ export interface LadybugDBConfig {
   readonly dbPath: string;
 }
 
+export type LadybugRuntimeMode = "server" | "client";
+
+export interface LadybugServerConfig {
+  readonly runtimeMode: LadybugRuntimeMode;
+  readonly prefix: string;
+  readonly dbPath: string;
+  readonly host: string;
+  readonly port: number;
+  readonly authToken: string;
+  readonly maxConcurrency: number;
+  readonly maxQueue: number;
+  readonly idleTtlMs: number;
+  readonly discoveryPath: string;
+}
+
+export interface LadybugClientConfig {
+  readonly runtimeMode: "client";
+  readonly prefix: string;
+  readonly dbPath: string;
+  readonly serverUrl: string;
+  readonly authToken: string;
+  readonly autostart: boolean;
+  readonly startupTimeoutMs: number;
+  readonly lockPath: string;
+  readonly discoveryPath: string;
+}
+
 /** Full application configuration combining prefix, Ollama, embedding, and LadybugDB settings. */
 export interface FullConfig {
   readonly prefix: string;
   readonly ollama: OllamaConfig;
   readonly embedding: EmbeddingConfig;
-  readonly ladybugdb: LadybugDBConfig;
+  readonly ladybugdb: LadybugDBConfig & {
+    readonly runtimeMode: LadybugRuntimeMode;
+    readonly serverUrl: string;
+    readonly serverHost: string;
+    readonly serverPort: number;
+    readonly serverAuthToken: string;
+    readonly serverMaxConcurrency: number;
+    readonly serverMaxQueue: number;
+    readonly serverAutostart: boolean;
+    readonly serverStartupTimeoutMs: number;
+    readonly serverLockPath: string;
+    readonly serverDiscoveryPath: string;
+    readonly serverIdleTtlMs: number;
+  };
   readonly loadedAt: Date;
   readonly source: "environment" | "env-file" | "default";
 }

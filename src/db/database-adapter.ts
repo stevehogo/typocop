@@ -6,6 +6,7 @@
  */
 
 import type { FullConfig } from "../config/types.js";
+import type { LadybugClientConfig, LadybugRuntimeMode } from "../config/types.js";
 import type {
   DatabaseAdapter,
   EmbeddingAdapter,
@@ -112,7 +113,86 @@ export class LadybugDatabaseAdapter implements DatabaseAdapter {
 export async function createDatabaseAdapter(
   config: FullConfig,
 ): Promise<DatabaseAdapter> {
+  validateAdapterFactoryConfig(config);
+
+  if (config.ladybugdb.runtimeMode === "client") {
+    const { ensureServerAndConnect } = await import("./autostart.js");
+    return ensureServerAndConnect(toLadybugClientConfig(config), {
+      embeddingConfig: config.embedding,
+      ollamaConfig: config.ollama,
+    });
+  }
+
   const adapter = new LadybugDatabaseAdapter(config);
   await adapter.initialize();
   return adapter;
+}
+
+export function toLadybugClientConfig(config: FullConfig): LadybugClientConfig {
+  return {
+    runtimeMode: "client",
+    prefix: config.prefix,
+    dbPath: config.ladybugdb.dbPath,
+    serverUrl: config.ladybugdb.serverUrl,
+    authToken: config.ladybugdb.serverAuthToken,
+    autostart: config.ladybugdb.serverAutostart,
+    startupTimeoutMs: config.ladybugdb.serverStartupTimeoutMs,
+    lockPath: config.ladybugdb.serverLockPath,
+    discoveryPath: config.ladybugdb.serverDiscoveryPath,
+  };
+}
+
+function validateAdapterFactoryConfig(config: FullConfig): void {
+  requireNonEmpty(config.prefix, "prefix");
+  requireNonEmpty(config.ladybugdb.dbPath, "ladybugdb.dbPath");
+  validateRuntimeMode(config.ladybugdb.runtimeMode);
+  requireNonEmpty(config.ladybugdb.serverHost, "ladybugdb.serverHost");
+  validateIntegerRange(config.ladybugdb.serverPort, "ladybugdb.serverPort", 1, 65_535);
+  validateMinimum(config.ladybugdb.serverMaxConcurrency, "ladybugdb.serverMaxConcurrency", 1);
+  validateMinimum(config.ladybugdb.serverMaxQueue, "ladybugdb.serverMaxQueue", 1);
+  validateMinimum(config.ladybugdb.serverStartupTimeoutMs, "ladybugdb.serverStartupTimeoutMs", 1);
+  validateMinimum(config.ladybugdb.serverIdleTtlMs, "ladybugdb.serverIdleTtlMs", 0);
+  requireNonEmpty(config.ladybugdb.serverLockPath, "ladybugdb.serverLockPath");
+  requireNonEmpty(config.ladybugdb.serverDiscoveryPath, "ladybugdb.serverDiscoveryPath");
+
+  if (config.ladybugdb.runtimeMode === "client") {
+    validateGrpcUrl(config.ladybugdb.serverUrl);
+  }
+}
+
+function validateRuntimeMode(runtimeMode: LadybugRuntimeMode): void {
+  if (runtimeMode !== "server" && runtimeMode !== "client") {
+    throw new Error(`ladybugdb.runtimeMode must be "server" or "client", received ${runtimeMode}`);
+  }
+}
+
+function validateGrpcUrl(serverUrl: string): void {
+  requireNonEmpty(serverUrl, "ladybugdb.serverUrl");
+  let parsed: URL;
+  try {
+    parsed = new URL(serverUrl);
+  } catch {
+    throw new Error(`ladybugdb.serverUrl must be a valid grpc:// URL, received ${serverUrl}`);
+  }
+  if (parsed.protocol !== "grpc:" || parsed.host === "") {
+    throw new Error(`ladybugdb.serverUrl must be a valid grpc:// URL, received ${serverUrl}`);
+  }
+}
+
+function validateIntegerRange(value: number, field: string, min: number, max: number): void {
+  if (!Number.isInteger(value) || value < min || value > max) {
+    throw new Error(`${field} must be an integer between ${min} and ${max}, received ${value}`);
+  }
+}
+
+function validateMinimum(value: number, field: string, min: number): void {
+  if (!Number.isInteger(value) || value < min) {
+    throw new Error(`${field} must be an integer >= ${min}, received ${value}`);
+  }
+}
+
+function requireNonEmpty(value: string, field: string): void {
+  if (value.trim() === "") {
+    throw new Error(`${field} is required`);
+  }
 }

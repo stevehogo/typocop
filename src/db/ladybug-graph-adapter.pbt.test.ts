@@ -81,8 +81,10 @@ function createInMemoryConnection() {
         return { getAll: async () => rows };
       }
 
-      // Parse MATCH relationship query: MATCH ()-[r:TYPE]->() RETURN r
-      const matchRelMatch = queryStr.match(/MATCH\s+\(\)-\[r:(\w+)\]->\(\)\s+RETURN\s+r/);
+      // Parse MATCH relationship query:
+      // - MATCH ()-[r:TYPE]->() RETURN r
+      // - MATCH (source)-[r:TYPE]->(target) RETURN r, ...
+      const matchRelMatch = queryStr.match(/MATCH\s+\([^)]*\)-\[r:(\w+)\]->\([^)]*\)\s+RETURN\s+r/);
       if (matchRelMatch) {
         const type = matchRelMatch[1];
         const rows: Record<string, LbugValue>[] = relationships

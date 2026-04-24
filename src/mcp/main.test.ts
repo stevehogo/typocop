@@ -139,7 +139,7 @@ describe("src/mcp/main.ts", () => {
       await runMain(["-e", ".env.test"]);
 
       expect(mockExistsSync).toHaveBeenCalledWith(".env.test");
-      expect(mockDotenvConfig).toHaveBeenCalledWith({ path: ".env.test" });
+      expect(mockDotenvConfig).toHaveBeenCalledWith({ path: ".env.test", quiet: true });
       expect(callOrder.indexOf("dotenv.config")).toBeLessThan(
         callOrder.indexOf("startMCPServer")
       );
@@ -165,7 +165,20 @@ describe("src/mcp/main.ts", () => {
       await runMain(["--env", ".env.production"]);
 
       expect(mockExistsSync).toHaveBeenCalledWith(".env.production");
-      expect(mockDotenvConfig).toHaveBeenCalledWith({ path: ".env.production" });
+      expect(mockDotenvConfig).toHaveBeenCalledWith({ path: ".env.production", quiet: true });
+    });
+
+    it("loads dotenv in quiet mode to avoid corrupting stdio MCP transport", async () => {
+      mockExistsSync.mockReturnValue(true);
+      mockDotenvConfig.mockReturnValue({ parsed: {} });
+      mockStartMCPServer.mockResolvedValue(undefined);
+
+      await runMain(["-e", ".env.test"]);
+
+      expect(mockDotenvConfig).toHaveBeenCalledWith({
+        path: ".env.test",
+        quiet: true,
+      });
     });
   });
 

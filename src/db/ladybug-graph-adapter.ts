@@ -98,15 +98,13 @@ export class LadybugGraphAdapter implements GraphAdapter {
     properties: Record<string, unknown>,
   ): Promise<void> {
     const prefixedLabel = this.prefixLabel(label);
-    const { id, ...rest } = properties as { id: string } & Record<string, unknown>;
-    const setEntries = Object.entries(rest);
-    const setClause = setEntries.length > 0
-      ? " ON MATCH SET " + setEntries.map(([k, v]) => `n.${k} = ${JSON.stringify(v)}`).join(", ") +
-        " ON CREATE SET " + setEntries.map(([k, v]) => `n.${k} = ${JSON.stringify(v)}`).join(", ")
+    const props = properties as { id: string } & Record<string, unknown>;
+    // Exclude 'id' from SET clause since it's the primary key (cannot be updated)
+    const propEntries = Object.entries(props).filter(([k]) => k !== "id");
+    const setClause = propEntries.length > 0
+      ? "SET n = {" + propEntries.map(([k, v]) => `${k}: ${JSON.stringify(v)}`).join(", ") + "}"
       : "";
-    await this.exec(
-      `MERGE (n:${prefixedLabel} {id: "${id}"})${setClause}`,
-    );
+    await this.exec(`MERGE (n:${prefixedLabel} {id: "${props.id}"}) ${setClause}`);
   }
 
   /** Known rel table properties declared in schema. */
@@ -175,7 +173,7 @@ export class LadybugGraphAdapter implements GraphAdapter {
   async queryRelationships(type: string): Promise<GraphRelationship[]> {
     const prefixedType = this.prefixType(type);
     const rows = await this.exec(
-      `MATCH ()-[r:${prefixedType}]->() RETURN r`,
+      `MATCH (source)-[r:${prefixedType}]->(target) RETURN r, source.id AS sourceId, target.id AS targetId`,
     );
 
     return rows.map((row) => {
@@ -183,24 +181,22 @@ export class LadybugGraphAdapter implements GraphAdapter {
       return {
         type: r._label ?? prefixedType,
         properties: { ...r } as Record<string, unknown>,
+        sourceId: typeof row["sourceId"] === "string" ? row["sourceId"] : undefined,
+        targetId: typeof row["targetId"] === "string" ? row["targetId"] : undefined,
       };
     });
   }
 
   async deleteNodesByLabel(label: string): Promise<number> {
     const prefixedLabel = this.prefixLabel(label);
-    const countRows = await this.exec(`MATCH (n:${prefixedLabel}) RETURN count(n) as count`);
-    const count = countRows[0]?.count as number ?? 0;
     await this.exec(`MATCH (n:${prefixedLabel}) DETACH DELETE n`);
-    return count;
+    return 0;
   }
 
   async deleteRelationshipsByType(type: string): Promise<number> {
     const prefixedType = this.prefixType(type);
-    const countRows = await this.exec(`MATCH ()-[r:${prefixedType}]->() RETURN count(r) as count`);
-    const count = countRows[0]?.count as number ?? 0;
     await this.exec(`MATCH ()-[r:${prefixedType}]->() DELETE r`);
-    return count;
+    return 0;
   }
 
   /**
@@ -249,10 +245,7 @@ export class LadybugGraphAdapter implements GraphAdapter {
     params: Record<string, unknown> = {},
   ): Promise<T[]> {
     const prefixed = this.prefixQuery(query);
-    const hasParams = Object.keys(params).length > 0;
-    const rows = hasParams
-      ? await this.execWithParams(prefixed, params)
-      : await this.exec(prefixed);
+    const rows = await this.exec(prefixed);
     // Normalize NodeValue/RelValue objects in each row
     return rows.map((row) => {
       const normalized: Record<string, unknown> = {};
@@ -268,11 +261,6 @@ export class LadybugGraphAdapter implements GraphAdapter {
     params: Record<string, unknown> = {},
   ): Promise<void> {
     const prefixed = this.prefixQuery(query);
-    const hasParams = Object.keys(params).length > 0;
-    if (hasParams) {
-      await this.execWithParams(prefixed, params);
-    } else {
-      await this.exec(prefixed);
-    }
+    await this.exec(prefixed);
   }
 }

@@ -5,9 +5,17 @@ import { homedir } from "node:os";
 import { join, dirname } from "node:path";
 
 import { PrefixValidator } from "./prefix-validator.js";
-import { PrefixValidationError, OllamaConfigError, EmbeddingConfigError } from "./errors.js";
+import { PrefixValidationError, OllamaConfigError, EmbeddingConfigError, LadybugConfigError } from "./errors.js";
 import type { ValidationResult } from "./prefix-validator.js";
-import type { OllamaConfig, LadybugDBConfig, EmbeddingProvider, HuggingFaceConfig, EmbeddingConfig, FullConfig } from "./types.js";
+import type {
+  OllamaConfig,
+  LadybugDBConfig,
+  EmbeddingProvider,
+  HuggingFaceConfig,
+  EmbeddingConfig,
+  FullConfig,
+  LadybugRuntimeMode,
+} from "./types.js";
 
 export type { FullConfig } from "./types.js";
 
@@ -20,6 +28,7 @@ export interface IConfigurationManager {
 
 const DEFAULT_PREFIX = "tpc_";
 const ENV_VAR = "TYPOCOP_PREFIX";
+const VALID_RUNTIME_MODES: readonly LadybugRuntimeMode[] = ["server", "client"] as const;
 
 const OLLAMA_DEFAULTS: OllamaConfig = {
   enabled: false,
@@ -28,6 +37,19 @@ const OLLAMA_DEFAULTS: OllamaConfig = {
   model: "mxbai-embed-large",
   /** Default dimensions for mxbai-embed-large. */
   dimensions: 1024,
+};
+
+const LADYBUG_SERVER_DEFAULTS = {
+  runtimeMode: "server" as LadybugRuntimeMode,
+  serverUrl: "grpc://127.0.0.1:7617",
+  serverHost: "127.0.0.1",
+  serverPort: 7617,
+  serverAuthToken: "",
+  serverMaxConcurrency: 4,
+  serverMaxQueue: 256,
+  serverAutostart: false,
+  serverStartupTimeoutMs: 10_000,
+  serverIdleTtlMs: 0,
 };
 
 const VALID_PROVIDERS: readonly EmbeddingProvider[] = ["huggingface", "ollama", "none"] as const;
@@ -59,12 +81,18 @@ export class ConfigurationManager implements IConfigurationManager {
       source,
     };
 
-    console.log(`[typocop] prefix=${prefix} ollama.enabled=${ollama.enabled} embedding.provider=${embedding.provider}`);
+    console.error(`[typocop] prefix=${prefix} ollama.enabled=${ollama.enabled} embedding.provider=${embedding.provider}`);
   }
 
   private resolveSource(): "environment" | "env-file" | "default" {
-    const raw = process.env[ENV_VAR];
-    if (raw === undefined || raw === "") return "default";
+    const hasEnv = Object.keys(process.env).some((key) =>
+      key === ENV_VAR ||
+      key.startsWith("OLLAMA_") ||
+      key.startsWith("HF_") ||
+      key === "EMBEDDING_PROVIDER" ||
+      key.startsWith("LADYBUG_"),
+    );
+    if (!hasEnv) return "default";
     return "environment";
   }
 
@@ -206,19 +234,158 @@ export class ConfigurationManager implements IConfigurationManager {
     return parsed;
   }
 
-  async loadLadybugDBConfig(prefix: string): Promise<LadybugDBConfig> {
-    const envPath = process.env["LADYBUGDB_PATH"];
-    const dbPath = envPath || this.defaultDbPath(prefix);
+  async loadLadybugDBConfig(prefix: string): Promise<FullConfig["ladybugdb"]> {
+    const dbPath = this.resolveConfiguredPath(
+      process.env["LADYBUGDB_PATH"],
+      this.defaultDbPath(prefix),
+    );
+    const runtimeMode = this.loadRuntimeMode();
+    const serverUrl = this.resolveConfiguredPath(
+      process.env["LADYBUG_SERVER_URL"],
+      LADYBUG_SERVER_DEFAULTS.serverUrl,
+    );
+    const serverHost = process.env["LADYBUG_SERVER_HOST"] || LADYBUG_SERVER_DEFAULTS.serverHost;
+    const serverPort = this.parsePort(
+      process.env["LADYBUG_SERVER_PORT"] || String(LADYBUG_SERVER_DEFAULTS.serverPort),
+    );
+    const serverAuthToken = process.env["LADYBUG_SERVER_AUTH_TOKEN"] || LADYBUG_SERVER_DEFAULTS.serverAuthToken;
+    const serverMaxConcurrency = this.parsePositiveInt(
+      "LADYBUG_SERVER_MAX_CONCURRENCY",
+      process.env["LADYBUG_SERVER_MAX_CONCURRENCY"] || String(LADYBUG_SERVER_DEFAULTS.serverMaxConcurrency),
+      1,
+    );
+    const serverMaxQueue = this.parsePositiveInt(
+      "LADYBUG_SERVER_MAX_QUEUE",
+      process.env["LADYBUG_SERVER_MAX_QUEUE"] || String(LADYBUG_SERVER_DEFAULTS.serverMaxQueue),
+      1,
+    );
+    const serverAutostart = this.parseBoolean(
+      process.env["LADYBUG_SERVER_AUTOSTART"],
+      LADYBUG_SERVER_DEFAULTS.serverAutostart,
+    );
+    const serverStartupTimeoutMs = this.parsePositiveInt(
+      "LADYBUG_SERVER_STARTUP_TIMEOUT_MS",
+      process.env["LADYBUG_SERVER_STARTUP_TIMEOUT_MS"] || String(LADYBUG_SERVER_DEFAULTS.serverStartupTimeoutMs),
+      1,
+    );
+    const serverIdleTtlMs = this.parsePositiveInt(
+      "LADYBUG_SERVER_IDLE_TTL_MS",
+      process.env["LADYBUG_SERVER_IDLE_TTL_MS"] || String(LADYBUG_SERVER_DEFAULTS.serverIdleTtlMs),
+      0,
+    );
+    const serverLockPath = this.resolveConfiguredPath(
+      process.env["LADYBUG_SERVER_LOCK_PATH"],
+      this.defaultLockPath(prefix),
+    );
+    const serverDiscoveryPath = this.resolveConfiguredPath(
+      process.env["LADYBUG_SERVER_DISCOVERY_PATH"],
+      this.defaultDiscoveryPath(prefix),
+    );
 
-    // Create parent directory — Kùzu creates the database file itself
+    if (runtimeMode === "client") {
+      this.validateGrpcUrl(serverUrl);
+    }
+
     await mkdir(dirname(dbPath), { recursive: true });
+    await mkdir(dirname(serverLockPath), { recursive: true });
+    await mkdir(dirname(serverDiscoveryPath), { recursive: true });
 
-    return { dbPath };
+    return {
+      dbPath,
+      runtimeMode,
+      serverUrl,
+      serverHost,
+      serverPort,
+      serverAuthToken,
+      serverMaxConcurrency,
+      serverMaxQueue,
+      serverAutostart,
+      serverStartupTimeoutMs,
+      serverLockPath,
+      serverDiscoveryPath,
+      serverIdleTtlMs,
+    };
   }
 
   private defaultDbPath(prefix: string): string {
-    const base = prefix.endsWith("_") ? prefix.slice(0, -1) : prefix;
-    return join(homedir(), ".typocop", base, "db.ladybug");
+    return join(homedir(), ".typocop", prefix, "db.ladybug");
+  }
+
+  private defaultLockPath(prefix: string): string {
+    return join(homedir(), ".typocop", "locks", `${prefix}-ladybug-server.lock`);
+  }
+
+  private defaultDiscoveryPath(prefix: string): string {
+    return join(homedir(), ".typocop", prefix, "ladybug-server.json");
+  }
+
+  private loadRuntimeMode(): LadybugRuntimeMode {
+    const raw = process.env["LADYBUG_RUNTIME_MODE"] || LADYBUG_SERVER_DEFAULTS.runtimeMode;
+    if (!VALID_RUNTIME_MODES.includes(raw as LadybugRuntimeMode)) {
+      throw new LadybugConfigError(
+        "LADYBUG_RUNTIME_MODE",
+        raw,
+        `Must be one of: ${VALID_RUNTIME_MODES.join(", ")}.`,
+      );
+    }
+    return raw as LadybugRuntimeMode;
+  }
+
+  private parsePort(raw: string): number {
+    const port = Number(raw);
+    if (!Number.isInteger(port) || port < 1 || port > 65535) {
+      throw new LadybugConfigError(
+        "LADYBUG_SERVER_PORT",
+        raw,
+        "Port must be an integer between 1 and 65535.",
+      );
+    }
+    return port;
+  }
+
+  private parsePositiveInt(field: string, raw: string, min: number): number {
+    const value = Number(raw);
+    if (!Number.isInteger(value) || value < min) {
+      throw new LadybugConfigError(
+        field,
+        raw,
+        `Must be an integer greater than or equal to ${min}.`,
+      );
+    }
+    return value;
+  }
+
+  private parseBoolean(raw: string | undefined, fallback: boolean): boolean {
+    if (raw === undefined || raw === "") return fallback;
+    return raw.toLowerCase() === "true";
+  }
+
+  private resolveConfiguredPath(raw: string | undefined, fallback: string): string {
+    const value = raw && raw !== "" ? raw : fallback;
+    if (value.startsWith("~/")) {
+      return join(homedir(), value.slice(2));
+    }
+    return value;
+  }
+
+  private validateGrpcUrl(url: string): void {
+    let parsed: URL;
+    try {
+      parsed = new URL(url);
+    } catch {
+      throw new LadybugConfigError(
+        "LADYBUG_SERVER_URL",
+        url,
+        "URL must be a valid grpc:// URL.",
+      );
+    }
+    if (parsed.protocol !== "grpc:") {
+      throw new LadybugConfigError(
+        "LADYBUG_SERVER_URL",
+        url,
+        "URL must use the grpc:// protocol in client mode.",
+      );
+    }
   }
 
   getPrefix(): string {

@@ -1,0 +1,208 @@
+syntax = "proto3";
+
+package typocop.ladybug.v1;
+
+message Empty {}
+
+message RequestMetadata {
+  string request_id = 1;
+  int32 timeout_ms = 2;
+  string prefix = 3;
+}
+
+message HealthCheckRequest {}
+
+message HealthCheckResponse {
+  enum ServingStatus {
+    UNKNOWN = 0;
+    SERVING = 1;
+    NOT_SERVING = 2;
+  }
+
+  ServingStatus status = 1;
+  string message = 2;
+}
+
+message ErrorDetail {
+  string code = 1;
+  string message = 2;
+  bool retryable = 3;
+}
+
+message SchedulerStats {
+  int32 in_flight = 1;
+  int32 queued = 2;
+  uint64 total_processed = 3;
+  uint64 total_timed_out = 4;
+  uint64 total_rejected = 5;
+  bool accepting_requests = 6;
+}
+
+message ServerMetrics {
+  uint64 uptime_ms = 1;
+  bool db_open = 2;
+  int32 in_flight_requests = 3;
+  int32 queued_requests = 4;
+  map<string, uint64> request_counts = 5;
+  map<string, uint64> error_counts = 6;
+  map<string, double> latency_p50_ms = 7;
+  map<string, double> latency_p99_ms = 8;
+}
+
+message GetMetricsRequest {}
+
+message GetMetricsResponse {
+  ServerMetrics metrics = 1;
+  SchedulerStats scheduler = 2;
+}
+
+message ShutdownRequest {
+  bool force = 1;
+}
+
+message ShutdownResponse {
+  bool accepted = 1;
+}
+
+message GraphNode {
+  string id = 1;
+  repeated string labels = 2;
+  string properties_json = 3;
+}
+
+message GraphRelationship {
+  string type = 1;
+  string properties_json = 2;
+  string source_id = 3;
+  string target_id = 4;
+}
+
+message QueryNodesRequest {
+  RequestMetadata metadata = 1;
+  string label = 2;
+  string filter_json = 3;
+}
+
+message QueryNodesResponse {
+  repeated GraphNode nodes = 1;
+}
+
+message QueryRelationshipsRequest {
+  RequestMetadata metadata = 1;
+  string type = 2;
+}
+
+message QueryRelationshipsResponse {
+  repeated GraphRelationship relationships = 1;
+}
+
+message RunCypherRequest {
+  RequestMetadata metadata = 1;
+  string query = 2;
+  string params_json = 3;
+}
+
+message RunCypherResponse {
+  repeated string rows_json = 1;
+}
+
+message RunCypherWriteRequest {
+  RequestMetadata metadata = 1;
+  string query = 2;
+  string params_json = 3;
+}
+
+message MutationSuccessResponse {
+  bool success = 1;
+}
+
+message CreateNodeRequest {
+  RequestMetadata metadata = 1;
+  string label = 2;
+  string properties_json = 3;
+}
+
+message CreateRelationshipRequest {
+  RequestMetadata metadata = 1;
+  string from_id = 2;
+  string to_id = 3;
+  string type = 4;
+  string properties_json = 5;
+}
+
+message DeleteNodesByLabelRequest {
+  RequestMetadata metadata = 1;
+  string label = 2;
+}
+
+message DeleteRelationshipsByTypeRequest {
+  RequestMetadata metadata = 1;
+  string type = 2;
+}
+
+message DeleteCountResponse {
+  int64 deleted_count = 1;
+}
+
+message Embedding {
+  repeated double vector = 1;
+  int32 dimensions = 2;
+}
+
+message SearchResult {
+  string symbol_id = 1;
+  double score = 2;
+  string metadata_json = 3;
+}
+
+message CreateTablesRequest {
+  RequestMetadata metadata = 1;
+}
+
+message IndexSymbolRequest {
+  RequestMetadata metadata = 1;
+  string symbol_id = 2;
+  Embedding embedding = 3;
+  string metadata_json = 4;
+}
+
+message SemanticSearchRequest {
+  RequestMetadata metadata = 1;
+  Embedding embedding = 2;
+  int32 limit = 3;
+}
+
+message SemanticSearchResponse {
+  repeated SearchResult results = 1;
+}
+
+message DeleteAllRequest {
+  RequestMetadata metadata = 1;
+}
+
+service Health {
+  rpc Check(HealthCheckRequest) returns (HealthCheckResponse);
+}
+
+service Admin {
+  rpc GetMetrics(GetMetricsRequest) returns (GetMetricsResponse);
+  rpc Shutdown(ShutdownRequest) returns (ShutdownResponse);
+}
+
+service Graph {
+  rpc QueryNodes(QueryNodesRequest) returns (QueryNodesResponse);
+  rpc QueryRelationships(QueryRelationshipsRequest) returns (QueryRelationshipsResponse);
+  rpc RunCypher(RunCypherRequest) returns (RunCypherResponse);
+  rpc RunCypherWrite(RunCypherWriteRequest) returns (MutationSuccessResponse);
+  rpc CreateNode(CreateNodeRequest) returns (MutationSuccessResponse);
+  rpc CreateRelationship(CreateRelationshipRequest) returns (MutationSuccessResponse);
+  rpc DeleteNodesByLabel(DeleteNodesByLabelRequest) returns (DeleteCountResponse);
+  rpc DeleteRelationshipsByType(DeleteRelationshipsByTypeRequest) returns (DeleteCountResponse);
+}
+
+service Vector {
+  rpc CreateTables(CreateTablesRequest) returns (MutationSuccessResponse);
+  rpc IndexSymbol(IndexSymbolRequest) returns (MutationSuccessResponse);
+  rpc SemanticSearch(SemanticSearchRequest) returns (SemanticSearchResponse);
+  rpc DeleteAll(DeleteAllRequest) returns (DeleteCountResponse);
+}

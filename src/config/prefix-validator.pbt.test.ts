@@ -5,9 +5,17 @@
  */
 
 import * as fc from "fast-check";
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { ConfigurationManager } from "./configuration-manager.js";
 import { PrefixValidator } from "./prefix-validator.js";
+
+vi.mock("node:fs/promises", () => ({
+  mkdir: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock("node:os", () => ({
+  homedir: vi.fn(() => "/mock-home"),
+}));
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 

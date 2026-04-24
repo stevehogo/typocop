@@ -12,7 +12,11 @@ export { PoolExhaustedError, PoolDrainedError, DatabaseConnectionError } from ".
 
 // Adapter
 export { LadybugDatabaseAdapter, createDatabaseAdapter } from "./database-adapter.js";
+export { RemoteDatabaseAdapter } from "./remote-database-adapter.js";
+export { RemoteGraphAdapter } from "./remote-graph-adapter.js";
+export { RemoteVectorAdapter } from "./remote-vector-adapter.js";
 
 // Connection (backward-compatible)
 export { createLadybugConnection, resetConnectionCache } from "./connection.js";
+export { createLadybugConnection as createEmbeddedConnection } from "./connection.js";
 export type { LadybugConnection } from "./connection.js";
