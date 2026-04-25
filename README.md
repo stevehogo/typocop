@@ -12,6 +12,8 @@ Typocop is a high-performance indexing and query engine that avoids the slow, mu
 - **Multi-Phase Indexing**: A robust 6-phase pipeline that walks, parses, resolves, clusters, traces, and indexes your code.
 - **Polyglot Support**: Native parsing for 12 languages including TypeScript, PHP (Magento 2 / Laravel), Python (FastAPI / Django), Java (Spring Boot), Go, Rust, and more.
 - **MCP Integration**: First-class Model Context Protocol (MCP) server for deep integration with AI-powered editors like Kiro, Claude, Cursor, and Windsurf.
+- **Obsidian Export**: Export your knowledge graph as an interactive markdown vault with visual diagrams and bidirectional links.
+- **Remote Database Access**: Distributed architecture with gRPC connection server for multi-client access to the same knowledge graph.
 
 ## 🏗️ Architecture
 
@@ -27,10 +29,26 @@ graph TD
 
     Phase6 --> LadybugDB[(LadybugDB - Kùzu)]
 
-    LadybugDB --> QueryServer[Query Server]
+    LadybugDB --> LocalQuery[Local Query Server]
+    LadybugDB --> ConnectionServer[Connection Server - gRPC]
 
-    QueryServer --> MCPServer[MCP Server]
+    LocalQuery --> MCPServer[MCP Server]
+    ConnectionServer --> RemoteClients[Remote Clients]
+    
+    CLI --> ObsidianExport[Obsidian Export]
+    LadybugDB --> ObsidianExport
 ```
+
+**Key components:**
+
+- **CLI Tool** — Command-line interface for parsing, querying, and exporting
+- **AST Parser** — Tree-sitter based parsing for 12 languages
+- **6-Phase Indexer** — Transforms source code into a relational knowledge graph
+- **LadybugDB** — Embedded Kùzu graph database with vector storage
+- **Query Server** — Local query execution engine
+- **Connection Server** — gRPC server for remote database access
+- **MCP Server** — Model Context Protocol integration for AI editors
+- **Obsidian Export** — Knowledge graph visualization as markdown vault
 
 ## 🛠️ Usage
 
@@ -49,6 +67,8 @@ Before running the indexer, ensure you have:
 2. **Embeddings provider** (optional — for semantic search)
    - **HuggingFace** (recommended, lightweight, no external service required)
    - **Ollama** (local embeddings service)
+3. **Connection Server** (optional — for remote database access)
+   - Enables distributed indexing and querying across multiple clients
 
 ### Embedding Configuration
 
@@ -64,7 +84,6 @@ pnpm typocop hf
 
 This command:
 - Updates `.env-typocop` to set `EMBEDDING_PROVIDER=huggingface`
-- Sets `HF_HOME=~/.cache/huggingface` for model caching
 - Downloads and caches the embedding model locally (`mixedbread-ai/mxbai-embed-large-v1`)
 - Enables WASM runtime caching for faster offline loads
 - Provides feedback on the configuration and cache location
@@ -210,6 +229,56 @@ pnpm typocop parse --path ./src --lang typescript --refresh
 - The operation is **atomic** from the user's perspective
 - Clearing is **idempotent** — safe to run multiple times
 
+### Exporting to Obsidian Vault
+
+Export your indexed knowledge graph as an Obsidian-compatible markdown vault for visual exploration and documentation:
+
+```bash
+# Export to default location (./.typocop-obsidian)
+pnpm typocop obsidian
+
+# Export to custom location
+pnpm typocop obsidian --out ./my-vault
+
+# Export with verbose output
+pnpm typocop obsidian --out ./my-vault --verbose
+```
+
+**What gets exported:**
+
+- **Symbol files** — One markdown file per symbol with documentation, location, and relationships
+- **Cluster files** — Functional communities with member symbols and Mermaid diagrams
+- **Process files** — Execution flows with step-by-step data flow diagrams
+- **Index files** — Navigation and cross-references between all artifacts
+- **Mermaid diagrams** — Visual representations of clusters and processes
+
+**Output structure:**
+
+```
+.typocop-obsidian/
+├── symbols/
+│   ├── MyClass.md
+│   ├── myFunction.md
+│   └── ...
+├── clusters/
+│   ├── authentication.md
+│   ├── dataAccess.md
+│   └── ...
+├── processes/
+│   ├── user-login-flow.md
+│   ├── data-fetch-pipeline.md
+│   └── ...
+└── index.md
+```
+
+**Features:**
+
+- Automatic `.gitignore` entry for the vault directory
+- Markdown-compatible Mermaid diagrams for visual exploration
+- Bidirectional links between symbols, clusters, and processes
+- Full symbol metadata (location, visibility, modifiers, documentation)
+- Confidence scores and relationship metadata
+
 ### Supported Languages
 
 TypeScript, JavaScript, Python, PHP, Java, Go, Rust, C, C++, C#, Ruby, Swift
@@ -218,6 +287,61 @@ TypeScript, JavaScript, Python, PHP, Java, Go, Rust, C, C++, C#, Ruby, Swift
 
 ```bash
 pnpm typocop status
+```
+
+### Connection Server (Remote Database Access)
+
+Typocop supports a distributed architecture where the database runs as a separate gRPC server, enabling multiple clients to connect and query the same knowledge graph remotely.
+
+#### Starting the Connection Server
+
+```bash
+# Start the connection server (listens on localhost:50051 by default)
+pnpm typocop db-server
+
+# Custom port
+pnpm typocop db-server --port 50052
+
+# Custom database path
+pnpm typocop db-server --db ~/.typocop/custom/db.ladybug
+
+# With verbose logging
+pnpm typocop db-server --verbose
+```
+
+**Server features:**
+
+- **gRPC-based communication** — Efficient binary protocol for graph queries and vector operations
+- **Connection pooling** — Manages concurrent client connections with configurable limits
+- **Priority scheduling** — Prioritizes critical queries over background operations
+- **Health checks** — Built-in health monitoring and graceful shutdown
+- **Metrics collection** — Real-time performance metrics and request statistics
+- **Multi-prefix support** — Isolate multiple knowledge graphs on the same server
+
+#### Connecting Remote Clients
+
+Configure your client to connect to a remote connection server:
+
+```bash
+# Set environment variables
+export TYPOCOP_DB_HOST=192.168.1.100
+export TYPOCOP_DB_PORT=50051
+export TYPOCOP_DB_MODE=remote
+
+# Run queries against the remote database
+pnpm typocop parse --path ./src --lang typescript
+pnpm typocop obsidian --out ./vault
+```
+
+**Connection configuration:**
+
+```bash
+# .env-typocop
+TYPOCOP_DB_MODE=remote              # "local" or "remote"
+TYPOCOP_DB_HOST=localhost           # Server hostname/IP
+TYPOCOP_DB_PORT=50051               # Server port
+TYPOCOP_DB_TIMEOUT=30000            # Connection timeout (ms)
+TYPOCOP_DB_MAX_RETRIES=3            # Retry attempts
 ```
 
 ### Reindexing
