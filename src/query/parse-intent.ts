@@ -3,7 +3,7 @@
  * Requirements: 9.1, 9.2, 11b.1, 21.6
  */
 import type { QueryIntent } from "../types/index.js";
-import { classifyIntent } from "../enrichment/intent.js";
+import { classifyIntent } from "./intent.js";
 
 /**
  * Parse natural language query text into a QueryIntent.
