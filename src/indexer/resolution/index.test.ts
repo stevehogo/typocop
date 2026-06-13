@@ -433,7 +433,7 @@ describe("resolveReferences", () => {
     });
     const imp = makeSymbol({ id: "im1", name: "Base", kind: "import" });
     // Act
-    const rels = await resolveReferences([base, iface, child, imp]);
+    const { relationships: rels } = await resolveReferences([base, iface, child, imp]);
     // Assert — should have: 1 inherits + 1 implements + 1 imports
     const types = rels.map((r) => r.relType);
     expect(types).toContain("inherits");
@@ -443,7 +443,7 @@ describe("resolveReferences", () => {
 
   it("returns empty array for empty symbol list", async () => {
     // Arrange + Act + Assert
-    expect(await resolveReferences([])).toHaveLength(0);
+    expect((await resolveReferences([])).relationships).toHaveLength(0);
   });
 });
 
@@ -468,7 +468,7 @@ describe("Property 2: Relationship Validity", () => {
           ),
           async (symbols) => {
             const knownIds = new Set(symbols.map((s) => s.id));
-            const relationships = await resolveReferences(symbols);
+            const { relationships } = await resolveReferences(symbols);
 
             for (const rel of relationships) {
               // Source must ALWAYS be a known symbol (Req 5.5)
@@ -498,7 +498,7 @@ describe("Property 2: Relationship Validity", () => {
           { minLength: 0, maxLength: 20, selector: (s) => s.id },
         ),
         async (symbols) => {
-          const relationships = await resolveReferences(symbols);
+          const { relationships } = await resolveReferences(symbols);
           const ids = relationships.map((r) => r.id);
           return new Set(ids).size === ids.length;
         },
@@ -532,7 +532,7 @@ describe("resolveImport: same-file tier resolution", () => {
       location: { filePath: "src/test.ts", startLine: 1, startColumn: 0, endLine: 1, endColumn: 0 },
     });
     // Act — resolveReferences uses SymbolTable internally for same-file tier
-    const rels = await resolveReferences([sameFileTarget, globalTarget, importSym]);
+    const { relationships: rels } = await resolveReferences([sameFileTarget, globalTarget, importSym]);
     const importRel = rels.find((r) => r.source === "i1");
     // Assert — should resolve to the same-file symbol
     expect(importRel?.target).toBe("local");

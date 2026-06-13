@@ -13,6 +13,7 @@ export interface RawRelationshipHint {
   /** For heritage: the name of the child class (used to look up its symbol ID). */
   readonly childSymbolId?: string;
   readonly startLine: number;
+  readonly language: Language;
 }
 
 /** Combined result of query-based extraction */
@@ -178,6 +179,7 @@ export function extractSymbolsWithQueries(
           sourceFile: filePath,
           targetName: raw,
           startLine: importSourceCapture.node.startPosition.row,
+          language,
         });
       }
     }
@@ -191,6 +193,7 @@ export function extractSymbolsWithQueries(
           sourceFile: filePath,
           targetName: calleeName,
           startLine: callNameCapture.node.startPosition.row,
+          language,
         });
       }
     }
@@ -203,6 +206,7 @@ export function extractSymbolsWithQueries(
         targetName: heritageExtendsCapture.node.text.trim(),
         childSymbolId: heritageClassCapture.node.text.trim(),
         startLine: heritageExtendsCapture.node.startPosition.row,
+        language,
       });
     }
 
@@ -213,6 +217,7 @@ export function extractSymbolsWithQueries(
         targetName: heritageImplCapture.node.text.trim(),
         childSymbolId: heritageClassCapture.node.text.trim(),
         startLine: heritageImplCapture.node.startPosition.row,
+        language,
       });
     }
   }

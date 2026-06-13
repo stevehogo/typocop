@@ -429,6 +429,20 @@ export const RUBY_QUERIES = `
   name: (identifier) @name) @definition.method
 
 (call
+  method: (identifier) @import.require
+  arguments: (argument_list
+    (string
+      (string_content) @import.source))
+  (#eq? @import.require "require")) @import
+
+(call
+  method: (identifier) @import.require_relative
+  arguments: (argument_list
+    (string
+      (string_content) @import.source))
+  (#eq? @import.require_relative "require_relative")) @import
+
+(call
   method: (identifier) @call.name) @call
 
 (body_statement

@@ -101,6 +101,38 @@ describe("executeTool", () => {
       expect(result.summary).toContain("baz");
     });
 
+    it("uses external package summary for dependency impact analysis", async () => {
+      vi.mocked(adapter._graph.runCypher)
+        .mockResolvedValueOnce([] as never)
+        .mockResolvedValueOnce([{
+          ext: {
+            labels: ["ExternalDependency"],
+            properties: { id: "ext:lodash", name: "lodash", aliases: "lodash,Lodash", ecosystem: "npm" },
+          },
+        }] as never)
+        .mockResolvedValueOnce([{
+          n: {
+            labels: ["Symbol"],
+            properties: {
+              id: "sym-1",
+              name: "useLodash",
+              kind: "function",
+              filePath: "/repo/src/use-lodash.ts",
+              startLine: "1",
+              startColumn: "0",
+              endLine: "5",
+              endColumn: "0",
+              visibility: "public",
+            },
+          },
+        }] as never)
+        .mockResolvedValueOnce([] as never);
+
+      const result = await executeTool("impact_analysis", { symbolName: "lodash", changeType: "modify" }, adapter);
+
+      expect(result.summary).toContain("External package 'lodash'");
+    });
+
     it("routes smart_search to smart search tool", async () => {
       const result = await executeTool("smart_search", { query: "auth flow" }, adapter);
 

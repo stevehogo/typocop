@@ -38,6 +38,23 @@ export class LadybugGraphAdapter implements GraphAdapter {
     return result.getAll();
   }
 
+  private isMissingTableError(error: unknown): boolean {
+    const message = error instanceof Error ? error.message : String(error);
+    return message.includes("Table ") && message.includes(" does not exist");
+  }
+
+  private async execWithSchemaRetry(query: string): Promise<Record<string, LbugValue>[]> {
+    try {
+      return await this.exec(query);
+    } catch (error) {
+      if (!this.isMissingTableError(error)) {
+        throw error;
+      }
+      await this.initializeSchema(true);
+      return this.exec(query);
+    }
+  }
+
   /** Execute a parameterized Cypher query using prepare + execute. */
   private async execWithParams(
     query: string,
@@ -59,14 +76,14 @@ export class LadybugGraphAdapter implements GraphAdapter {
    * LadybugDB (Kùzu) requires explicit schema before data insertion.
    * Safe to call multiple times — uses IF NOT EXISTS.
    */
-  async initializeSchema(): Promise<void> {
-    if (this.schemaInitialized) return;
+  async initializeSchema(force = false): Promise<void> {
+    if (this.schemaInitialized && !force) return;
 
-    const nodeLabels = ["Symbol", "Cluster", "Process", "Metadata"];
+    const nodeLabels = ["Symbol", "Cluster", "Process", "Metadata", "ExternalDependency"];
     for (const label of nodeLabels) {
       const tbl = this.prefixLabel(label);
       await this.exec(
-        `CREATE NODE TABLE IF NOT EXISTS ${tbl} (id STRING, name STRING, kind STRING, filePath STRING, startLine STRING, startColumn STRING, endLine STRING, endColumn STRING, visibility STRING, signature STRING, documentation STRING, category STRING, confidence STRING, symbolCount STRING, entryPoint STRING, stepCount STRING, key STRING, timestamp STRING, PRIMARY KEY(id))`,
+        `CREATE NODE TABLE IF NOT EXISTS ${tbl} (id STRING, name STRING, kind STRING, filePath STRING, startLine STRING, startColumn STRING, endLine STRING, endColumn STRING, visibility STRING, signature STRING, documentation STRING, category STRING, confidence STRING, symbolCount STRING, entryPoint STRING, stepCount STRING, key STRING, timestamp STRING, aliases STRING, ecosystem STRING, PRIMARY KEY(id))`,
       );
     }
 
@@ -86,6 +103,10 @@ export class LadybugGraphAdapter implements GraphAdapter {
     const containsTbl = this.prefixType("CONTAINS");
     await this.exec(`CREATE REL TABLE IF NOT EXISTS ${containsTbl} (FROM ${cls} TO ${sym})`);
 
+    const ext = this.prefixLabel("ExternalDependency");
+    const dependsOnTbl = this.prefixType("DEPENDS_ON");
+    await this.exec(`CREATE REL TABLE IF NOT EXISTS ${dependsOnTbl} (FROM ${sym} TO ${ext})`);
+
     // Process → Symbol (HAS_STEP) — step_order tracks ordering
     const hasStepTbl = this.prefixType("HAS_STEP");
     await this.exec(`CREATE REL TABLE IF NOT EXISTS ${hasStepTbl} (FROM ${proc} TO ${sym}, step_order STRING)`);
@@ -104,7 +125,7 @@ export class LadybugGraphAdapter implements GraphAdapter {
     const setClause = propEntries.length > 0
       ? "SET n = {" + propEntries.map(([k, v]) => `${k}: ${JSON.stringify(v)}`).join(", ") + "}"
       : "";
-    await this.exec(`MERGE (n:${prefixedLabel} {id: "${props.id}"}) ${setClause}`);
+    await this.execWithSchemaRetry(`MERGE (n:${prefixedLabel} {id: "${props.id}"}) ${setClause}`);
   }
 
   /** Known rel table properties declared in schema. */
@@ -122,6 +143,7 @@ export class LadybugGraphAdapter implements GraphAdapter {
     DEFINES: ["Symbol", "Symbol"],
     CONTAINS: ["Cluster", "Symbol"],
     HAS_STEP: ["Process", "Symbol"],
+    DEPENDS_ON: ["Symbol", "ExternalDependency"],
   };
 
   async createRelationship(
@@ -141,7 +163,7 @@ export class LadybugGraphAdapter implements GraphAdapter {
       ? " ON MATCH SET " + propEntries.map(([k, v]) => `r.${k} = ${JSON.stringify(v)}`).join(", ") +
         " ON CREATE SET " + propEntries.map(([k, v]) => `r.${k} = ${JSON.stringify(v)}`).join(", ")
       : "";
-    await this.exec(
+    await this.execWithSchemaRetry(
       `MATCH (a:${fromLabel} {id: "${fromId}"}), (b:${toLabel} {id: "${toId}"}) MERGE (a)-[r:${prefixedType}]->(b)${setClause}`,
     );
   }
@@ -156,7 +178,7 @@ export class LadybugGraphAdapter implements GraphAdapter {
       ? "WHERE " + filterKeys.map((k) => `n.${k} = "${String(filter[k])}"`).join(" AND ")
       : "";
 
-    const rows = await this.exec(
+    const rows = await this.execWithSchemaRetry(
       `MATCH (n:${prefixedLabel}) ${whereClause} RETURN n`,
     );
 
@@ -172,7 +194,7 @@ export class LadybugGraphAdapter implements GraphAdapter {
 
   async queryRelationships(type: string): Promise<GraphRelationship[]> {
     const prefixedType = this.prefixType(type);
-    const rows = await this.exec(
+    const rows = await this.execWithSchemaRetry(
       `MATCH (source)-[r:${prefixedType}]->(target) RETURN r, source.id AS sourceId, target.id AS targetId`,
     );
 
@@ -189,13 +211,13 @@ export class LadybugGraphAdapter implements GraphAdapter {
 
   async deleteNodesByLabel(label: string): Promise<number> {
     const prefixedLabel = this.prefixLabel(label);
-    await this.exec(`MATCH (n:${prefixedLabel}) DETACH DELETE n`);
+    await this.execWithSchemaRetry(`MATCH (n:${prefixedLabel}) DETACH DELETE n`);
     return 0;
   }
 
   async deleteRelationshipsByType(type: string): Promise<number> {
     const prefixedType = this.prefixType(type);
-    await this.exec(`MATCH ()-[r:${prefixedType}]->() DELETE r`);
+    await this.execWithSchemaRetry(`MATCH ()-[r:${prefixedType}]->() DELETE r`);
     return 0;
   }
 
@@ -218,8 +240,8 @@ export class LadybugGraphAdapter implements GraphAdapter {
   }
 
   /** Known node labels and relationship types that need prefixing in raw Cypher. */
-  private static readonly KNOWN_LABELS = ["Symbol", "Cluster", "Process", "Metadata"];
-  private static readonly KNOWN_REL_TYPES = ["CALLS", "IMPORTS", "INHERITS", "IMPLEMENTS", "CONTAINS", "HAS_STEP", "REFERENCES", "DEFINES"];
+  private static readonly KNOWN_LABELS = ["Symbol", "Cluster", "Process", "Metadata", "ExternalDependency"];
+  private static readonly KNOWN_REL_TYPES = ["CALLS", "IMPORTS", "INHERITS", "IMPLEMENTS", "CONTAINS", "HAS_STEP", "REFERENCES", "DEFINES", "DEPENDS_ON"];
 
   /**
    * Inject prefix into bare node labels and relationship types in a Cypher query.
@@ -245,7 +267,7 @@ export class LadybugGraphAdapter implements GraphAdapter {
     params: Record<string, unknown> = {},
   ): Promise<T[]> {
     const prefixed = this.prefixQuery(query);
-    const rows = await this.exec(prefixed);
+    const rows = await this.execWithSchemaRetry(prefixed);
     // Normalize NodeValue/RelValue objects in each row
     return rows.map((row) => {
       const normalized: Record<string, unknown> = {};
@@ -261,6 +283,6 @@ export class LadybugGraphAdapter implements GraphAdapter {
     params: Record<string, unknown> = {},
   ): Promise<void> {
     const prefixed = this.prefixQuery(query);
-    await this.exec(prefixed);
+    await this.execWithSchemaRetry(prefixed);
   }
 }

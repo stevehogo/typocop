@@ -32,6 +32,7 @@ vi.mock("../indexer/pipeline.js", () => ({
     relationships: [],
     clusters: [],
     processes: [],
+    externalDependencyCount: 0,
     skippedFiles: 0,
     embeddingCount: 0,
   }),

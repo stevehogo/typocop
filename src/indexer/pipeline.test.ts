@@ -115,7 +115,7 @@ function makeMockAdapter(embeddingsEnabled: boolean): {
 function setupDefaultMocks(): void {
   mockWalkFileTree.mockResolvedValue([{ path: "src/stub.ts", size: 100 }]);
   mockExtractAllSymbols.mockResolvedValue({ symbols: [STUB_SYMBOL], hints: [], skippedFiles: 0 });
-  mockResolveReferences.mockReturnValue([]);
+  mockResolveReferences.mockReturnValue({ relationships: [], extNodes: new Map() });
   mockClusterSymbols.mockResolvedValue([]);
   mockTraceProcesses.mockReturnValue([]);
   mockBuildSearchIndex.mockResolvedValue({ keywords: new Map(), symbolCount: 1, embeddings: [] });
@@ -142,6 +142,7 @@ describe("runIndexingPipeline — DatabaseAdapter integration", () => {
 
     expect(result.symbols).toHaveLength(0);
     expect(result.embeddingCount).toBe(0);
+    expect(result.externalDependencyCount).toBe(0);
   });
 
   it("should store graph data through GraphAdapter (Req 8.1)", async () => {
@@ -167,7 +168,7 @@ describe("runIndexingPipeline — DatabaseAdapter integration", () => {
       symbols: [STUB_SYMBOL, { ...STUB_SYMBOL, id: "stub2", name: "stub2" }],
       hints: [], skippedFiles: 0,
     });
-    mockResolveReferences.mockReturnValue([relationship]);
+    mockResolveReferences.mockReturnValue({ relationships: [relationship], extNodes: new Map() });
     mockClusterSymbols.mockResolvedValue([cluster]);
     mockTraceProcesses.mockReturnValue([process]);
 
@@ -193,6 +194,43 @@ describe("runIndexingPipeline — DatabaseAdapter integration", () => {
     expect(graph.createRelationship).toHaveBeenCalledWith("stub", "stub2", "CALLS", {});
     expect(graph.createRelationship).toHaveBeenCalledWith("cluster-1", "stub", "CONTAINS", {});
     expect(graph.createRelationship).toHaveBeenCalledWith("proc-1", "stub", "HAS_STEP", { step_order: "0" });
+  });
+
+  it("stores external dependency nodes and DEPENDS_ON edges", async () => {
+    const { adapter, graph } = makeMockAdapter(false);
+    mockResolveReferences.mockReturnValue({
+      relationships: [{
+        id: "dep-1",
+        source: "stub",
+        target: "ext:lodash",
+        relType: "dependsOn",
+        metadata: { packageName: "lodash", ecosystem: "npm" },
+      }],
+      extNodes: new Map([["ext:lodash", {
+        id: "ext:lodash",
+        name: "lodash",
+        aliases: ["lodash", "Lodash"],
+        ecosystem: "npm",
+      }]]),
+    });
+
+    const result = await runIndexingPipeline({
+      sourcePath: ".",
+      language: "typescript",
+      verbose: false,
+      adapter,
+    });
+
+    expect(result.externalDependencyCount).toBe(1);
+    expect(graph.createNode).toHaveBeenCalledWith("ExternalDependency", expect.objectContaining({
+      id: "ext:lodash",
+      aliases: "lodash,Lodash",
+      ecosystem: "npm",
+    }));
+    expect(graph.createRelationship).toHaveBeenCalledWith("stub", "ext:lodash", "DEPENDS_ON", {
+      packageName: "lodash",
+      ecosystem: "npm",
+    });
   });
 });
 

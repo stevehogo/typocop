@@ -81,6 +81,7 @@ describe("Property-based tests: Refresh parameter functionality", () => {
       relationships: [],
       clusters: [],
       processes: [],
+      externalDependencyCount: 0,
       skippedFiles: 0,
       embeddingCount: 0,
     });
@@ -114,6 +115,7 @@ describe("Property-based tests: Refresh parameter functionality", () => {
             relationships: [{ id: "rel1" }],
             clusters: [],
             processes: [],
+            externalDependencyCount: 0,
             skippedFiles: 0,
             embeddingCount: 0,
           });
@@ -165,6 +167,7 @@ describe("Property-based tests: Refresh parameter functionality", () => {
             relationships: [],
             clusters: [],
             processes: [],
+            externalDependencyCount: 0,
             skippedFiles: 0,
             embeddingCount: 10,
           });
@@ -227,6 +230,7 @@ describe("Property-based tests: Refresh parameter functionality", () => {
             processes: Array.from({ length: input.processCount }, (_, i) => ({
               id: `process${i}`,
             })),
+            externalDependencyCount: 0,
             skippedFiles: 0,
             embeddingCount: 0,
           });
@@ -278,6 +282,7 @@ describe("Property-based tests: Refresh parameter functionality", () => {
             relationships: [],
             clusters: [],
             processes: [],
+            externalDependencyCount: 0,
             skippedFiles: 0,
             embeddingCount: input.embeddingCount,
           });
@@ -329,6 +334,7 @@ describe("Property-based tests: Refresh parameter functionality", () => {
             relationships: [],
             clusters: [],
             processes: [],
+            externalDependencyCount: 0,
             skippedFiles: 0,
             embeddingCount: 0,
           });

@@ -3,6 +3,9 @@ import type {
   LadybugClientConfig,
   OllamaConfig,
 } from "../config/types.js";
+import { readdir } from "node:fs/promises";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { writeDiscoveryFile } from "../db-server/discovery.js";
 import { ServerStartupTimeoutError, ServerUnavailableError } from "../db-server/errors.js";
 import type { DiscoveryFile } from "../db-server/types.js";
@@ -30,6 +33,8 @@ interface AutostartDependencies {
   readonly readDiscovery?: (path: string) => Promise<DiscoveryFile | null>;
   readonly sleep?: (ms: number) => Promise<void>;
   readonly now?: () => number;
+  readonly listDiscoveryFiles?: () => Promise<readonly string[]>;
+  readonly killPid?: (pid: number) => void;
 }
 
 interface EnsureServerAndConnectOptions {
@@ -51,6 +56,8 @@ export class DefaultAutostartManager implements AutostartManager {
   private readonly readDiscoveryFn: (path: string) => Promise<DiscoveryFile | null>;
   private readonly sleepFn: (ms: number) => Promise<void>;
   private readonly nowFn: () => number;
+  private readonly listDiscoveryFilesFn: () => Promise<readonly string[]>;
+  private readonly killPidFn: (pid: number) => void;
 
   constructor(deps: AutostartDependencies = {}) {
     this.checkHealthFn = deps.checkHealth || checkServerHealth;
@@ -60,11 +67,50 @@ export class DefaultAutostartManager implements AutostartManager {
     this.readDiscoveryFn = deps.readDiscovery || readDiscoveryFile;
     this.sleepFn = deps.sleep || sleep;
     this.nowFn = deps.now || Date.now;
+    this.listDiscoveryFilesFn = deps.listDiscoveryFiles || listDefaultDiscoveryFiles;
+    this.killPidFn = deps.killPid || ((pid) => process.kill(pid, "SIGTERM"));
   }
 
   async ensureServer(config: LadybugClientConfig): Promise<void> {
     if (await this.checkHealthFn(config, HEALTH_TIMEOUT_MS)) {
-      return;
+      const discovery = await this.findDiscoveryForServerUrl(config.serverUrl);
+      if (!discovery || discovery.prefix === config.prefix) {
+        return;
+      }
+      if (!config.autostart) {
+        throw new ServerUnavailableError(config.serverUrl);
+      }
+
+      const release = await this.acquireLockFn(config.lockPath, config.startupTimeoutMs);
+      try {
+        if (!(await this.checkHealthFn(config, HEALTH_TIMEOUT_MS))) {
+          return;
+        }
+
+        const latest = await this.findDiscoveryForServerUrl(config.serverUrl);
+        if (!latest || latest.prefix === config.prefix) {
+          return;
+        }
+
+        const pid = typeof latest.pid === "number" ? latest.pid : -1;
+        if (pid > 0) {
+          try {
+            this.killPidFn(pid);
+          } catch {
+            // Best-effort. If termination fails, spawning may fail with EADDRINUSE.
+          }
+        }
+
+        const deadline = this.nowFn() + HEALTH_TIMEOUT_MS;
+        while (this.nowFn() < deadline) {
+          await this.sleepFn(POLL_INTERVAL_MS);
+          if (!(await this.checkHealthFn(config, 500))) {
+            break;
+          }
+        }
+      } finally {
+        await release();
+      }
     }
 
     // Stale discovery files are ignored; health is the source of truth.
@@ -114,6 +160,28 @@ export class DefaultAutostartManager implements AutostartManager {
   async readDiscovery(discoveryPath: string): Promise<DiscoveryFile | null> {
     return this.readDiscoveryFn(discoveryPath);
   }
+
+  private async findDiscoveryForServerUrl(serverUrl: string): Promise<DiscoveryFile | null> {
+    const target = parseGrpcUrl(serverUrl);
+    const candidates = await this.listDiscoveryFilesFn().catch(() => []);
+    for (const filePath of candidates) {
+      const discovery = await this.readDiscoveryFn(filePath).catch(() => null);
+      if (!discovery) continue;
+      if (!target) {
+        if (discovery.url === serverUrl) return discovery;
+        continue;
+      }
+
+      // Hostnames often differ between client and server discovery:
+      // server binds to 0.0.0.0 but client connects via 127.0.0.1/localhost.
+      // Since only one process can bind a port, matching by port is enough.
+      const candidate = parseGrpcUrl(discovery.url);
+      if (candidate && candidate.port === target.port) {
+        return discovery;
+      }
+    }
+    return null;
+  }
 }
 
 export async function ensureServerAndConnect(
@@ -129,4 +197,22 @@ export async function ensureServerAndConnect(
   });
   await adapter.initialize();
   return adapter;
+}
+
+async function listDefaultDiscoveryFiles(): Promise<readonly string[]> {
+  const root = join(homedir(), ".typocop");
+  const entries = await readdir(root, { withFileTypes: true }).catch(() => []);
+  return entries
+    .filter((entry) => entry.isDirectory() && entry.name !== "locks")
+    .map((entry) => join(root, entry.name, "ladybug-server.json"));
+}
+
+function parseGrpcUrl(value: string): { readonly port: string } | null {
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "grpc:" || url.port.trim() === "") return null;
+    return { port: url.port };
+  } catch {
+    return null;
+  }
 }

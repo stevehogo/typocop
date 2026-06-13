@@ -4,15 +4,16 @@
       "command": "typocop-mcp",
       "args": [
         "-e",
-        "/home/citado/typocop/.env-typocop"
+        ".env-typocop"
       ],
-      "disabled": true,
+      "env": {},
+      "disabled": false,
       "autoApprove": [
-        "get_symbol_context",
-        "get_symbol_context",
-        "impact_analysis",
-        "trace_data_flow",
-        "find_dependents"
+        "mcp_typocop_get_symbol_context",
+        "mcp_typocop_find_dependents",
+        "mcp_typocop_trace_data_flow",
+        "mcp_typocop_impact_analysis",
+        "mcp_typocop_smart_search"
       ]
     }
   }

@@ -22,6 +22,7 @@ export interface IndexingStats {
   relationshipCount: number;
   clusterCount: number;
   processCount: number;
+  externalDependencyCount: number;
   skippedFiles: number;
   embeddingCount: number;
   clearingStats?: ClearingStats;
@@ -91,19 +92,21 @@ export async function executeIndexingPipeline(
       const symbolsDeleted = await graphAdapter.deleteNodesByLabel("Symbol");
       const clustersDeleted = await graphAdapter.deleteNodesByLabel("Cluster");
       const processesDeleted = await graphAdapter.deleteNodesByLabel("Process");
+      const externalDependenciesDeleted = await graphAdapter.deleteNodesByLabel("ExternalDependency");
       await graphAdapter.deleteNodesByLabel("Metadata");
 
       const callsDeleted = await graphAdapter.deleteRelationshipsByType("CALLS");
       const importsDeleted = await graphAdapter.deleteRelationshipsByType("IMPORTS");
       const containsDeleted = await graphAdapter.deleteRelationshipsByType("CONTAINS");
       const hasStepDeleted = await graphAdapter.deleteRelationshipsByType("HAS_STEP");
+      const dependsOnDeleted = await graphAdapter.deleteRelationshipsByType("DEPENDS_ON");
 
       // Clear vector data
       const embeddingsDeleted = await vectorAdapter.deleteAll();
 
       clearingStats = {
-        nodesDeleted: symbolsDeleted + clustersDeleted + processesDeleted,
-        relationshipsDeleted: callsDeleted + importsDeleted + containsDeleted + hasStepDeleted,
+        nodesDeleted: symbolsDeleted + clustersDeleted + processesDeleted + externalDependenciesDeleted,
+        relationshipsDeleted: callsDeleted + importsDeleted + containsDeleted + hasStepDeleted + dependsOnDeleted,
         embeddingsDeleted,
       };
 
@@ -126,6 +129,7 @@ export async function executeIndexingPipeline(
       relationshipCount: result.relationships.length,
       clusterCount: result.clusters.length,
       processCount: result.processes.length,
+      externalDependencyCount: result.externalDependencyCount,
       skippedFiles: result.skippedFiles,
       embeddingCount: result.embeddingCount,
       clearingStats,
@@ -370,6 +374,7 @@ export async function executeCLI(command: CLICommand): Promise<void> {
         console.error(`  Relationships: ${chalk.cyan(stats.relationshipCount)}`);
         console.error(`  Clusters:      ${chalk.cyan(stats.clusterCount)}`);
         console.error(`  Processes:     ${chalk.cyan(stats.processCount)}`);
+        console.error(`  External deps: ${chalk.cyan(stats.externalDependencyCount)}`);
         console.error(`  Embeddings:    ${chalk.cyan(stats.embeddingCount)}`);
 
         if (stats.skippedFiles > 0) {

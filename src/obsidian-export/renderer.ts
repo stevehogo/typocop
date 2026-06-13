@@ -4,6 +4,7 @@
  */
 import type {
   ExportedCluster,
+  ExportedExternalDependency,
   ExportedRelationship,
   ExportedSymbol,
   GraphData,
@@ -39,6 +40,40 @@ export interface VaultFile {
 
 export interface VaultContent {
   readonly files: VaultFile[];
+}
+
+function renderExternalDependencyFile(
+  dependency: ExportedExternalDependency,
+  dependsOnEdges: readonly ExportedRelationship[],
+  symbolToCluster: ReadonlyMap<string, string>,
+): string {
+  const aliases = dependency.aliases.split(",").map((alias) => alias.trim()).filter(Boolean);
+  const dependents = dependsOnEdges.filter((edge) => edge.targetId === dependency.id);
+  return [
+    "---",
+    "type: external-dependency",
+    `ecosystem: ${dependency.ecosystem}`,
+    `dependent_count: ${dependents.length}`,
+    "---",
+    "",
+    `# External Dependency: ${dependency.name}`,
+    "",
+    `**Ecosystem**: ${dependency.ecosystem}`,
+    "",
+    "## Aliases",
+    "",
+    ...(aliases.length > 0 ? aliases.map((alias) => `- ${alias}`) : ["- None"]),
+    "",
+    "## Dependent Symbols",
+    "",
+    ...(dependents.length > 0
+      ? dependents.map((edge) => {
+        const clusterName = symbolToCluster.get(edge.sourceId) ?? "unclustered";
+        return `- [[03-symbols/${slugify(clusterName)}/${slugify(edge.sourceName)}|${edge.sourceName}]]`;
+      })
+      : ["- None"]),
+    "",
+  ].join("\n");
 }
 
 export function renderVault(data: GraphData): VaultContent {
@@ -81,6 +116,29 @@ export function renderVault(data: GraphData): VaultContent {
     });
   }
   files.push({ relativePath: "02-processes/_index.md", content: renderProcessIndex(data.processes) });
+
+  for (const dependency of data.externalDependencies) {
+    files.push({
+      relativePath: `04-external-dependencies/${slugify(dependency.name)}.md`,
+      content: renderExternalDependencyFile(dependency, data.dependsOnEdges, symbolToCluster),
+    });
+  }
+  files.push({
+    relativePath: "04-external-dependencies/_index.md",
+    content: [
+      "---",
+      "type: external-dependency-index",
+      `dependency_count: ${data.externalDependencies.length}`,
+      "---",
+      "",
+      "# External Dependencies",
+      "",
+      ...data.externalDependencies.map((dependency) =>
+        `- [[${slugify(dependency.name)}]] (${dependency.ecosystem})`,
+      ),
+      "",
+    ].join("\n"),
+  });
 
   // Top-level navigation (main MOC)
   files.push({ relativePath: "_index.md", content: renderNavigationIndex(data) });
@@ -196,5 +254,3 @@ export function buildIncomingCallsMap(relationships: readonly ExportedRelationsh
   }
   return map;
 }
-
-

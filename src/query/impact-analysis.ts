@@ -48,11 +48,52 @@ interface CypherStepRow {
   description: string | null;
 }
 
+interface CypherExternalDependencyRow {
+  ext: { labels: string[]; properties: Record<string, string> };
+}
+
 async function findDependents(graph: GraphAdapter, symbolId: string): Promise<GraphNode[]> {
   const rows = await graph.runCypher<CypherNodeRow>(
     `MATCH (n:Symbol)-[e:CALLS*1..${MAX_TRAVERSAL_DEPTH}]->(t:Symbol) WHERE t.id = $val OR t.name = $val RETURN DISTINCT n`,
     { val: symbolId },
+  ) ?? [];
+  return rows.map(rowToNode);
+}
+
+export async function findExternalDependencyByAlias(
+  graph: GraphAdapter,
+  query: string,
+): Promise<GraphNode | null> {
+  const rows = await graph.runCypher<CypherExternalDependencyRow>(
+    `MATCH (ext:ExternalDependency)
+     WHERE toLower(ext.name) CONTAINS toLower($query)
+        OR toLower(ext.aliases) CONTAINS toLower($query)
+     RETURN ext`,
+    { query },
+  ) ?? [];
+  const nodes = rows
+    .filter((row): row is CypherExternalDependencyRow => Boolean(row?.ext?.properties))
+    .map((row) => ({
+    id: row.ext.properties["id"] ?? "",
+    labels: row.ext.labels,
+    properties: row.ext.properties,
+    }));
+  if (nodes.length === 0) return null;
+  return nodes.reduce((best, candidate) =>
+    prop(best, "name").length <= prop(candidate, "name").length ? best : candidate,
   );
+}
+
+async function findDependentsByExternalDependency(
+  graph: GraphAdapter,
+  externalDependencyId: string,
+): Promise<GraphNode[]> {
+  const rows = await graph.runCypher<CypherNodeRow>(
+    `MATCH (n:Symbol)-[:DEPENDS_ON]->(ext:ExternalDependency)
+     WHERE ext.id = $val OR ext.name = $val
+     RETURN DISTINCT n`,
+    { val: externalDependencyId },
+  ) ?? [];
   return rows.map(rowToNode);
 }
 
@@ -60,24 +101,28 @@ async function findProcessesBySymbol(graph: GraphAdapter, symbolId: string): Pro
   const rows = await graph.runCypher<CypherProcessRow>(
     `MATCH (p:Process)-[:HAS_STEP]->(s:Symbol) WHERE s.id = $val OR s.name = $val RETURN DISTINCT p`,
     { val: symbolId },
-  );
-  return rows.map((r) => ({
+  ) ?? [];
+  return rows
+    .filter((row): row is CypherProcessRow => Boolean(row?.p?.properties))
+    .map((r) => ({
     id: r.p.properties["id"] ?? "",
     labels: r.p.labels,
     properties: r.p.properties,
-  }));
+    }));
 }
 
 async function findClustersBySymbol(graph: GraphAdapter, symbolId: string): Promise<GraphNode[]> {
   const rows = await graph.runCypher<CypherClusterRow>(
     `MATCH (c:Cluster)-[:CONTAINS]->(s:Symbol) WHERE s.id = $val OR s.name = $val RETURN DISTINCT c`,
     { val: symbolId },
-  );
-  return rows.map((r) => ({
+  ) ?? [];
+  return rows
+    .filter((row): row is CypherClusterRow => Boolean(row?.c?.properties))
+    .map((r) => ({
     id: r.c.properties["id"] ?? "",
     labels: r.c.labels,
     properties: r.c.properties,
-  }));
+    }));
 }
 
 async function findProcessSteps(graph: GraphAdapter, processId: string): Promise<Array<{ order: number; symbolId: string; description: string }>> {
@@ -86,7 +131,7 @@ async function findProcessSteps(graph: GraphAdapter, processId: string): Promise
      RETURN s.id AS symbolId, r.step_order AS stepOrder, s.name AS description
      ORDER BY r.step_order ASC`,
     { processId },
-  );
+  ) ?? [];
   return rows.map((r) => ({
     order: r.stepOrder,
     symbolId: r.symbolId,
@@ -106,7 +151,11 @@ async function graphNodeToProcess(node: GraphNode, graph: GraphAdapter): Promise
 }
 
 /** Return type for executeImpactAnalysis, including resolution info for callers. */
-export type ImpactAnalysisResult = { resolution: SymbolResolution } & Pick<QueryResult, "symbols" | "relationships" | "clusters" | "processes" | "confidence" | "riskLevel" | "affectedFlows">;
+export type ImpactAnalysisResult = {
+  resolution: SymbolResolution;
+  targetKind: "symbol" | "externalDependency";
+  targetName?: string;
+} & Pick<QueryResult, "symbols" | "relationships" | "clusters" | "processes" | "confidence" | "riskLevel" | "affectedFlows">;
 
 /**
  * Execute an impact analysis query using GraphAdapter.runCypher().
@@ -118,12 +167,55 @@ export async function executeImpactAnalysis(
   maxResults: number,
   graphAdapter: GraphAdapter,
 ): Promise<ImpactAnalysisResult> {
-  // Req 10.1, 1.1, 1.2, 1.4 — resolve target symbol (exact → fuzzy → not_found)
-  const resolution = await resolveSymbol(target, graphAdapter);
+  const exactRows = await graphAdapter.runCypher<CypherNodeRow>(
+    `MATCH (n:Symbol) WHERE n.id = $val OR n.name = $val RETURN n LIMIT 1`,
+    { val: target },
+  ) ?? [];
+  const exactSymbolNode = exactRows[0]?.n?.properties ? rowToNode(exactRows[0]) : null;
+
+  const matchedExternalDependency = exactSymbolNode === null
+    ? await findExternalDependencyByAlias(graphAdapter, target)
+    : null;
+  if (matchedExternalDependency) {
+    const dependentNodes = await findDependentsByExternalDependency(graphAdapter, matchedExternalDependency.id);
+    const dependentSymbols = dependentNodes.map(graphNodeToSymbol);
+    const processes = await Promise.all(
+      (await Promise.all(
+        dependentSymbols.map((symbol) => findProcessesBySymbol(graphAdapter, symbol.id)),
+      )).flat().map((node) => graphNodeToProcess(node, graphAdapter)),
+    );
+    const relationships: Relationship[] = dependentSymbols.map((dep) => ({
+      id: `${dep.id}->dependsOn->${matchedExternalDependency.id}`,
+      source: dep.id,
+      target: matchedExternalDependency.id,
+      relType: "dependsOn",
+      metadata: {
+        packageName: prop(matchedExternalDependency, "name", matchedExternalDependency.id),
+      },
+    }));
+
+    return {
+      resolution: { kind: "exact", node: matchedExternalDependency },
+      targetKind: "externalDependency",
+      targetName: prop(matchedExternalDependency, "name", matchedExternalDependency.id),
+      symbols: dependentSymbols.slice(0, maxResults),
+      relationships,
+      clusters: [],
+      processes,
+      confidence: dependentSymbols.length > 0 ? 0.92 : 0.75,
+      riskLevel: calculateImpactRisk(dependentSymbols),
+      affectedFlows: processes.map((process) => process.name),
+    };
+  }
+
+  const resolution = exactSymbolNode !== null
+    ? { kind: "exact" as const, node: exactSymbolNode }
+    : await resolveSymbol(target, graphAdapter);
 
   if (resolution.kind === "not_found") {
     return {
       resolution,
+      targetKind: "symbol",
       symbols: [],
       relationships: [],
       clusters: [],
@@ -168,6 +260,7 @@ export async function executeImpactAnalysis(
 
   return {
     resolution,
+    targetKind: "symbol",
     symbols: allSymbols,
     relationships,
     clusters,

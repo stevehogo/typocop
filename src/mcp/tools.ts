@@ -114,13 +114,19 @@ async function executeFindDependents(
     `Risk level: ${result.riskLevel.toUpperCase()}. ` +
     `Affected flows: ${result.affectedFlows.length}. ` +
     `Confidence: ${(result.confidence * 100).toFixed(0)}%.`;
+  const summary = result.targetKind === "externalDependency"
+    ? `External package '${result.targetName ?? symbolName}': ${result.symbols.length} dependent symbols. ` +
+      `Risk level: ${result.riskLevel.toUpperCase()}. ` +
+      `Affected flows: ${result.affectedFlows.length}. ` +
+      `Confidence: ${(result.confidence * 100).toFixed(0)}%.`
+    : baseSummary;
 
   if (resolution.kind === "fuzzy") {
     const fuzzyPrefix = `Fuzzy matched '${symbolName}' → '${resolution.matchedName}'. `;
-    return formatMCPResponse(result, fuzzyPrefix + baseSummary);
+    return formatMCPResponse(result, fuzzyPrefix + summary);
   }
 
-  return formatMCPResponse(result, baseSummary);
+  return formatMCPResponse(result, summary);
 }
 
 /**
@@ -186,13 +192,19 @@ async function executeImpactAnalysisTool(
     `${result.affectedFlows.length} affected flows. ` +
     `Risk: ${result.riskLevel.toUpperCase()}. ` +
     `Confidence: ${(result.confidence * 100).toFixed(0)}%.`;
+  const summary = result.targetKind === "externalDependency"
+    ? `External package '${result.targetName ?? symbolName}': ${result.symbols.length} dependent symbols, ` +
+      `${result.affectedFlows.length} affected flows. ` +
+      `Risk: ${result.riskLevel.toUpperCase()}. ` +
+      `Confidence: ${(result.confidence * 100).toFixed(0)}%.`
+    : baseSummary;
 
   if (resolution.kind === "fuzzy") {
     const fuzzyPrefix = `Fuzzy matched '${symbolName}' → '${resolution.matchedName}'. `;
-    return formatMCPResponse(result, fuzzyPrefix + baseSummary);
+    return formatMCPResponse(result, fuzzyPrefix + summary);
   }
 
-  return formatMCPResponse(result, baseSummary);
+  return formatMCPResponse(result, summary);
 }
 
 /**

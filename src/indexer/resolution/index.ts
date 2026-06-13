@@ -6,11 +6,20 @@
  *
  * Requirements: 3.3, 5.1, 5.2, 5.3, 5.4, 5.5, 5.6, 5.7
  */
-import type { Symbol, Relationship, RelationType } from "../../types/index.js";
+import type {
+  ExternalDependencyNode,
+  Symbol,
+  Relationship,
+  RelationType,
+} from "../../types/index.js";
 import type { RawRelationshipHint } from "../parsing/index.js";
 import { buildSymbolTable } from "./symbol-table.js";
 import { createResolutionContext } from "./resolution-context.js";
 import { loadLanguageConfigs, type LanguageConfigs } from "../language-config.js";
+import {
+  getOrCreateExtNode,
+  isExternalPackage,
+} from "./external-packages.js";
 
 // ─── Symbol map ───────────────────────────────────────────────────────────────
 
@@ -226,8 +235,9 @@ export function resolveHints(
   hints: RawRelationshipHint[],
   symbols: Symbol[],
   languageConfigs?: LanguageConfigs,
-): Relationship[] {
+): ResolveHintsResult {
   const symbolMap = buildSymbolMap(symbols);
+  const extNodes = new Map<string, ExternalDependencyNode>();
 
   // Build resolution context and populate symbol table
   const ctx = createResolutionContext();
@@ -264,6 +274,23 @@ export function resolveHints(
       switch (hint.kind) {
         case "import": {
           const sourceId = `${hint.sourceFile}:import:${hint.startLine}`;
+          if (isExternalPackage(hint.targetName, hint.language)) {
+            const extNode = getOrCreateExtNode(hint.targetName, hint.language, extNodes);
+            const importingSymbols = fileSymbols.get(hint.sourceFile) ?? [];
+            for (const importingSymbol of importingSymbols) {
+              add({
+                id: relId("dependsOn", importingSymbol.id, extNode.id),
+                source: importingSymbol.id,
+                target: extNode.id,
+                relType: "dependsOn",
+                metadata: {
+                  ecosystem: extNode.ecosystem,
+                  packageName: extNode.name,
+                },
+              });
+            }
+            break;
+          }
           const segments = hint.targetName.split("/");
           const lastName = segments[segments.length - 1];
 
@@ -322,7 +349,12 @@ export function resolveHints(
     ctx.clearCache();
   }
 
-  return relationships;
+  return { relationships, extNodes };
+}
+
+export interface ResolveHintsResult {
+  readonly relationships: Relationship[];
+  readonly extNodes: Map<string, ExternalDependencyNode>;
 }
 
 // ─── Phase 3 entry point ─────────────────────────────────────────────────────
@@ -343,7 +375,7 @@ export async function resolveReferences(
   symbols: Symbol[],
   hints?: RawRelationshipHint[],
   repoRoot?: string,
-): Promise<Relationship[]> {
+): Promise<ResolveHintsResult> {
   if (hints && hints.length > 0) {
     const languageConfigs = repoRoot
       ? await loadLanguageConfigs(repoRoot)
@@ -354,10 +386,13 @@ export async function resolveReferences(
   // Legacy path: derive relationships from symbol kinds and signatures
   const symbolMap = buildSymbolMap(symbols);
   const symbolTable = buildSymbolTable(symbols);
-  return [
-    ...resolveImports(symbols, symbolMap, symbolTable),
-    ...resolveCalls(symbols, symbolMap),
-    ...resolveInheritance(symbols, symbolMap),
-    ...resolveImplementations(symbols, symbolMap),
-  ];
+  return {
+    relationships: [
+      ...resolveImports(symbols, symbolMap, symbolTable),
+      ...resolveCalls(symbols, symbolMap),
+      ...resolveInheritance(symbols, symbolMap),
+      ...resolveImplementations(symbols, symbolMap),
+    ],
+    extNodes: new Map(),
+  };
 }

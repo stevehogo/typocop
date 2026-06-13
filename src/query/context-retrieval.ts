@@ -26,11 +26,15 @@ interface CypherStepRow {
   description: string | null;
 }
 
+interface CypherExternalDependencyRow {
+  ext: { labels: string[]; properties: Record<string, string> };
+}
+
 async function findDependents(graph: GraphAdapter, symbolId: string): Promise<GraphNode[]> {
   const rows = await graph.runCypher<CypherNodeRow>(
     `MATCH (n:Symbol)-[e:CALLS*1..${MAX_TRAVERSAL_DEPTH}]->(t:Symbol) WHERE t.id = $val OR t.name = $val RETURN DISTINCT n`,
     { val: symbolId },
-  );
+  ) ?? [];
   return rows.map(rowToNode);
 }
 
@@ -38,32 +42,52 @@ async function findDependencies(graph: GraphAdapter, symbolId: string): Promise<
   const rows = await graph.runCypher<CypherNodeRow>(
     `MATCH (s:Symbol)-[e:CALLS*1..${MAX_TRAVERSAL_DEPTH}]->(n:Symbol) WHERE s.id = $val OR s.name = $val RETURN DISTINCT n`,
     { val: symbolId },
-  );
+  ) ?? [];
   return rows.map(rowToNode);
+}
+
+async function findExternalDependencies(graph: GraphAdapter, symbolId: string): Promise<GraphNode[]> {
+  const rows = await graph.runCypher<CypherExternalDependencyRow>(
+    `MATCH (s:Symbol)-[:DEPENDS_ON]->(ext:ExternalDependency)
+     WHERE s.id = $val OR s.name = $val
+     RETURN DISTINCT ext`,
+    { val: symbolId },
+  ) ?? [];
+  return rows
+    .filter((row): row is CypherExternalDependencyRow => Boolean(row?.ext?.properties))
+    .map((row) => ({
+    id: row.ext.properties["id"] ?? "",
+    labels: row.ext.labels,
+    properties: row.ext.properties,
+    }));
 }
 
 async function findProcessesBySymbol(graph: GraphAdapter, symbolId: string): Promise<GraphNode[]> {
   const rows = await graph.runCypher<CypherProcessRow>(
     `MATCH (p:Process)-[:HAS_STEP]->(s:Symbol) WHERE s.id = $val OR s.name = $val RETURN DISTINCT p`,
     { val: symbolId },
-  );
-  return rows.map((r) => ({
+  ) ?? [];
+  return rows
+    .filter((row): row is CypherProcessRow => Boolean(row?.p?.properties))
+    .map((r) => ({
     id: r.p.properties["id"] ?? "",
     labels: r.p.labels,
     properties: r.p.properties,
-  }));
+    }));
 }
 
 async function findClustersBySymbol(graph: GraphAdapter, symbolId: string): Promise<GraphNode[]> {
   const rows = await graph.runCypher<CypherClusterRow>(
     `MATCH (c:Cluster)-[:CONTAINS]->(s:Symbol) WHERE s.id = $val OR s.name = $val RETURN DISTINCT c`,
     { val: symbolId },
-  );
-  return rows.map((r) => ({
+  ) ?? [];
+  return rows
+    .filter((row): row is CypherClusterRow => Boolean(row?.c?.properties))
+    .map((r) => ({
     id: r.c.properties["id"] ?? "",
     labels: r.c.labels,
     properties: r.c.properties,
-  }));
+    }));
 }
 
 async function findProcessSteps(graph: GraphAdapter, processId: string): Promise<Array<{ order: number; symbolId: string; description: string }>> {
@@ -72,7 +96,7 @@ async function findProcessSteps(graph: GraphAdapter, processId: string): Promise
      RETURN s.id AS symbolId, r.step_order AS stepOrder, s.name AS description
      ORDER BY r.step_order ASC`,
     { processId },
-  );
+  ) ?? [];
   return rows.map((r) => ({
     order: r.stepOrder,
     symbolId: r.symbolId,
@@ -150,6 +174,7 @@ export async function executeContextRetrieval(
   // Req 12.5 — find all clusters containing the symbol
   const clusterNodes = await findClustersBySymbol(graphAdapter, target);
   const clusters = clusterNodes.map(graphNodeToCluster);
+  const externalDependencyNodes = await findExternalDependencies(graphAdapter, target);
 
   // Build relationships: callers → target and target → callees
   const relationships: Relationship[] = [
@@ -167,13 +192,27 @@ export async function executeContextRetrieval(
       relType: "calls" as const,
       metadata: {},
     })),
+    ...externalDependencyNodes.map((extNode) => ({
+      id: `${target}->dependsOn->${extNode.id}`,
+      source: targetNode.id,
+      target: extNode.id,
+      relType: "dependsOn" as const,
+      metadata: {
+        packageName: prop(extNode, "name", extNode.id),
+      },
+    })),
   ];
 
   // Combine all symbols: target + callers + callees
   const allSymbols = [targetSymbol, ...callers, ...callees].slice(0, maxResults);
 
   // Confidence: high when target resolved and context found
-  const hasContext = callers.length > 0 || callees.length > 0 || processes.length > 0 || clusters.length > 0;
+  const hasContext =
+    callers.length > 0 ||
+    callees.length > 0 ||
+    processes.length > 0 ||
+    clusters.length > 0 ||
+    externalDependencyNodes.length > 0;
   const confidence = hasContext ? 0.92 : 0.75;
 
   // Affected flows: list process names

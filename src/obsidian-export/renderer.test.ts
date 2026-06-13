@@ -184,7 +184,9 @@ describe("renderNavigationIndex", () => {
       symbols: [],
       clusters: [],
       processes: [],
+      externalDependencies: [],
       relationships: [],
+      dependsOnEdges: [],
       clusterMemberships: new Map(),
       processSteps: new Map(),
     };
@@ -199,7 +201,9 @@ describe("renderNavigationIndex", () => {
       symbols: [],
       clusters: [],
       processes: [],
+      externalDependencies: [],
       relationships: [],
+      dependsOnEdges: [],
       clusterMemberships: new Map(),
       processSteps: new Map(),
     };
@@ -257,7 +261,9 @@ describe("renderVault", () => {
       symbols,
       clusters: [{ id: "c1", name: "core", category: "utility", confidence: 0.9, symbolCount: 2 }],
       processes: [{ id: "p1", name: "Main Flow", entryPoint: "foo", stepCount: 2 }],
+      externalDependencies: [{ id: "ext:lodash", name: "lodash", aliases: "lodash,Lodash", ecosystem: "npm" }],
       relationships: [],
+      dependsOnEdges: [{ sourceId: "s1", sourceName: "foo", targetId: "ext:lodash", targetName: "lodash", relType: "DEPENDS_ON" }],
       clusterMemberships: new Map([["c1", ["s1", "s2"]]]),
       processSteps: new Map([["p1", [{ order: 0, symbolId: "s1", symbolName: "foo" }, { order: 1, symbolId: "s3", symbolName: "baz" }]]]),
     };
@@ -305,5 +311,13 @@ describe("renderVault", () => {
     const nav = vault.files.find((f) => f.relativePath === "_index.md");
     expect(nav).toBeDefined();
     expect(nav!.content).toContain("Code Graph Navigator");
+  });
+
+  it("renders external dependency files", () => {
+    const vault = renderVault(buildTestData());
+    const dependency = vault.files.find((file) => file.relativePath === "04-external-dependencies/lodash.md");
+    expect(dependency).toBeDefined();
+    expect(dependency?.content).toContain("External Dependency: lodash");
+    expect(dependency?.content).toContain("[[03-symbols/core/foo|foo]]");
   });
 });

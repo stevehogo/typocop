@@ -31,6 +31,13 @@ export interface ExportedProcess {
   readonly stepCount: number;
 }
 
+export interface ExportedExternalDependency {
+  readonly id: string;
+  readonly name: string;
+  readonly aliases: string;
+  readonly ecosystem: string;
+}
+
 export interface ExportedRelationship {
   readonly sourceId: string;
   readonly targetId: string;
@@ -49,7 +56,9 @@ export interface GraphData {
   readonly symbols: ExportedSymbol[];
   readonly clusters: ExportedCluster[];
   readonly processes: ExportedProcess[];
+  readonly externalDependencies: ExportedExternalDependency[];
   readonly relationships: ExportedRelationship[];
+  readonly dependsOnEdges: ExportedRelationship[];
   readonly clusterMemberships: ReadonlyMap<string, string[]>;
   readonly processSteps: ReadonlyMap<string, ExportedProcessStep[]>;
 }
@@ -58,7 +67,9 @@ const EMPTY_GRAPH_DATA: GraphData = {
   symbols: [],
   clusters: [],
   processes: [],
+  externalDependencies: [],
   relationships: [],
+  dependsOnEdges: [],
   clusterMemberships: new Map(),
   processSteps: new Map(),
 };
@@ -125,6 +136,18 @@ export async function fetchAllGraphData(graphAdapter: GraphAdapter, prefix: stri
       stepCount: toNumber(row.stepCount),
     }));
 
+    const externalDependencyRows = await graphAdapter.runCypher<Record<string, unknown>>(
+      `MATCH (ext:\`${prefix}ExternalDependency\`)
+       RETURN ext.id AS id, ext.name AS name, ext.aliases AS aliases, ext.ecosystem AS ecosystem`,
+    );
+
+    const externalDependencies: ExportedExternalDependency[] = externalDependencyRows.map((row) => ({
+      id: (row.id as string) ?? "",
+      name: (row.name as string) ?? "",
+      aliases: (row.aliases as string) ?? "",
+      ecosystem: (row.ecosystem as string) ?? "unknown",
+    }));
+
     // 2.4 Fetch relationships with name resolution
     const relationships: ExportedRelationship[] = [];
     for (const relType of RELATIONSHIP_TYPES) {
@@ -143,6 +166,19 @@ export async function fetchAllGraphData(graphAdapter: GraphAdapter, prefix: stri
         });
       }
     }
+
+    const dependsOnRows = await graphAdapter.runCypher<Record<string, unknown>>(
+      `MATCH (src:\`${prefix}Symbol\`)-[:\`${prefix}DEPENDS_ON\`]->(ext:\`${prefix}ExternalDependency\`)
+       RETURN src.id AS sourceId, src.name AS sourceName, ext.id AS targetId, ext.name AS targetName`,
+    );
+
+    const dependsOnEdges: ExportedRelationship[] = dependsOnRows.map((row) => ({
+      sourceId: (row.sourceId as string) ?? "",
+      targetId: (row.targetId as string) ?? "",
+      relType: "DEPENDS_ON",
+      sourceName: (row.sourceName as string) ?? "",
+      targetName: (row.targetName as string) ?? "",
+    }));
 
     // 2.5 Fetch cluster memberships (CONTAINS)
     const membershipRows = await graphAdapter.runCypher<Record<string, unknown>>(
@@ -189,7 +225,9 @@ export async function fetchAllGraphData(graphAdapter: GraphAdapter, prefix: stri
       symbols,
       clusters,
       processes,
+      externalDependencies,
       relationships,
+      dependsOnEdges,
       clusterMemberships,
       processSteps,
     };

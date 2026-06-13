@@ -33,7 +33,7 @@ export interface Symbol {
 
 export type RelationType =
   | "calls" | "imports" | "inherits" | "implements"
-  | "contains" | "references" | "defines";
+  | "contains" | "references" | "defines" | "dependsOn";
 
 export interface Relationship {
   readonly id: string;
@@ -41,6 +41,22 @@ export interface Relationship {
   readonly target: string;   // Symbol ID — must exist
   readonly relType: RelationType;
   readonly metadata: Record<string, string>; // "unresolved": "true" for unresolved imports
+}
+
+export type PackageEcosystem =
+  | "npm"
+  | "composer"
+  | "pip"
+  | "maven"
+  | "cargo"
+  | "go_modules"
+  | "unknown";
+
+export interface ExternalDependencyNode {
+  readonly id: string;
+  readonly name: string;
+  readonly aliases: readonly string[];
+  readonly ecosystem: PackageEcosystem;
 }
 
 // ─── Cluster ──────────────────────────────────────────────────────────────────

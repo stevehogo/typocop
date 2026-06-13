@@ -63,6 +63,20 @@ describe("LadybugGraphAdapter", () => {
 
       expect(mockQuery).toHaveBeenCalledOnce();
     });
+
+    it("recreates schema and retries when a table is missing", async () => {
+      const adapter = createAdapter("tpc_");
+      mockQuery
+        .mockRejectedValueOnce(new Error("Binder exception: Table tpc_ExternalDependency does not exist."))
+        .mockResolvedValue(mockQueryResult([]));
+
+      await adapter.createNode("ExternalDependency", { id: "ext:pkg", name: "pkg" });
+
+      expect(mockQuery.mock.calls.some((call) =>
+        String(call[0]).includes("CREATE NODE TABLE IF NOT EXISTS tpc_ExternalDependency"),
+      )).toBe(true);
+      expect(mockQuery.mock.calls.at(-1)?.[0]).toContain("MERGE (n:tpc_ExternalDependency");
+    });
   });
 
   // ── createRelationship (Req 2.2, 2.4) ──────────────────────────────────
@@ -90,6 +104,26 @@ describe("LadybugGraphAdapter", () => {
       await adapter.createRelationship("s1", "s2", "CALLS");
 
       expect(mockQuery).toHaveBeenCalledOnce();
+    });
+
+    it("uses Symbol -> ExternalDependency labels for DEPENDS_ON", async () => {
+      const adapter = createAdapter("tpc_");
+      await adapter.createRelationship("sym-1", "ext:pkg", "DEPENDS_ON");
+
+      const query = mockQuery.mock.calls[0][0] as string;
+      expect(query).toContain("MATCH (a:tpc_Symbol");
+      expect(query).toContain("(b:tpc_ExternalDependency");
+    });
+  });
+
+  describe("initializeSchema", () => {
+    it("creates ExternalDependency and DEPENDS_ON tables", async () => {
+      const adapter = createAdapter("tpc_");
+      await adapter.initializeSchema();
+
+      const executedQueries = mockQuery.mock.calls.map((call) => call[0] as string);
+      expect(executedQueries.some((query) => query.includes("tpc_ExternalDependency"))).toBe(true);
+      expect(executedQueries.some((query) => query.includes("tpc_DEPENDS_ON"))).toBe(true);
     });
   });
 

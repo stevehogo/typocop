@@ -37,6 +37,11 @@ const mockClusterNode: GraphNode = {
   properties: { id: "cluster-id", name: "AuthenticationCluster", confidence: "0.92", category: "authentication" },
 };
 
+const mockExternalDependencyNode: GraphNode = {
+  id: "ext:lodash", labels: ["ExternalDependency"],
+  properties: { id: "ext:lodash", name: "lodash", aliases: "lodash,Lodash", ecosystem: "npm" },
+};
+
 /**
  * Build a mock GraphAdapter with a sequenced runCypher that returns
  * different results for each call in order.
@@ -166,15 +171,20 @@ describe("executeContextRetrieval", () => {
       [processRow(mockProcessNode)],   // 4. findProcessesBySymbol
       [],                              // 5. findProcessSteps for process-id
       [clusterRow(mockClusterNode)],   // 6. findClustersBySymbol
+      [{ ext: { labels: mockExternalDependencyNode.labels, properties: mockExternalDependencyNode.properties as Record<string, string> } }],
     ]);
 
     const result = await executeContextRetrieval("target-symbol-id", 10, adapter);
 
     expect(result.symbols).toHaveLength(3);
-    expect(result.relationships).toHaveLength(2);
+    expect(result.relationships).toHaveLength(3);
     expect(result.clusters).toHaveLength(1);
     expect(result.processes).toHaveLength(1);
     expect(result.confidence).toBe(0.92);
+    expect(result.relationships.some((relationship) =>
+      relationship.relType === "dependsOn" &&
+      relationship.metadata["packageName"] === "lodash",
+    )).toBe(true);
   });
 
   it("returns lower confidence when no context is found", async () => {

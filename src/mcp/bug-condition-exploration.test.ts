@@ -32,6 +32,7 @@ vi.mock("../query/context-retrieval.js", () => ({
 vi.mock("../query/impact-analysis.js", () => ({
   executeImpactAnalysis: vi.fn().mockResolvedValue({
     resolution: STUB_RESOLUTION,
+    targetKind: "symbol",
     symbols: [],
     relationships: [],
     clusters: [],

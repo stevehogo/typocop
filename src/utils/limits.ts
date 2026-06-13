@@ -37,6 +37,40 @@ export const QUERY_TIMEOUT_MS = 2_000;
 /** Maximum graph traversal depth to prevent infinite loops (Req 23.4, 16.7) */
 export const MAX_TRAVERSAL_DEPTH = 20;
 
+/** POSIX and common C++ standard library headers treated as internal/system headers. */
+export const C_SYSTEM_HEADERS: ReadonlySet<string> = new Set([
+  "algorithm", "array", "atomic", "bitset", "cassert", "cctype", "cerrno",
+  "cfenv", "cfloat", "charconv", "chrono", "cinttypes", "climits", "clocale",
+  "cmath", "codecvt", "compare", "complex", "concepts", "condition_variable",
+  "coroutine", "csetjmp", "csignal", "cstdarg", "cstddef", "cstdint",
+  "cstdio", "cstdlib", "cstring", "ctgmath", "ctime", "cuchar", "cwchar",
+  "cwctype", "deque", "exception", "execution", "expected", "filesystem",
+  "format", "forward_list", "fstream", "functional", "future", "initializer_list",
+  "iomanip", "ios", "iosfwd", "iostream", "istream", "iterator", "latch",
+  "limits", "list", "locale", "map", "memory", "memory_resource", "mutex",
+  "new", "numbers", "numeric", "optional", "ostream", "queue", "random",
+  "ranges", "ratio", "regex", "scoped_allocator", "semaphore", "set",
+  "shared_mutex", "source_location", "span", "sstream", "stack", "stdexcept",
+  "stdfloat", "stop_token", "streambuf", "string", "string_view", "strstream",
+  "syncstream", "system_error", "thread", "tuple", "type_traits", "typeindex",
+  "typeinfo", "unordered_map", "unordered_set", "utility", "valarray", "variant",
+  "vector", "version", "cassert", "complex.h", "ctype.h", "errno.h", "fenv.h",
+  "float.h", "inttypes.h", "iso646.h", "limits.h", "locale.h", "math.h",
+  "setjmp.h", "signal.h", "stdalign.h", "stdarg.h", "stdatomic.h", "stdbool.h",
+  "stddef.h", "stdint.h", "stdio.h", "stdlib.h", "stdnoreturn.h", "string.h",
+  "tgmath.h", "threads.h", "time.h", "uchar.h", "wchar.h", "wctype.h",
+]);
+
+/** Common VCS hosts used to identify Go module import roots. */
+export const GO_VCS_HOSTS: ReadonlySet<string> = new Set([
+  "bitbucket.org",
+  "codeberg.org",
+  "git.sr.ht",
+  "github.com",
+  "gitlab.com",
+  "golang.org",
+]);
+
 /**
  * Validates if a file size is within the allowed limit.
  * 

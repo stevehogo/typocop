@@ -2,3 +2,9 @@
 args = ["-e",".env-typocop"]
 command = "typocop-mcp"
 enabled = true
+
+[mcp_servers.typocop-mcp.tools.get_symbol_context]
+approval_mode = "approve"
+
+[mcp_servers.typocop-mcp.tools.impact_analysis]
+approval_mode = "approve"

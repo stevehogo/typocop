@@ -46,6 +46,10 @@ describe("fetchAllGraphData", () => {
       { id: "proc-1", name: "Main Flow", entryPoint: "foo", stepCount: 2 },
     ]);
 
+    queryResults.set("RETURN ext.id AS id", [
+      { id: "ext:lodash", name: "lodash", aliases: "lodash,Lodash", ecosystem: "npm" },
+    ]);
+
     // Relationships
     queryResults.set("tpc_CALLS", [
       { sourceId: "sym-1", sourceName: "foo", targetId: "sym-2", targetName: "bar" },
@@ -65,6 +69,9 @@ describe("fetchAllGraphData", () => {
       { processId: "proc-1", symbolId: "sym-1", symbolName: "foo", stepOrder: 0 },
       { processId: "proc-1", symbolId: "sym-2", symbolName: "bar", stepOrder: 1 },
     ]);
+    queryResults.set("RETURN src.id AS sourceId", [
+      { sourceId: "sym-1", sourceName: "foo", targetId: "ext:lodash", targetName: "lodash" },
+    ]);
 
     const adapter = createMockGraphAdapter(queryResults);
     const result = await fetchAllGraphData(adapter, "tpc_");
@@ -78,6 +85,8 @@ describe("fetchAllGraphData", () => {
 
     expect(result.processes).toHaveLength(1);
     expect(result.processes[0].name).toBe("Main Flow");
+    expect(result.externalDependencies).toHaveLength(1);
+    expect(result.externalDependencies[0].name).toBe("lodash");
 
     expect(result.relationships).toHaveLength(1);
     expect(result.relationships[0].relType).toBe("CALLS");
@@ -89,6 +98,9 @@ describe("fetchAllGraphData", () => {
     expect(steps).toHaveLength(2);
     expect(steps![0].symbolName).toBe("foo");
     expect(steps![1].order).toBe(1);
+    expect(result.dependsOnEdges).toEqual([
+      expect.objectContaining({ relType: "DEPENDS_ON", targetName: "lodash" }),
+    ]);
   });
 
   it("returns empty GraphData when no symbols exist", async () => {
@@ -104,5 +116,7 @@ describe("fetchAllGraphData", () => {
     expect(result.relationships).toHaveLength(0);
     expect(result.clusterMemberships.size).toBe(0);
     expect(result.processSteps.size).toBe(0);
+    expect(result.externalDependencies).toEqual([]);
+    expect(result.dependsOnEdges).toEqual([]);
   });
 });

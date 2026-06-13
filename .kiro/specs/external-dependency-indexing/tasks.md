@@ -2,111 +2,154 @@
 
 ## Implementation Plan
 
-### Phase A: Core Detection & Node Creation
+### Phase A: Types & Constants
 
-- [ ] 1. Create `src/indexer/resolution/external-packages.ts`
+- [x] 1. Update shared types and constants
   _Skills: `typescript-expert`, `clean-code`
-  - [ ] 1.1 Implement `isExternalPackage(importPath: string, language: Language): boolean` with language-aware rules (PHP backslash, Rust self/super/crate, C system headers, Go, etc.)
-  - [ ] 1.2 Implement `normalizePackageName(importPath: string, language: Language): string` with per-language strategies (PHP `\`, Java/C# `.`, Go 3-segment VCS, Rust `::`, C/C++ header root)
-  - [ ] 1.3 Implement `buildAliases(packageName: string): string[]` stripping scope, namespace tail, and generating camelCase/PascalCase/stripped variants
-  - [ ] 1.4 Implement `detectEcosystem(language: Language): PackageEcosystem`
-  - [ ] 1.5 Implement `getOrCreateExtNode(packageName, language, extNodes): ExternalDependencyNode`
-  - [ ] 1.6 Define `C_SYSTEM_HEADERS: ReadonlySet<string>` and `GO_VCS_HOSTS: ReadonlySet<string>` constants in `src/utils/limits.ts`
+  - [x] 1.1 Add `PackageEcosystem` type and `ExternalDependencyNode` interface to `src/types/index.ts`
+  - [x] 1.2 Extend `RelationType` with `"dependsOn"` in `src/types/index.ts`
+  - [x] 1.3 Add `language: Language` field to `RawRelationshipHint` in `src/parser/extract-symbols.ts`
+  - [x] 1.4 Update all hint construction sites in `extractSymbolsWithQueries` to populate `language` from the function parameter
+  - [x] 1.5 Add `C_SYSTEM_HEADERS: ReadonlySet<string>` constant to `src/utils/limits.ts` (POSIX/C++ standard headers)
+  - [x] 1.6 Add `GO_VCS_HOSTS: ReadonlySet<string>` constant to `src/utils/limits.ts`
 
-- [ ] 2. Update types in `src/types/index.ts`
-  _Skills: `typescript-expert`
-  - [ ] 2.1 Add `PackageEcosystem` union type (including `go_modules`)
-  - [ ] 2.2 Add `ExternalDependencyNode` interface
-  - [ ] 2.3 Extend `RelationType` with `"dependsOn"`
-  - [ ] 2.4 Add `language: Language` field to `RawRelationshipHint` in `src/parser/extract-symbols.ts`
+### Phase B: Core Detection Logic
 
-- [ ] 3. Write property tests for `external-packages.ts`
+- [x] 2. Create `src/indexer/resolution/external-packages.ts`
+  _Skills: `typescript-expert`, `clean-code`
+  - [x] 2.1 Implement `isExternalPackage(importPath, language)` — relative paths, `node:` built-ins, C system headers, Rust `crate::/super::/self::` → false; all other bare specifiers → true
+  - [x] 2.2 Implement `normalizePackageName(importPath, language)` — PHP `\`, Java/C# `.` (2 segments), Go 3-segment VCS, Rust `::`, C/C++ header root, TS/JS scoped `@scope/pkg`
+  - [x] 2.3 Implement `buildAliases(packageName)` — canonical + camelCase + PascalCase + stripped variants
+  - [x] 2.4 Implement `detectEcosystem(language)` — language-to-ecosystem mapping
+  - [x] 2.5 Implement `getOrCreateExtNode(packageName, language, extNodes)` — deduplicating factory
+
+- [x] 3. Write property tests (`src/indexer/resolution/external-packages.pbt.test.ts`)
   _Skills: `testing-patterns`, `tdd-workflow`
-  - [ ] 3.1 Property EDI-1: detection totality for TS/JS bare specifiers
-  - [ ] 3.2 Property EDI-2: relative paths never external
-  - [ ] 3.3 Property EDI-3: `node:` built-ins never external
-  - [ ] 3.4 Property EDI-4: PHP backslash paths are external
-  - [ ] 3.5 Property EDI-5: C system headers never external
-  - [ ] 3.6 Property EDI-6: Rust `crate::`/`super::`/`self::` never external
-  - [ ] 3.7 Property EDI-7: normalized name has no excess separators (all languages)
-  - [ ] 3.8 Property EDI-8: aliases always include canonical name
-  - [ ] 3.9 Property EDI-9: ID is stable and deterministic
-  - [ ] 3.10 Property EDI-11: ecosystem is always a valid value
+  - [x] 3.1 EDI-P1: bare specifiers detected as external for TS/JS
+  - [x] 3.2 EDI-P2: relative paths never external (all languages)
+  - [x] 3.3 EDI-P3: `node:` built-ins never external
+  - [x] 3.4 EDI-P4: PHP backslash paths are external
+  - [x] 3.5 EDI-P5: C system headers never external
+  - [x] 3.6 EDI-P6: Rust `crate::/super::/self::` never external
+  - [x] 3.7 EDI-P7: normalized name has no trailing separators
+  - [x] 3.8 EDI-P8: aliases always include canonical name
+  - [x] 3.9 EDI-P9: ID is stable and deterministic
+  - [x] 3.10 EDI-P11: ecosystem is always a valid value
 
-### Phase B: Parser Updates
+### Phase C: Parser Updates (Ruby)
 
-- [ ] 4. Add Ruby import hint emission to `src/parser/queries.ts`
+- [x] 4. Add Ruby import hint emission
   _Skills: `typescript-expert`, `clean-code`
-  - [ ] 4.1 Add `require` call capture to `RUBY_QUERIES` to emit import hints for bare gem names
-  - [ ] 4.2 Add `require_relative` capture and mark as relative (will be filtered by `isExternalPackage`)
-  - [ ] 4.3 Propagate `language` field through `extractSymbolsWithQueries` into each `RawRelationshipHint`
+  - [x] 4.1 Add `require` call capture to `RUBY_QUERIES` in `src/parser/queries.ts`
+  - [x] 4.2 Add `require_relative` capture and mark as relative
+  - [x] 4.3 Verify `language` field propagation through `extractSymbolsWithQueries`
 
-- [ ] 5. Write tests for Ruby import hint emission
+- [x] 5. Write tests for Ruby import hints
   _Skills: `testing-patterns`
-  - [ ] 5.1 `require 'rails'` emits an import hint with `targetName: "rails"`, `language: "ruby"`
-  - [ ] 5.2 `require_relative './helper'` emits a hint that `isExternalPackage` classifies as internal
+  - [x] 5.1 `require 'gem'` emits hint with `targetName: "gem"`, `language: "ruby"`
+  - [x] 5.2 `require_relative './helper'` emits hint classified as internal by `isExternalPackage`
 
-### Phase C: Resolution Phase Integration
+### Phase D: Resolution Phase Integration
 
-- [ ] 6. Modify `resolveHints` in `src/indexer/resolution/index.ts`
+- [x] 6. Modify `resolveHints` and `resolveReferences` in `src/indexer/resolution/index.ts`
   _Skills: `typescript-expert`, `clean-code`
-  - [ ] 6.1 In the `"import"` case, call `isExternalPackage(hint.targetName, hint.language)` before existing resolution logic
-  - [ ] 6.2 When external: call `getOrCreateExtNode` and emit a `dependsOn` relationship
-  - [ ] 6.3 When internal: preserve existing resolution logic unchanged
-  - [ ] 6.4 Return `{ relationships, extNodes }` from `resolveHints` (update return type)
+  - [x] 6.1 Define `ResolveHintsResult` interface (`{ relationships, extNodes }`)
+  - [x] 6.2 In `"import"` case: call `isExternalPackage(hint.targetName, hint.language)` before existing resolution
+  - [x] 6.3 When external: call `getOrCreateExtNode`, emit `dependsOn` relationship, skip internal resolution
+  - [x] 6.4 When internal: preserve existing resolution logic unchanged
+  - [x] 6.5 Update `resolveHints` return type to `ResolveHintsResult`
+  - [x] 6.6 Update `resolveReferences` to return `ResolveHintsResult` and propagate `extNodes`
 
-- [ ] 7. Write integration tests for modified `resolveHints`
+- [x] 7. Write tests for modified resolution
   _Skills: `testing-patterns`
-  - [ ] 7.1 TS: `import neo4j from "neo4j-driver"` → `ext:neo4j-driver`, ecosystem `npm`
-  - [ ] 7.2 PHP: `use Illuminate\Http\Request` → `ext:Illuminate`, ecosystem `composer`
-  - [ ] 7.3 Java: `import com.neo4j.driver.Driver` → `ext:com.neo4j`, ecosystem `maven`
-  - [ ] 7.4 Go: `import "github.com/neo4j/neo4j-go-driver/v5"` → `ext:github.com/neo4j/neo4j-go-driver`
-  - [ ] 7.5 Rust: `use serde::Serialize` → `ext:serde`, ecosystem `cargo`
-  - [ ] 7.6 Property EDI-12: no DEPENDS_ON for relative import hints
-  - [ ] 7.7 Property EDI-13: DEPENDS_ON target always starts with `"ext:"`
-  - [ ] 7.8 Internal imports still produce IMPORTS edges (regression)
+  - [x] 7.1 TS bare specifier → `ext:<pkg>` node, ecosystem `npm`
+  - [x] 7.2 PHP backslash import → `ext:<vendor>` node, ecosystem `composer`
+  - [x] 7.3 Java dot-separated → `ext:<top.two>` node, ecosystem `maven`
+  - [x] 7.4 Go VCS module → `ext:<3-segment>` node, ecosystem `go_modules`
+  - [x] 7.5 Rust crate → `ext:<crate>` node, ecosystem `cargo`
+  - [x] 7.6 EDI-P12: no `dependsOn` for relative import hints
+  - [x] 7.7 EDI-P13: `dependsOn` target always starts with `"ext:"`
+  - [x] 7.8 Internal imports still produce `imports` edges (regression)
 
-### Phase D: Graph Store
+### Phase E: LadybugDB Schema & Storage
 
-- [ ] 8. Create `src/graph/external-dependency.ts`
+- [x] 8. Update LadybugDB schema in `src/db/ladybug-graph-adapter.ts`
   _Skills: `typescript-expert`, `nodejs-best-practices`
-  - [ ] 8.1 Implement `storeExternalDependencies(session, nodes): Promise<void>` using MERGE on `ExternalDependency` label
-  - [ ] 8.2 Implement `findExternalDependencyByAlias(session, query): Promise<GraphNode | null>` with case-insensitive regex on `name` and `aliases`
+  - [x] 8.1 Add `ExternalDependency` node table to `initializeSchema()` (id, name, aliases, ecosystem)
+  - [x] 8.2 Add `DEPENDS_ON` rel table (Symbol → ExternalDependency) to `initializeSchema()`
+  - [x] 8.3 Add `DEPENDS_ON: ["Symbol", "ExternalDependency"]` to `REL_LABEL_MAP`
 
-- [ ] 9. Write unit tests for `external-dependency.ts` (mocked session)
+- [x] 9. Write unit tests for schema changes
   _Skills: `testing-patterns`
-  - [ ] 9.1 `storeExternalDependencies` calls MERGE with correct label and properties
-  - [ ] 9.2 `findExternalDependencyByAlias` returns null when no match
-  - [ ] 9.3 `findExternalDependencyByAlias` matches by alias case-insensitively (Property EDI-10)
+  - [x] 9.1 `initializeSchema` creates `ExternalDependency` table and `DEPENDS_ON` rel table
+  - [x] 9.2 `createRelationship` with type `DEPENDS_ON` uses correct FROM/TO labels
 
-### Phase E: Pipeline Integration
+### Phase F: Pipeline Integration
 
-- [ ] 10. Update `src/indexer/pipeline.ts`
+- [x] 10. Update `src/indexer/pipeline.ts`
   _Skills: `typescript-expert`, `clean-code`
-  - [ ] 10.1 Update `resolveReferences` call to capture returned `extNodes`
-  - [ ] 10.2 Pass `extNodes` to `storeInDatabases`
-  - [ ] 10.3 Call `storeExternalDependencies` and store `DEPENDS_ON` edges
-  - [ ] 10.4 Include ext node count in pipeline stats
+  - [x] 10.1 Update `resolveReferences` call to destructure `{ relationships, extNodes }`
+  - [x] 10.2 Store `ExternalDependency` nodes via `graphAdapter.createNode("ExternalDependency", ...)` with aliases as comma-separated string
+  - [x] 10.3 Store `DEPENDS_ON` edges via `graphAdapter.createRelationship(sourceId, extId, "DEPENDS_ON")`
+  - [x] 10.4 Add `externalDependencyCount` to `PipelineResult` and populate it
 
-- [ ] 11. Write pipeline integration tests
+- [x] 11. Update `src/cli/executor.ts` for refresh and stats
+  _Skills: `typescript-expert`, `clean-code`
+  - [x] 11.1 Add `await graphAdapter.deleteNodesByLabel("ExternalDependency")` to refresh clearing
+  - [x] 11.2 Add `await graphAdapter.deleteRelationshipsByType("DEPENDS_ON")` to refresh clearing
+  - [x] 11.3 Include `ExternalDependency` count in clearing stats
+  - [x] 11.4 Display `externalDependencyCount` in indexing stats output
+
+- [x] 12. Write pipeline integration tests
   _Skills: `testing-patterns`, `nodejs-best-practices`
-  - [ ] 11.1 TypeScript fixture with `neo4j-driver` import produces `ExternalDependency` node
-  - [ ] 11.2 PHP fixture with `Illuminate\Http\Request` produces `ext:Illuminate` node
-  - [ ] 11.3 Existing pipeline tests still pass (regression)
+  - [x] 12.1 TS fixture with bare specifier produces `ExternalDependency` node in graph
+  - [x] 12.2 PHP fixture with backslash import produces correct `ext:` node
+  - [x] 12.3 Existing pipeline tests still pass (regression)
 
-### Phase F: Query Engine
+### Phase G: Query Engine
 
-- [ ] 12. Extend impact analysis in `src/query/impact-analysis.ts`
+- [x] 13. Extend impact analysis in `src/query/impact-analysis.ts`
   _Skills: `typescript-expert`, `clean-code`
-  - [ ] 12.1 Before `findDependents`, call `findExternalDependencyByAlias`
-  - [ ] 12.2 If matched, run `DEPENDS_ON` traversal query
-  - [ ] 12.3 If not matched, fall through to existing logic (no regression)
-  - [ ] 12.4 Merge results into existing `QueryResult` shape — no API surface change
+  - [x] 13.1 Implement `findExternalDependencyByAlias(graph, query)` — case-insensitive match on `name` and comma-separated `aliases`
+  - [x] 13.2 In `executeImpactAnalysis`: before `findDependents`, call `findExternalDependencyByAlias`
+  - [x] 13.3 If matched: run `DEPENDS_ON` traversal to find all dependent symbols
+  - [x] 13.4 If not matched: fall through to existing `findDependents` (no regression)
+  - [x] 13.5 Merge results into existing `ImpactAnalysisResult` shape
 
-- [ ] 13. Write tests for extended impact analysis
+- [x] 14. Extend context retrieval in `src/query/context-retrieval.ts`
+  _Skills: `typescript-expert`, `clean-code`
+  - [x] 14.1 Add `DEPENDS_ON` traversal to find external deps a symbol depends on
+  - [x] 14.2 Include external dependency names in the result's relationships array
+
+- [x] 15. Update MCP tool summaries in `src/mcp/tools.ts`
+  _Skills: `typescript-expert`, `clean-code`
+  - [x] 15.1 In `executeImpactAnalysisTool`: detect when result came from external dep match and adjust summary text (e.g. "External package 'X': N dependent symbols")
+  - [x] 15.2 In `executeFindDependents`: same external dep summary adjustment
+
+- [x] 16. Write tests for query engine changes
   _Skills: `testing-patterns`
-  - [ ] 13.1 `impact_analysis("neo4j-driver")` returns all dependent symbols (EDI-14)
-  - [ ] 13.2 `impact_analysis("Neo4j")` resolves via alias and returns same results
-  - [ ] 13.3 `impact_analysis("Illuminate")` resolves PHP composer package
-  - [ ] 13.4 `impact_analysis("createDriver")` still uses internal traversal (EDI-15)
-  - [ ] 13.5 Risk level thresholds apply correctly to external dep results
+  - [x] 16.1 `findExternalDependencyByAlias` returns null when no match
+  - [x] 16.2 `findExternalDependencyByAlias` matches by alias case-insensitively (EDI-P10)
+  - [x] 16.3 `impact_analysis("<package>")` returns dependent symbols (EDI-P14)
+  - [x] 16.4 Fuzzy alias match resolves approximate name to correct package
+  - [x] 16.5 `impact_analysis("<internal-symbol>")` still uses internal traversal (EDI-P15)
+  - [x] 16.6 Risk level thresholds apply correctly to external dep results
+  - [x] 16.7 Context retrieval includes external deps in relationships
+
+### Phase H: Obsidian Export
+
+- [x] 17. Update obsidian export to include external dependencies
+  _Skills: `typescript-expert`, `clean-code`
+  - [x] 17.1 Add `ExportedExternalDependency` interface to `src/obsidian-export/graph-reader.ts`
+  - [x] 17.2 Fetch `ExternalDependency` nodes in `fetchAllGraphData`
+  - [x] 17.3 Fetch `DEPENDS_ON` edges and add to `GraphData.relationships`
+  - [x] 17.4 Add `externalDependencies` and `dependsOnEdges` to `GraphData` interface
+  - [x] 17.5 Render external dependency markdown files in `src/obsidian-export/renderer.ts` (name, ecosystem, aliases, dependent symbols)
+
+- [x] 18. Write tests for obsidian export changes
+  _Skills: `testing-patterns`
+  - [x] 18.1 `fetchAllGraphData` includes external dependency nodes
+  - [x] 18.2 `renderVault` produces files for external dependencies
+  - [x] 18.3 Existing obsidian export tests still pass (regression)
+
+## Codex session: codex resume 019dc9e6-65f8-7c91-8a11-f0eafbfc7c8e

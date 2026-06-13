@@ -7,7 +7,15 @@
  *
  * Requirements: 1.1, 1.6, 1.7, 3.1–3.8, 8.1–8.5
  */
-import type { Language, Symbol, Relationship, Cluster, Process, Embedding } from "../types/index.js";
+import type {
+  Cluster,
+  Embedding,
+  ExternalDependencyNode,
+  Language,
+  Process,
+  Relationship,
+  Symbol,
+} from "../types/index.js";
 import type { DatabaseAdapter, GraphAdapter, VectorAdapter, EmbeddingAdapter } from "../db/types.js";
 import { walkFileTree, type FileNode } from "./structure/index.js";
 import { extractAllSymbols } from "./parsing/index.js";
@@ -43,6 +51,7 @@ export interface PipelineResult {
   readonly relationships: Relationship[];
   readonly clusters: Cluster[];
   readonly processes: Process[];
+  readonly externalDependencyCount: number;
   readonly skippedFiles: number;
   readonly embeddingCount: number;
 }
@@ -65,7 +74,15 @@ export async function runIndexingPipeline(config: PipelineConfig): Promise<Pipel
   if (verbose) console.error(`[pipeline] Phase 1 complete: ${fileNodes.length} files found`);
 
   if (fileNodes.length === 0) {
-    return { symbols: [], relationships: [], clusters: [], processes: [], skippedFiles: 0, embeddingCount: 0 };
+    return {
+      symbols: [],
+      relationships: [],
+      clusters: [],
+      processes: [],
+      externalDependencyCount: 0,
+      skippedFiles: 0,
+      embeddingCount: 0,
+    };
   }
 
   if (verbose) console.error("[pipeline] Starting Phase 2: Parsing");
@@ -75,13 +92,21 @@ export async function runIndexingPipeline(config: PipelineConfig): Promise<Pipel
   if (verbose) console.error(`[pipeline] Phase 2 complete: ${symbols.length} symbols extracted, ${hints.length} relationship hints`);
 
   if (symbols.length === 0) {
-    return { symbols: [], relationships: [], clusters: [], processes: [], skippedFiles, embeddingCount: 0 };
+    return {
+      symbols: [],
+      relationships: [],
+      clusters: [],
+      processes: [],
+      externalDependencyCount: 0,
+      skippedFiles,
+      embeddingCount: 0,
+    };
   }
 
   if (verbose) console.error("[pipeline] Starting Phase 3: Resolution");
 
   // Phase 3: Resolve references (Req 3.3)
-  const relationships = await resolveReferences(symbols, hints, sourcePath);
+  const { relationships, extNodes } = await resolveReferences(symbols, hints, sourcePath);
   if (verbose) console.error(`[pipeline] Phase 3 complete: ${relationships.length} relationships resolved`);
 
   if (verbose) console.error("[pipeline] Starting Phase 4: Clustering");
@@ -120,10 +145,18 @@ export async function runIndexingPipeline(config: PipelineConfig): Promise<Pipel
 
   // Store graph data through GraphAdapter (Req 8.1)
   if (verbose) console.error("[pipeline] Storing results in graph database");
-  await storeInDatabases(symbols, relationships, clusters, processes, graphAdapter);
+  await storeInDatabases(symbols, relationships, clusters, processes, extNodes, graphAdapter);
   if (verbose) console.error("[pipeline] Storage complete");
 
-  return { symbols, relationships, clusters, processes, skippedFiles, embeddingCount };
+  return {
+    symbols,
+    relationships,
+    clusters,
+    processes,
+    externalDependencyCount: extNodes.size,
+    skippedFiles,
+    embeddingCount,
+  };
 }
 
 /**
@@ -139,6 +172,7 @@ async function storeInDatabases(
   relationships: Relationship[],
   clusters: Cluster[],
   processes: Process[],
+  extNodes: Map<string, ExternalDependencyNode>,
   graphAdapter: GraphAdapter,
 ): Promise<void> {
   // NOTE: Do NOT prepend prefix here — the GraphAdapter handles prefixing internally.
@@ -179,12 +213,21 @@ async function storeInDatabases(
     });
   }
 
+  for (const extNode of extNodes.values()) {
+    await graphAdapter.createNode("ExternalDependency", {
+      id: extNode.id,
+      name: extNode.name,
+      aliases: extNode.aliases.join(","),
+      ecosystem: extNode.ecosystem,
+    });
+  }
+
   // Store relationship edges
   for (const r of relationships) {
     await graphAdapter.createRelationship(
       r.source,
       r.target,
-      r.relType.toUpperCase(),
+      r.relType === "dependsOn" ? "DEPENDS_ON" : r.relType.toUpperCase(),
       r.metadata,
     );
   }

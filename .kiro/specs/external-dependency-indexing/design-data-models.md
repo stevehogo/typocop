@@ -8,9 +8,8 @@ Added to `src/types/index.ts`:
 
 ```typescript
 export interface ExternalDependencyNode {
-  /** Stable ID: "ext:{normalizedPackageName}" e.g. "ext:neo4j-driver" */
-  readonly id: string;
-  readonly name: string;
+  readonly id: string;        // "ext:{normalizedPackageName}"
+  readonly name: string;      // canonical package name
   readonly aliases: readonly string[];
   readonly ecosystem: PackageEcosystem;
 }
@@ -20,191 +19,108 @@ export type PackageEcosystem =
   | "cargo" | "go_modules" | "unknown";
 ```
 
-## New RelationType: "dependsOn"
+## Extended RelationType
 
 ```typescript
 export type RelationType =
   | "calls" | "imports" | "inherits" | "implements"
   | "contains" | "references" | "defines"
-  | "dependsOn";   // ← new: internal symbol → ExternalDependencyNode
+  | "dependsOn";   // internal symbol → ExternalDependencyNode
 ```
 
-## Neo4j Graph Schema
+## Extended RawRelationshipHint
 
-```
-(:Symbol)-[:DEPENDS_ON]->(:ExternalDependency {
-  id:        "ext:neo4j-driver",
-  name:      "neo4j-driver",
-  aliases:   ["neo4j", "Neo4j", "Neo4jDriver", "neo4j-driver"],
-  ecosystem: "npm"
-})
-```
+In `src/parser/extract-symbols.ts` — add `language` field:
 
-## Algorithm: isExternalPackage
-
-Accepts the raw `targetName` from a `RawRelationshipHint` and the source file language.
-
-```
-FUNCTION isExternalPackage(importPath: string, language: Language): boolean
-  // Relative paths — all languages
-  IF importPath STARTS WITH "./" OR "../" THEN RETURN false
-
-  // Node.js built-ins
-  IF importPath STARTS WITH "node:" THEN RETURN false
-
-  // C/C++ system headers: angle-bracket form or known POSIX names
-  IF language IS "c" OR "cpp" THEN
-    IF importPath STARTS WITH "<" THEN RETURN false
-    IF importPath IN C_SYSTEM_HEADERS THEN RETURN false
-  END IF
-
-  // PHP: backslash-separated namespace — external if root vendor is not
-  // a tsconfig alias (alias resolution already strips those)
-  IF language IS "php" THEN RETURN true
-
-  // Java/C#: dot-separated — always external (internal refs use call hints)
-  IF language IS "java" OR "csharp" THEN RETURN true
-
-  // Rust: crate::path — external if not "crate::", "super::", "self::"
-  IF language IS "rust" THEN
-    IF importPath STARTS WITH "crate::" OR "super::" OR "self::" THEN RETURN false
-    RETURN true
-  END IF
-
-  // Go: module path — external if not resolved by goModule config
-  // (resolveAlias already handles internal module paths)
-  IF language IS "go" THEN RETURN true
-
-  // Swift: bare framework name — always external
-  IF language IS "swift" THEN RETURN true
-
-  // Ruby: handled via require call hints (see EDI-9)
-  // TS/JS: scoped (@neo4j/...) or bare specifier
-  RETURN true
-END FUNCTION
+```typescript
+export interface RawRelationshipHint {
+  readonly kind: "import" | "call" | "inherits" | "implements";
+  readonly sourceFile: string;
+  readonly targetName: string;
+  readonly childSymbolId?: string;
+  readonly startLine: number;
+  readonly language: Language;  // ← NEW
+}
 ```
 
-`C_SYSTEM_HEADERS` is a `ReadonlySet<string>` of POSIX/C++ standard headers
-(`stdio.h`, `stdlib.h`, `string`, `vector`, `iostream`, etc.) defined as a
-constant in `src/utils/limits.ts`.
+All hint construction sites in `extractSymbolsWithQueries` must populate `language` from the function parameter.
 
-## Algorithm: normalizePackageName
+## LadybugDB Schema Additions
 
-```
-FUNCTION normalizePackageName(importPath: string, language: Language): string
-  SWITCH language
-    CASE "php":
-      // "Illuminate\Http\Request" → "Illuminate"
-      RETURN importPath.split("\\")[0]
-
-    CASE "java", "csharp":
-      // "com.neo4j.driver.Driver" → "com.neo4j"
-      parts ← importPath.split(".")
-      RETURN parts.slice(0, 2).join(".")   // top 2 segments
-
-    CASE "rust":
-      // "serde::Serialize" → "serde"
-      RETURN importPath.split("::")[0]
-
-    CASE "go":
-      // "github.com/neo4j/neo4j-go-driver/v5" → "github.com/neo4j/neo4j-go-driver"
-      parts ← importPath.split("/")
-      IF parts[0] IN GO_VCS_HOSTS THEN   // github.com, gitlab.com, etc.
-        RETURN parts.slice(0, 3).join("/")
-      END IF
-      RETURN parts[0]   // non-VCS: single segment
-
-    CASE "c", "cpp":
-      // "openssl/ssl.h" → "openssl"
-      RETURN importPath.split("/")[0].replace(/\.h$/, "")
-
-    DEFAULT:  // typescript, javascript, ruby, swift, python
-      IF importPath STARTS WITH "@" THEN
-        parts ← importPath.split("/")
-        RETURN parts[0] + "/" + parts[1]   // "@scope/package"
-      END IF
-      RETURN importPath.split("/")[0]
-  END SWITCH
-END FUNCTION
-```
-
-`GO_VCS_HOSTS = new Set(["github.com", "gitlab.com", "bitbucket.org", "golang.org", "gopkg.in"])`
-
-## Algorithm: buildAliases
+In `initializeSchema()` of `src/db/ladybug-graph-adapter.ts`:
 
 ```
-FUNCTION buildAliases(packageName: string): string[]
-  aliases ← [packageName]
-  base ← packageName
-    .replace(/^@[^/]+\//, "")   // strip npm scope
-    .replace(/::.+$/, "")       // strip Rust path
-    .replace(/\\.+$/, "")       // strip PHP namespace tail
-    .replace(/\..+$/, "")       // strip Java/C# package tail
-
-  camel   ← toCamelCase(base)
-  pascal  ← toPascalCase(base)
-  stripped ← base.replace(/[-_.]/g, "")
-
-  FOR each variant IN [base, camel, pascal, stripped] DO
-    IF variant NOT IN aliases THEN aliases.push(variant)
-  END FOR
-  RETURN aliases
-END FUNCTION
+CREATE NODE TABLE IF NOT EXISTS {prefix}ExternalDependency (
+  id STRING, name STRING, aliases STRING, ecosystem STRING,
+  PRIMARY KEY(id)
+)
 ```
 
-## Algorithm: detectEcosystem
-
 ```
-FUNCTION detectEcosystem(language: Language): PackageEcosystem
-  SWITCH language
-    CASE "typescript", "javascript": RETURN "npm"
-    CASE "php":                      RETURN "composer"
-    CASE "python":                   RETURN "pip"
-    CASE "java":                     RETURN "maven"
-    CASE "rust":                     RETURN "cargo"
-    CASE "go":                       RETURN "go_modules"
-    DEFAULT:                         RETURN "unknown"
-  END SWITCH
-END FUNCTION
+CREATE REL TABLE IF NOT EXISTS {prefix}DEPENDS_ON (
+  FROM {prefix}Symbol TO {prefix}ExternalDependency
+)
 ```
 
-## Algorithm: resolveHints (modified import case)
+Update `REL_LABEL_MAP`: `DEPENDS_ON: ["Symbol", "ExternalDependency"]`
 
-```
-CASE "import":
-  IF isExternalPackage(hint.targetName, hint.language) THEN
-    pkgName ← normalizePackageName(hint.targetName, hint.language)
-    extId   ← "ext:" + pkgName
-    IF NOT extNodes.has(extId) THEN
-      extNodes.set(extId, {
-        id:        extId,
-        name:      pkgName,
-        aliases:   buildAliases(pkgName),
-        ecosystem: detectEcosystem(hint.language),
-      })
-    END IF
-    add({ relType: "dependsOn", source: sourceId, target: extId, ... })
-  ELSE
-    // existing internal resolution logic (unchanged)
-  END IF
+## Modified resolveHints return type
+
+```typescript
+export interface ResolveHintsResult {
+  readonly relationships: Relationship[];
+  readonly extNodes: Map<string, ExternalDependencyNode>;
+}
 ```
 
-`RawRelationshipHint` gains a `language: Language` field populated by the parser.
+`resolveReferences` also returns `ResolveHintsResult` (breaking change for pipeline caller).
 
-## Cypher: findExternalDependencyByAlias
+## Modified PipelineResult
 
-```cypher
-MATCH (ext:ExternalDependency)
-WHERE ext.name =~ $pattern
-   OR any(alias IN ext.aliases WHERE alias =~ $pattern)
-RETURN ext LIMIT 1
+```typescript
+export interface PipelineResult {
+  // ... existing fields ...
+  readonly externalDependencyCount: number;  // ← NEW
+}
 ```
 
-`$pattern = "(?i).*<query>.*"`
+## Modified GraphData (Obsidian export)
 
-## Cypher: impact analysis for external deps
+```typescript
+export interface ExportedExternalDependency {
+  readonly id: string;
+  readonly name: string;
+  readonly aliases: string;
+  readonly ecosystem: string;
+}
 
-```cypher
-MATCH (n)-[:DEPENDS_ON*1..$maxDepth]->(ext:ExternalDependency {id: $extId})
-RETURN DISTINCT n
+export interface GraphData {
+  // ... existing fields ...
+  readonly externalDependencies: ExportedExternalDependency[];
+  readonly dependsOnEdges: ExportedRelationship[];
+}
 ```
+
+## Algorithms
+
+See [design-correctness.md](./design-correctness.md) for property specifications.
+
+### isExternalPackage(importPath, language)
+
+Returns false for: relative paths (`./`, `../`), `node:` built-ins, C system headers, Rust internal paths (`crate::`, `super::`, `self::`). Returns true for everything else.
+
+### normalizePackageName(importPath, language)
+
+Per-language: PHP `\` first segment, Java/C# `.` first 2 segments, Rust `::` first segment, Go 3-segment VCS, C/C++ first `/` segment strip `.h`, TS/JS scoped `@scope/pkg` or first `/` segment.
+
+### buildAliases(packageName)
+
+Canonical + camelCase + PascalCase + stripped (remove `[-_.]`).
+
+### detectEcosystem(language)
+
+TS/JS→npm, PHP→composer, Python→pip, Java→maven, Rust→cargo, Go→go_modules, else→unknown.
+
+### findExternalDependencyByAlias(graph, query)
+
+Case-insensitive match on `name` and comma-separated `aliases` field. Returns first match or null. Falls through to `findDependents` on null.
