@@ -5,15 +5,15 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { DatabaseAdapter, GraphAdapter } from "../src/core/ports/persistence.js";
-import { executeTool } from "../src/mcp/tools.js";
+import { executeTool } from "../src/apps/mcp-server/tools.js";
 import type { MCPToolResponse } from "../src/core/domain.js";
 
 // Mock the query modules
-vi.mock("../src/query/impact-analysis.js", () => ({
+vi.mock("../src/application/querying/impact-analysis.js", () => ({
   executeImpactAnalysis: vi.fn(),
 }));
 
-import { executeImpactAnalysis } from "../src/query/impact-analysis.js";
+import { executeImpactAnalysis } from "../src/application/querying/impact-analysis.js";
 
 describe("MCP find_dependents tool (mocked)", () => {
   let mockAdapter: DatabaseAdapter;

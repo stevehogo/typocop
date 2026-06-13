@@ -12,11 +12,10 @@ import { loadConnectionProtoPackage } from "./proto-loader.js";
 import { toGrpcTarget, waitForReady } from "./remote-grpc.js";
 
 // dist/infrastructure/remote-transport/autostart-runtime.js -> climb three to
-// <root>, then dist/db-server/main.js (the server binary it spawns). §13.3:
-// runtime-only path — typecheck won't catch a wrong depth. (Repointed to
-// apps/ladybug-server in PR8.)
+// <root>, then dist/apps/ladybug-server/main.js (the server binary it spawns).
+// §13.3: runtime-only path — typecheck won't catch a wrong depth.
 const DEFAULT_SERVER_SCRIPT = fileURLToPath(
-  new URL("../../../dist/db-server/main.js", import.meta.url),
+  new URL("../../../dist/apps/ladybug-server/main.js", import.meta.url),
 );
 
 interface HealthCheckResponse {

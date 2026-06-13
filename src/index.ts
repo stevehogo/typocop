@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { parseArgs, executeCLI } from "./cli/index.js";
+import { parseArgs, executeCLI } from "./apps/cli/index.js";
 
 async function main() {
   try {

@@ -20,7 +20,7 @@ describe("Integration Wiring", () => {
 
   describe("CLI to Pipeline Wiring", () => {
     it("should import pipeline functions in CLI executor", async () => {
-      const { executeCLI } = await import("../cli/executor.js");
+      const { executeCLI } = await import("../apps/cli/executor.js");
       expect(executeCLI).toBeDefined();
       expect(typeof executeCLI).toBe("function");
     });
@@ -28,13 +28,13 @@ describe("Integration Wiring", () => {
 
   describe("Query Server to Databases Wiring", () => {
     it("should export createQueryServer from query module", async () => {
-      const { createQueryServer } = await import("../query/server.js");
+      const { createQueryServer } = await import("../apps/query-api/server.js");
       expect(createQueryServer).toBeDefined();
       expect(typeof createQueryServer).toBe("function");
     });
 
     it("should export startQueryServer from query module", async () => {
-      const { startQueryServer } = await import("../query/server.js");
+      const { startQueryServer } = await import("../apps/query-api/server.js");
       expect(startQueryServer).toBeDefined();
       expect(typeof startQueryServer).toBe("function");
     });
@@ -42,13 +42,13 @@ describe("Integration Wiring", () => {
 
   describe("MCP Server to Query Server Wiring", () => {
     it("should export startMCPServer from MCP module", async () => {
-      const { startMCPServer } = await import("../mcp/server.js");
+      const { startMCPServer } = await import("../apps/mcp-server/server.js");
       expect(startMCPServer).toBeDefined();
       expect(typeof startMCPServer).toBe("function");
     });
 
     it("should export executeTool from MCP module", async () => {
-      const { executeTool } = await import("../mcp/tools.js");
+      const { executeTool } = await import("../apps/mcp-server/tools.js");
       expect(executeTool).toBeDefined();
       expect(typeof executeTool).toBe("function");
     });
@@ -70,7 +70,7 @@ describe("Integration Wiring", () => {
   describe("Type Compatibility", () => {
     it("should have compatible types between pipeline and CLI", async () => {
       const { runIndexingPipeline } = await import("../application/indexing/pipeline.js");
-      const { executeCLI } = await import("../cli/executor.js");
+      const { executeCLI } = await import("../apps/cli/executor.js");
 
       expect(typeof runIndexingPipeline).toBe("function");
       expect(typeof executeCLI).toBe("function");
@@ -78,7 +78,7 @@ describe("Integration Wiring", () => {
 
     it("should have compatible types between query server and MCP", async () => {
       const { executeQuery } = await import("../application/querying/execute-query.js");
-      const { executeTool } = await import("../mcp/tools.js");
+      const { executeTool } = await import("../apps/mcp-server/tools.js");
 
       expect(typeof executeQuery).toBe("function");
       expect(typeof executeTool).toBe("function");

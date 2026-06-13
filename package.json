@@ -6,9 +6,9 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "bin": {
-    "typocop": "dist/cli/main.js",
-    "typocop-mcp": "dist/mcp/main.js",
-    "typocop-ladybug-server": "dist/db-server/main.js"
+    "typocop": "dist/apps/cli/main.js",
+    "typocop-mcp": "dist/apps/mcp-server/main.js",
+    "typocop-ladybug-server": "dist/apps/ladybug-server/main.js"
   },
   "files": [
     "dist",
@@ -20,7 +20,7 @@
   },
   "scripts": {
     "build": "tsc",
-    "postbuild": "chmod +x dist/cli/main.js dist/mcp/main.js dist/db-server/main.js",
+    "postbuild": "chmod +x dist/apps/cli/main.js dist/apps/mcp-server/main.js dist/apps/ladybug-server/main.js",
     "postinstall": "pnpm approve-builds",
     "prepublishOnly": "pnpm run build",
     "clean": "rm -rf dist",

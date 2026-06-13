@@ -8,27 +8,27 @@
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { DatabaseAdapter, GraphAdapter, VectorAdapter, EmbeddingAdapter } from "../../src/core/ports/persistence.js";
-import { executeTool } from "../../src/mcp/tools.js";
+import { executeTool } from "../../src/apps/mcp-server/tools.js";
 
 // ---------------------------------------------------------------------------
 // Mock query modules — no real network calls
 // ---------------------------------------------------------------------------
 
-vi.mock("../../src/query/context-retrieval.js", () => ({
+vi.mock("../../src/application/querying/context-retrieval.js", () => ({
   executeContextRetrieval: vi.fn(),
 }));
 
-vi.mock("../../src/query/impact-analysis.js", () => ({
+vi.mock("../../src/application/querying/impact-analysis.js", () => ({
   executeImpactAnalysis: vi.fn(),
 }));
 
-vi.mock("../../src/query/data-flow-trace.js", () => ({
+vi.mock("../../src/application/querying/data-flow-trace.js", () => ({
   executeDataFlowTrace: vi.fn(),
 }));
 
-import { executeContextRetrieval } from "../../src/query/context-retrieval.js";
-import { executeImpactAnalysis } from "../../src/query/impact-analysis.js";
-import { executeDataFlowTrace } from "../../src/query/data-flow-trace.js";
+import { executeContextRetrieval } from "../../src/application/querying/context-retrieval.js";
+import { executeImpactAnalysis } from "../../src/application/querying/impact-analysis.js";
+import { executeDataFlowTrace } from "../../src/application/querying/data-flow-trace.js";
 
 // ---------------------------------------------------------------------------
 // Helpers

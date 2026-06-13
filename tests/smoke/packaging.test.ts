@@ -10,9 +10,9 @@ const root = resolve(__dirname, "../..");
 describe("package.json field assertions", () => {
   it("declares bin field with typocop and typocop-mcp", () => {
     expect(pkg.bin).toEqual({
-      typocop: "dist/cli/main.js",
-      "typocop-mcp": "dist/mcp/main.js",
-      "typocop-ladybug-server": "dist/db-server/main.js",
+      typocop: "dist/apps/cli/main.js",
+      "typocop-mcp": "dist/apps/mcp-server/main.js",
+      "typocop-ladybug-server": "dist/apps/ladybug-server/main.js",
     });
   });
 
@@ -34,7 +34,7 @@ describe("package.json field assertions", () => {
 
   it("declares scripts.postbuild with chmod on both entry points", () => {
     expect(pkg.scripts.postbuild).toBe(
-      "chmod +x dist/cli/main.js dist/mcp/main.js dist/db-server/main.js"
+      "chmod +x dist/apps/cli/main.js dist/apps/mcp-server/main.js dist/apps/ladybug-server/main.js"
     );
   });
 

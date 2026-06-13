@@ -34,7 +34,7 @@ async function countGraphNodes(adapter: DatabaseAdapter, prefix: string): Promis
 describe("Parse with --refresh flag (Task 12)", () => {
   describe("Task 12.1-12.5: Full parse with --refresh", () => {
     it.skip("should execute full parse with --refresh flag (Task 12.1)", async () => {
-      const { executeIndexingPipeline } = await import("../../src/cli/executor.js");
+      const { executeIndexingPipeline } = await import("../../src/apps/cli/executor.js");
 
       const stats = await executeIndexingPipeline(
         SAMPLE_PROJECT_PATH,
@@ -53,7 +53,7 @@ describe("Parse with --refresh flag (Task 12)", () => {
 
   describe("Task 12.6: Incremental parse preserves data", () => {
     it.skip("should preserve data when parsing without --refresh flag", async () => {
-      const { executeIndexingPipeline } = await import("../../src/cli/executor.js");
+      const { executeIndexingPipeline } = await import("../../src/apps/cli/executor.js");
 
       const stats = await executeIndexingPipeline(
         SAMPLE_PROJECT_PATH,
@@ -69,7 +69,7 @@ describe("Parse with --refresh flag (Task 12)", () => {
 
   describe("Task 12.8: Statistics are accurate", () => {
     it.skip("should have non-negative statistics", async () => {
-      const { executeIndexingPipeline } = await import("../../src/cli/executor.js");
+      const { executeIndexingPipeline } = await import("../../src/apps/cli/executor.js");
 
       const stats = await executeIndexingPipeline(
         SAMPLE_PROJECT_PATH,
