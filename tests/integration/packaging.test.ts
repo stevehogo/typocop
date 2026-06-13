@@ -7,21 +7,21 @@ import { execSync } from "node:child_process";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, "../..");
 
-const CLI_MAIN = resolve(root, "dist/cli/main.js");
-const MCP_MAIN = resolve(root, "dist/mcp/main.js");
-const LADYBUG_SERVER_MAIN = resolve(root, "dist/db-server/main.js");
+const CLI_MAIN = resolve(root, "dist/apps/cli/main.js");
+const MCP_MAIN = resolve(root, "dist/apps/mcp-server/main.js");
+const LADYBUG_SERVER_MAIN = resolve(root, "dist/apps/ladybug-server/main.js");
 
 // Requirements: 2.3, 2.4
 describe("build output — dist files exist", () => {
-  it("dist/cli/main.js exists after build", () => {
+  it("dist/apps/cli/main.js exists after build", () => {
     expect(existsSync(CLI_MAIN)).toBe(true);
   });
 
-  it("dist/mcp/main.js exists after build", () => {
+  it("dist/apps/mcp-server/main.js exists after build", () => {
     expect(existsSync(MCP_MAIN)).toBe(true);
   });
 
-  it("dist/db-server/main.js exists after build", () => {
+  it("dist/apps/ladybug-server/main.js exists after build", () => {
     expect(existsSync(LADYBUG_SERVER_MAIN)).toBe(true);
   });
 });
@@ -30,17 +30,17 @@ describe("build output — dist files exist", () => {
 const itPosix = process.platform === "win32" ? it.skip : it;
 
 describe("executable permission bits (POSIX only)", () => {
-  itPosix("dist/cli/main.js has executable permission bits set", () => {
+  itPosix("dist/apps/cli/main.js has executable permission bits set", () => {
     const { mode } = statSync(CLI_MAIN);
     expect(mode & 0o111).toBeGreaterThan(0);
   });
 
-  itPosix("dist/mcp/main.js has executable permission bits set", () => {
+  itPosix("dist/apps/mcp-server/main.js has executable permission bits set", () => {
     const { mode } = statSync(MCP_MAIN);
     expect(mode & 0o111).toBeGreaterThan(0);
   });
 
-  itPosix("dist/db-server/main.js has executable permission bits set", () => {
+  itPosix("dist/apps/ladybug-server/main.js has executable permission bits set", () => {
     const { mode } = statSync(LADYBUG_SERVER_MAIN);
     expect(mode & 0o111).toBeGreaterThan(0);
   });
@@ -48,19 +48,19 @@ describe("executable permission bits (POSIX only)", () => {
 
 // Requirements: 1.2, 5.1
 describe("shebang line in compiled entry points", () => {
-  it("dist/cli/main.js starts with #!/usr/bin/env node", () => {
+  it("dist/apps/cli/main.js starts with #!/usr/bin/env node", () => {
     const content = readFileSync(CLI_MAIN, "utf-8");
     const firstLine = content.split("\n")[0];
     expect(firstLine).toBe("#!/usr/bin/env node");
   });
 
-  it("dist/mcp/main.js starts with #!/usr/bin/env node", () => {
+  it("dist/apps/mcp-server/main.js starts with #!/usr/bin/env node", () => {
     const content = readFileSync(MCP_MAIN, "utf-8");
     const firstLine = content.split("\n")[0];
     expect(firstLine).toBe("#!/usr/bin/env node");
   });
 
-  it("dist/db-server/main.js starts with #!/usr/bin/env node", () => {
+  it("dist/apps/ladybug-server/main.js starts with #!/usr/bin/env node", () => {
     const content = readFileSync(LADYBUG_SERVER_MAIN, "utf-8");
     const firstLine = content.split("\n")[0];
     expect(firstLine).toBe("#!/usr/bin/env node");

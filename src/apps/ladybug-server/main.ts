@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { ConfigurationManager } from "../../platform/config/configuration-manager.js";
+import { applyArgEnvOverrides } from "../../platform/bootstrap.js";
 import { logServerEvent } from "../../platform/logging/logger.js";
 import { toLadybugServerConfig, startConnectionServer } from "./server.js";
 
@@ -17,7 +18,7 @@ const ARG_TO_ENV: Record<string, string> = {
 };
 
 async function main(): Promise<void> {
-  applyCliOverrides(process.argv.slice(2));
+  applyArgEnvOverrides(process.argv.slice(2), ARG_TO_ENV);
   process.env["LADYBUG_RUNTIME_MODE"] = "server";
 
   const manager = new ConfigurationManager();
@@ -31,21 +32,6 @@ async function main(): Promise<void> {
 
   const server = await startConnectionServer(serverConfig);
   await server.waitForShutdown();
-}
-
-function applyCliOverrides(argv: readonly string[]): void {
-  for (let index = 0; index < argv.length; index++) {
-    const key = argv[index];
-    const envVar = ARG_TO_ENV[key];
-    if (!envVar) {
-      continue;
-    }
-    const value = argv[index + 1];
-    if (value) {
-      process.env[envVar] = value;
-      index++;
-    }
-  }
 }
 
 main().catch((error) => {
