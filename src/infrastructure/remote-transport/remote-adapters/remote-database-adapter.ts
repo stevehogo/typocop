@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import * as grpc from "@grpc/grpc-js";
 
-import type { LadybugClientConfig } from "../platform/config/types.js";
+import type { LadybugClientConfig } from "../../../platform/config/types.js";
 import { RemoteGraphAdapter } from "./remote-graph-adapter.js";
 import {
   CONNECT_READY_TIMEOUT_MS,
@@ -11,7 +11,7 @@ import {
   isTransientGrpcError,
   toGrpcTarget,
   waitForReady,
-} from "./remote-grpc.js";
+} from "../remote-grpc.js";
 import {
   DEFAULT_RPC_TIMEOUT_MS,
   type GraphRpcMethod,
@@ -20,14 +20,14 @@ import {
   type RpcRequestMetadata,
   type UnaryRpcMethod,
   type VectorRpcMethod,
-} from "./remote-rpc-client.js";
+} from "../remote-rpc-client.js";
 import { RemoteVectorAdapter } from "./remote-vector-adapter.js";
 import type {
   DatabaseAdapter,
   EmbeddingAdapter,
   GraphAdapter,
   VectorAdapter,
-} from "../core/ports/persistence.js";
+} from "../../../core/ports/persistence.js";
 
 interface RemoteDatabaseAdapterOptions {
   readonly createClients?: (target: string) => RpcClientBundle;

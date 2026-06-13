@@ -4,19 +4,8 @@ export interface RequestMetadata {
   readonly prefix: string;
 }
 
-export interface ErrorDetail {
-  readonly code: string;
-  readonly message: string;
-  readonly retryable: boolean;
-}
-
-export interface DiscoveryFile {
-  readonly pid: number;
-  readonly startedAt: string;
-  readonly prefix: string;
-  readonly dbPath: string;
-  readonly url: string;
-}
+// ErrorDetail and DiscoveryFile moved to infrastructure/remote-transport/types.ts
+// (PR5) — both are shared transport types needed by client and server.
 
 export type RequestPriority = "admin" | "interactive_read" | "background_write";
 

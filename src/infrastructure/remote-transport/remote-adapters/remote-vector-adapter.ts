@@ -1,6 +1,6 @@
-import type { SearchResult, Embedding } from "../core/domain.js";
-import type { VectorAdapter } from "../core/ports/persistence.js";
-import type { RemoteRpcClient, RpcRequestMetadata } from "./remote-rpc-client.js";
+import type { SearchResult, Embedding } from "../../../core/domain.js";
+import type { VectorAdapter } from "../../../core/ports/persistence.js";
+import type { RemoteRpcClient, RpcRequestMetadata } from "../remote-rpc-client.js";
 
 interface MutationResponse {
   readonly success?: boolean;

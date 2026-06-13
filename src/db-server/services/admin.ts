@@ -1,4 +1,4 @@
-import { toServiceError } from "../errors.js";
+import { toServiceError } from "../../infrastructure/remote-transport/errors.js";
 import type { MetricsCollector } from "../metrics.js";
 import type { SchedulerStats } from "../types.js";
 

@@ -1,12 +1,12 @@
-import type { LadybugClientConfig } from "../platform/config/types.js";
-import type { EmbeddingAdapter } from "../core/ports/persistence.js";
+import type { LadybugClientConfig } from "../../platform/config/types.js";
+import type { EmbeddingAdapter } from "../../core/ports/persistence.js";
 import { readdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { writeDiscoveryFile } from "../db-server/discovery.js";
-import { ServerStartupTimeoutError, ServerUnavailableError } from "../db-server/errors.js";
-import type { DiscoveryFile } from "../db-server/types.js";
-import { RemoteDatabaseAdapter } from "./remote-database-adapter.js";
+import { writeDiscoveryFile } from "./discovery.js";
+import { ServerStartupTimeoutError, ServerUnavailableError } from "./errors.js";
+import type { DiscoveryFile } from "./types.js";
+import { RemoteDatabaseAdapter } from "./remote-adapters/remote-database-adapter.js";
 import {
   acquireCrossProcessLock,
   checkServerHealth,

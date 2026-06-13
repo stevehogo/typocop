@@ -50,7 +50,7 @@ vi.mock("./ladybug-vector-adapter.js", () => ({
 const { mockEnsureServerAndConnect } = vi.hoisted(() => ({
   mockEnsureServerAndConnect: vi.fn(),
 }));
-vi.mock("./autostart.js", () => ({
+vi.mock("../infrastructure/remote-transport/autostart.js", () => ({
   ensureServerAndConnect: mockEnsureServerAndConnect,
 }));
 

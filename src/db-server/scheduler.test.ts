@@ -9,7 +9,7 @@ vi.mock("@grpc/grpc-js", () => ({
   },
 }));
 
-import { QueueFullError, RequestTimeoutError, ServerDrainingError } from "./errors.js";
+import { QueueFullError, RequestTimeoutError, ServerDrainingError } from "../infrastructure/remote-transport/errors.js";
 import { PriorityRequestScheduler } from "./scheduler.js";
 
 function deferred<T>(): {

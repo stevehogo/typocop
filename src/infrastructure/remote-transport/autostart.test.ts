@@ -19,8 +19,8 @@ vi.mock("@grpc/grpc-js", () => ({
   loadPackageDefinition: (definition: unknown) => definition,
 }));
 
-import type { LadybugClientConfig } from "../platform/config/types.js";
-import { ServerStartupTimeoutError, ServerUnavailableError } from "../db-server/errors.js";
+import type { LadybugClientConfig } from "../../platform/config/types.js";
+import { ServerStartupTimeoutError, ServerUnavailableError } from "./errors.js";
 import { DefaultAutostartManager } from "./autostart.js";
 
 const baseConfig: LadybugClientConfig = {

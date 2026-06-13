@@ -1,14 +1,8 @@
-import { fileURLToPath } from "node:url";
-
 import * as grpc from "@grpc/grpc-js";
-import * as protoLoader from "@grpc/proto-loader";
 
+import { loadConnectionProtoPackage } from "./proto-loader.js";
 import type { RpcClientBundle } from "./remote-rpc-client.js";
 
-const PROTO_PATH = fileURLToPath(
-  new URL("../../proto/ladybug_connection.proto", import.meta.url),
-);
-const PROTO_PACKAGE = "typocop.ladybug.v1";
 export const CONNECT_READY_TIMEOUT_MS = 2_000;
 
 const TRANSIENT_GRPC_CODES = new Set<number>([
@@ -83,15 +77,7 @@ function loadClientConstructors(): {
     return cachedClientConstructors;
   }
 
-  const definition = protoLoader.loadSync(PROTO_PATH, {
-    longs: String,
-    enums: String,
-    defaults: true,
-    oneofs: true,
-    keepCase: false,
-  });
-  const descriptor = grpc.loadPackageDefinition(definition) as Record<string, unknown>;
-  const root = resolveProtoPackage(descriptor, PROTO_PACKAGE);
+  const root = loadConnectionProtoPackage();
 
   const graphCtor = root["Graph"];
   const vectorCtor = root["Vector"];
@@ -106,19 +92,3 @@ function loadClientConstructors(): {
   return cachedClientConstructors;
 }
 
-function resolveProtoPackage(
-  root: Record<string, unknown>,
-  packageName: string,
-): Record<string, unknown> {
-  let current: unknown = root;
-  for (const key of packageName.split(".")) {
-    if (!current || typeof current !== "object" || !(key in current)) {
-      throw new Error(`Proto package "${packageName}" is unavailable`);
-    }
-    current = (current as Record<string, unknown>)[key];
-  }
-  if (!current || typeof current !== "object") {
-    throw new Error(`Proto package "${packageName}" is invalid`);
-  }
-  return current as Record<string, unknown>;
-}

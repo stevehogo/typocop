@@ -1,4 +1,4 @@
-import { QueueFullError, RequestTimeoutError, ServerDrainingError } from "./errors.js";
+import { QueueFullError, RequestTimeoutError, ServerDrainingError } from "../infrastructure/remote-transport/errors.js";
 import { logServerEvent } from "../platform/logging/logger.js";
 import type { RequestPriority, ScheduledRequest, SchedulerStats } from "./types.js";
 

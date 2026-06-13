@@ -14,7 +14,7 @@ vi.mock("@grpc/grpc-js", async () => {
   return createGrpcJsMock();
 });
 
-import { RemoteDatabaseAdapter } from "../db/remote-database-adapter.js";
+import { RemoteDatabaseAdapter } from "../infrastructure/remote-transport/remote-adapters/remote-database-adapter.js";
 import { LadybugGraphAdapter } from "../db/ladybug-graph-adapter.js";
 import { startConnectionServer } from "./server.js";
 import { LadybugEmbeddedDatabaseRuntime } from "./runtime.js";

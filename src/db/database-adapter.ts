@@ -108,7 +108,7 @@ export async function createDatabaseAdapter(
   validateAdapterFactoryConfig(config);
 
   if (config.ladybugdb.runtimeMode === "client") {
-    const { ensureServerAndConnect } = await import("./autostart.js");
+    const { ensureServerAndConnect } = await import("../infrastructure/remote-transport/autostart.js");
     return ensureServerAndConnect(toLadybugClientConfig(config), { embeddingAdapter });
   }
 

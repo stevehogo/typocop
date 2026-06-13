@@ -33,7 +33,7 @@ vi.mock("@grpc/grpc-js", () => ({
   loadPackageDefinition: (definition: unknown) => definition,
 }));
 
-import type { LadybugClientConfig } from "../platform/config/types.js";
+import type { LadybugClientConfig } from "../../platform/config/types.js";
 import { DefaultAutostartManager } from "./autostart.js";
 import { acquireCrossProcessLock } from "./autostart-runtime.js";
 

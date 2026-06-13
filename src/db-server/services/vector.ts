@@ -1,6 +1,6 @@
 import { status } from "@grpc/grpc-js";
 import type { SearchResult } from "../../core/domain.js";
-import { toServiceError } from "../errors.js";
+import { toServiceError } from "../../infrastructure/remote-transport/errors.js";
 import type { OperationRouter, VectorOperation } from "../router.js";
 import type { RequestMetadata } from "../types.js";
 

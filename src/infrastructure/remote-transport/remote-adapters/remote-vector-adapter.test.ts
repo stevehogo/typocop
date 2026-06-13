@@ -1,12 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 
-import type { Embedding } from "../core/domain.js";
+import type { Embedding } from "../../../core/domain.js";
 import { RemoteVectorAdapter } from "./remote-vector-adapter.js";
 import type {
   RemoteRpcClient,
   RpcRequestMetadata,
   VectorRpcMethod,
-} from "./remote-rpc-client.js";
+} from "../remote-rpc-client.js";
 
 function makeRpc(overrides: {
   readonly callVector?: (

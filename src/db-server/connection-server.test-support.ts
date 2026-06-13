@@ -10,7 +10,7 @@ import { join } from "node:path";
 import "../db/huggingface-embedding-adapter.js";
 import type { FullConfig, LadybugClientConfig, LadybugServerConfig } from "../platform/config/types.js";
 import { createDatabaseAdapter } from "../db/database-adapter.js";
-import type { RemoteDatabaseAdapter } from "../db/remote-database-adapter.js";
+import type { RemoteDatabaseAdapter } from "../infrastructure/remote-transport/remote-adapters/remote-database-adapter.js";
 
 export function makeServerConfig(root: string, overrides: Partial<LadybugServerConfig> = {}): LadybugServerConfig {
   return {

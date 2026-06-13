@@ -5,7 +5,7 @@ import type {
   GraphRpcMethod,
   RemoteRpcClient,
   RpcRequestMetadata,
-} from "./remote-rpc-client.js";
+} from "../remote-rpc-client.js";
 
 function makeRpc(overrides: {
   readonly callGraph?: (

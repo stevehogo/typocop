@@ -4,19 +4,19 @@ import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import * as grpc from "@grpc/grpc-js";
-import * as protoLoader from "@grpc/proto-loader";
 import * as lockfile from "proper-lockfile";
 
-import type { LadybugClientConfig } from "../platform/config/types.js";
-import type { DiscoveryFile } from "../db-server/types.js";
+import type { LadybugClientConfig } from "../../platform/config/types.js";
+import type { DiscoveryFile } from "./types.js";
+import { loadConnectionProtoPackage } from "./proto-loader.js";
 import { toGrpcTarget, waitForReady } from "./remote-grpc.js";
 
-const PROTO_PATH = fileURLToPath(
-  new URL("../../proto/ladybug_connection.proto", import.meta.url),
-);
-const PROTO_PACKAGE = "typocop.ladybug.v1";
+// dist/infrastructure/remote-transport/autostart-runtime.js -> climb three to
+// <root>, then dist/db-server/main.js (the server binary it spawns). §13.3:
+// runtime-only path — typecheck won't catch a wrong depth. (Repointed to
+// apps/ladybug-server in PR8.)
 const DEFAULT_SERVER_SCRIPT = fileURLToPath(
-  new URL("../../dist/db-server/main.js", import.meta.url),
+  new URL("../../../dist/db-server/main.js", import.meta.url),
 );
 
 interface HealthCheckResponse {
@@ -164,33 +164,11 @@ function loadHealthClientCtor(): HealthClientConstructor {
     return healthClientCtor;
   }
 
-  const definition = protoLoader.loadSync(PROTO_PATH, {
-    longs: String,
-    enums: String,
-    defaults: true,
-    oneofs: true,
-    keepCase: false,
-  });
-  const descriptor = grpc.loadPackageDefinition(definition) as Record<string, unknown>;
-  const pkg = resolveProtoPackage(descriptor, PROTO_PACKAGE);
+  const pkg = loadConnectionProtoPackage();
   const health = pkg["Health"];
   if (typeof health !== "function") {
     throw new Error("Health client constructor is unavailable");
   }
   healthClientCtor = health as HealthClientConstructor;
   return healthClientCtor;
-}
-
-function resolveProtoPackage(
-  root: Record<string, unknown>,
-  packageName: string,
-): Record<string, unknown> {
-  let current: unknown = root;
-  for (const part of packageName.split(".")) {
-    if (!current || typeof current !== "object" || !(part in current)) {
-      throw new Error(`Proto package "${packageName}" is unavailable`);
-    }
-    current = (current as Record<string, unknown>)[part];
-  }
-  return current as Record<string, unknown>;
 }

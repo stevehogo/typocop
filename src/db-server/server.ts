@@ -1,12 +1,10 @@
-import { fileURLToPath } from "node:url";
-
 import * as grpc from "@grpc/grpc-js";
-import * as protoLoader from "@grpc/proto-loader";
 
 import type { FullConfig, LadybugServerConfig } from "../platform/config/types.js";
-import { removeDiscoveryFile, writeDiscoveryFile } from "./discovery.js";
+import { removeDiscoveryFile, writeDiscoveryFile } from "../infrastructure/remote-transport/discovery.js";
+import { loadConnectionProtoPackage } from "../infrastructure/remote-transport/proto-loader.js";
 import { logServerEvent } from "../platform/logging/logger.js";
-import { toServiceError } from "./errors.js";
+import { toServiceError } from "../infrastructure/remote-transport/errors.js";
 import { InMemoryMetricsCollector } from "./metrics.js";
 import { DefaultOperationRouter } from "./router.js";
 import { LadybugEmbeddedDatabaseRuntime } from "./runtime.js";
@@ -21,8 +19,6 @@ export interface ConnectionServerHandle {
   readonly waitForShutdown: () => Promise<void>;
 }
 
-const PROTO_PATH = fileURLToPath(new URL("../../proto/ladybug_connection.proto", import.meta.url));
-const PROTO_PACKAGE = "typocop.ladybug.v1";
 const MAX_MESSAGE_BYTES = 4 * 1024 * 1024;
 
 export async function startConnectionServer(config: LadybugServerConfig): Promise<ConnectionServerHandle> {
@@ -36,15 +32,7 @@ export async function startConnectionServer(config: LadybugServerConfig): Promis
     });
     const router = new DefaultOperationRouter(runtime, scheduler, config.prefix, metrics);
 
-    const packageDefinition = protoLoader.loadSync(PROTO_PATH, {
-      longs: String,
-      enums: String,
-      defaults: true,
-      oneofs: true,
-      keepCase: false,
-    });
-    const protoDescriptor = grpc.loadPackageDefinition(packageDefinition) as Record<string, any>;
-    const services = resolveProtoPackage(protoDescriptor, PROTO_PACKAGE);
+    const services = loadConnectionProtoPackage();
 
     const grpcServer = new grpc.Server({
       "grpc.max_receive_message_length": MAX_MESSAGE_BYTES,
@@ -183,10 +171,6 @@ export function toLadybugServerConfig(config: FullConfig): LadybugServerConfig {
     idleTtlMs: config.ladybugdb.serverIdleTtlMs,
     discoveryPath: config.ladybugdb.serverDiscoveryPath,
   };
-}
-
-function resolveProtoPackage(root: Record<string, any>, packageName: string): Record<string, any> {
-  return packageName.split(".").reduce<Record<string, any>>((current, key) => current[key], root);
 }
 
 function withAuth(

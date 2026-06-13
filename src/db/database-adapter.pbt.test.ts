@@ -48,7 +48,7 @@ vi.mock("./noop-embedding-adapter.js", () => ({
   NoOpEmbeddingAdapter: vi.fn(function () {}),
 }));
 
-vi.mock("./autostart.js", () => ({
+vi.mock("../infrastructure/remote-transport/autostart.js", () => ({
   ensureServerAndConnect: mockEnsureServerAndConnect,
 }));
 
