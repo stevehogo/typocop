@@ -4,7 +4,7 @@
  * Requirements: 22.1, 22.2
  */
 import type { Symbol, Cluster } from "../../core/domain.js";
-import { verifyEmbeddingText } from "../../security/privacy.js";
+import { verifyEmbeddingText } from "../../platform/security/privacy.js";
 
 function redactAbsolutePaths(text: string): string {
   // Keep the same absolute-path definition as verifyEmbeddingText(), but redact

@@ -3,7 +3,7 @@
  * Requirements: 1.1, 4.5, 5.1, 6.1, 6.3, 8.1
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import type { EmbeddingProvider, FullConfig } from "../config/types.js";
+import type { EmbeddingProvider, FullConfig } from "../platform/config/types.js";
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 const mockConn = { query: vi.fn(), init: vi.fn(), close: vi.fn() };

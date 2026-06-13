@@ -5,7 +5,7 @@
 import type { DatabaseAdapter, GraphAdapter, GraphNode } from "../core/ports/persistence.js";
 import { prop } from "../core/ports/persistence.js";
 import type { MCPToolResponse } from "../core/domain.js";
-import { sanitizeQuery as sanitizeQueryImpl } from "../security/sanitize.js";
+import { sanitizeQuery as sanitizeQueryImpl } from "../platform/security/sanitize.js";
 
 // Re-export for testing
 export { sanitizeQueryImpl as sanitizeQuery };

@@ -2,7 +2,7 @@
 
 export { ConfigurationManager, configurationManager } from "./configuration-manager.js";
 export type { IConfigurationManager } from "./configuration-manager.js";
-export type { FullConfig } from "./types.js";
+export type { FullConfig, ObsidianExportConfig } from "./types.js";
 export type {
   OllamaConfig,
   LadybugDBConfig,

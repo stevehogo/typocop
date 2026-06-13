@@ -11,7 +11,7 @@
  */
 import type { Cluster, ClusterCategory, Symbol } from "../../core/domain.js";
 import type { EmbeddingAdapter } from "../../core/ports/persistence.js";
-import { verifyEnrichmentPrompt } from "../../security/privacy.js";
+import { verifyEnrichmentPrompt } from "../../platform/security/privacy.js";
 import {
   SemanticClusterClassifier,
   buildClusterText,

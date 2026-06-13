@@ -3,7 +3,7 @@ import { extname } from "node:path";
 import Parser from "tree-sitter";
 import type { Language } from "../core/domain.js";
 import { type ASTNode, fromSyntaxNode } from "./ast-node.js";
-import { MAX_FILE_SIZE, getTreeSitterBufferSize } from "../utils/limits.js";
+import { MAX_FILE_SIZE, getTreeSitterBufferSize } from "../platform/utils/limits.js";
 import { collectDiagnostics } from "./diagnostic-collector.js";
 import { emitDiagnostics } from "./diagnostic-formatter.js";
 import { logDiagnostics } from "./diagnostic-logger.js";

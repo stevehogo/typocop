@@ -4,7 +4,7 @@
  */
 import type { GraphAdapter, GraphNode } from "../core/ports/persistence.js";
 import type { Symbol, Relationship, QueryResult } from "../core/domain.js";
-import { MAX_TRAVERSAL_DEPTH } from "../utils/limits.js";
+import { MAX_TRAVERSAL_DEPTH } from "../platform/utils/limits.js";
 import { rowToNode, graphNodeToSymbol } from "./graph-helpers.js";
 import type { CypherNodeRow } from "./graph-helpers.js";
 import { resolveSymbol, type SymbolResolution } from "./symbol-resolver.js";

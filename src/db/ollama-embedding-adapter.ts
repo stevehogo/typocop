@@ -4,9 +4,9 @@
  * Requirements: 4.1, 4.2, 4.3, 4.6
  */
 
-import type { OllamaConfig } from "../config/types.js";
+import type { OllamaConfig } from "../platform/config/types.js";
 import type { Embedding } from "../core/domain.js";
-import { verifyEmbeddingText } from "../security/privacy.js";
+import { verifyEmbeddingText } from "../platform/security/privacy.js";
 import type { EmbeddingAdapter } from "../core/ports/persistence.js";
 
 /** Response shape from Ollama's /api/embeddings endpoint. */

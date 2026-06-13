@@ -5,7 +5,7 @@ import { LadybugVectorAdapter } from "../db/ladybug-vector-adapter.js";
 import type { GraphNode, GraphRelationship } from "../core/ports/persistence.js";
 import type { Embedding, SearchResult } from "../core/domain.js";
 import { InMemoryMetricsCollector, type MetricsCollector } from "./metrics.js";
-import { logServerEvent } from "./logger.js";
+import { logServerEvent } from "../platform/logging/logger.js";
 import type { EmbeddedDatabaseRuntime } from "./runtime.js";
 import type { RequestMetadata, RequestPriority, SchedulerStats, ServerMetrics } from "./types.js";
 

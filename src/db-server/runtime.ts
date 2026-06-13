@@ -3,7 +3,7 @@ import type { Connection, Database } from "@ladybugdb/core";
 import { createEmbeddedConnection, type LadybugConnection } from "../db/index.js";
 import { LadybugGraphAdapter } from "../db/ladybug-graph-adapter.js";
 import { LadybugVectorAdapter } from "../db/ladybug-vector-adapter.js";
-import { logServerEvent } from "./logger.js";
+import { logServerEvent } from "../platform/logging/logger.js";
 
 export interface EmbeddedDatabaseRuntime {
   open(dbPath: string, prefix: string): Promise<void>;

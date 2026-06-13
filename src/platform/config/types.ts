@@ -3,6 +3,16 @@
  * Requirements: 4.1, 4.3, 4.6, 5.1, 5.2, 5.3, 5.4, 5.5
  */
 
+/**
+ * Obsidian vault export configuration.
+ * Lives here (not in apps/cli) so application/export-render can depend on it
+ * without a back-edge into the CLI app (breaks Cycle B).
+ */
+export interface ObsidianExportConfig {
+  readonly outputPath: string;
+  readonly verbose: boolean;
+}
+
 /** Ollama embedding service configuration. */
 export interface OllamaConfig {
   /** Whether Ollama embeddings are enabled. Default: false. (Req 5.1) */

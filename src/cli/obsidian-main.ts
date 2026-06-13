@@ -5,7 +5,7 @@
 import { existsSync } from "node:fs";
 import { readFile, appendFile } from "node:fs/promises";
 import { parseArgs, CLIValidationError } from "./parser.js";
-import { configurationManager, ConfigurationError, PrefixValidationError } from "../config/index.js";
+import { configurationManager, ConfigurationError, PrefixValidationError } from "../platform/config/index.js";
 import chalk from "chalk";
 import ora from "ora";
 import { executeObsidianExport } from "../obsidian-export/index.js";

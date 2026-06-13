@@ -2,7 +2,7 @@ import type {
   EmbeddingConfig,
   LadybugClientConfig,
   OllamaConfig,
-} from "../config/types.js";
+} from "../platform/config/types.js";
 import { readdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";

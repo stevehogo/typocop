@@ -53,7 +53,7 @@ vi.mock("./resolution/index.js", () => ({ resolveReferences: mockResolveReferenc
 vi.mock("./clustering/index.js", () => ({ clusterSymbols: mockClusterSymbols }));
 vi.mock("./processes/index.js", () => ({ traceProcesses: mockTraceProcesses }));
 vi.mock("./search/index.js", () => ({ buildSearchIndex: mockBuildSearchIndex }));
-vi.mock("../config/index.js", () => ({
+vi.mock("../platform/config/index.js", () => ({
   configurationManager: { getPrefix: () => "tpc_" },
 }));
 

@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import type { HuggingFaceConfig } from "../config/types.js";
+import type { HuggingFaceConfig } from "../platform/config/types.js";
 
 // ─── Mocks ───────────────────────────────────────────────────────────────────
 
@@ -20,12 +20,12 @@ vi.mock("@huggingface/transformers", () => ({
   pipeline: (...args: unknown[]) => mockPipeline(...args),
 }));
 
-vi.mock("../security/privacy.js", () => ({
+vi.mock("../platform/security/privacy.js", () => ({
   verifyEmbeddingText: vi.fn(),
 }));
 
 import { HuggingFaceEmbeddingAdapter } from "./huggingface-embedding-adapter.js";
-import { verifyEmbeddingText } from "../security/privacy.js";
+import { verifyEmbeddingText } from "../platform/security/privacy.js";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 

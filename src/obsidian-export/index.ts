@@ -2,9 +2,8 @@
  * Obsidian Export — public API and orchestration.
  * Requirements: 1.1, 2.1–2.9, 9.1, 9.2
  */
-import type { ObsidianExportConfig } from "../cli/parser.js";
 import type { DatabaseAdapter } from "../core/ports/persistence.js";
-import { configurationManager } from "../config/index.js";
+import { configurationManager, type ObsidianExportConfig } from "../platform/config/index.js";
 import { fetchAllGraphData } from "./graph-reader.js";
 import { renderVault } from "./renderer.js";
 import { writeVault } from "./vault-writer.js";

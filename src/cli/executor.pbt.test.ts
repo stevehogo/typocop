@@ -57,7 +57,7 @@ vi.mock("../indexer/pipeline.js", () => ({
   runIndexingPipeline: mockRunIndexingPipeline,
 }));
 
-vi.mock("../config/index.js", () => ({
+vi.mock("../platform/config/index.js", () => ({
   configurationManager: {
     initialize: vi.fn().mockResolvedValue(undefined),
     getPrefix: vi.fn().mockReturnValue("tpc_"),

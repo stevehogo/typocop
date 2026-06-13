@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
-import { ConfigurationManager } from "../config/configuration-manager.js";
-import { logServerEvent } from "./logger.js";
+import { ConfigurationManager } from "../platform/config/configuration-manager.js";
+import { logServerEvent } from "../platform/logging/logger.js";
 import { toLadybugServerConfig, startConnectionServer } from "./server.js";
 
 const ARG_TO_ENV: Record<string, string> = {

@@ -7,7 +7,7 @@ import chalk from "chalk";
 import ora from "ora";
 import { createDatabaseAdapter } from "../db/database-adapter.js";
 import { runIndexingPipeline, type PipelineConfig } from "../indexer/pipeline.js";
-import { configurationManager } from "../config/index.js";
+import { configurationManager } from "../platform/config/index.js";
 import type { DatabaseAdapter } from "../core/ports/persistence.js";
 import { executeObsidianExport } from "../obsidian-export/index.js";
 

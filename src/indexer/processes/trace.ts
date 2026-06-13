@@ -8,7 +8,7 @@
  */
 import type { ProcessStep } from "../../core/domain.js";
 import type { CallGraph } from "./entry-points.js";
-import { MAX_TRAVERSAL_DEPTH } from "../../utils/limits.js";
+import { MAX_TRAVERSAL_DEPTH } from "../../platform/utils/limits.js";
 
 // ─── Configuration ────────────────────────────────────────────────────────────
 

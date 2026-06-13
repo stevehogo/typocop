@@ -7,7 +7,7 @@ import { prop } from "../core/ports/persistence.js";
 import type { Relationship, Process, QueryResult } from "../core/domain.js";
 import { graphNodeToCluster } from "./process-helpers.js";
 import { type CypherNodeRow, rowToNode, graphNodeToSymbol } from "./graph-helpers.js";
-import { MAX_TRAVERSAL_DEPTH } from "../utils/limits.js";
+import { MAX_TRAVERSAL_DEPTH } from "../platform/utils/limits.js";
 import { resolveSymbol, type SymbolResolution } from "./symbol-resolver.js";
 
 // ─── Graph query helpers using GraphAdapter ───────────────────────────────────

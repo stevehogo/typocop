@@ -4,11 +4,11 @@
  */
 import type { DatabaseAdapter } from "../core/ports/persistence.js";
 import type { Query, QueryResult } from "../core/domain.js";
-import { QUERY_TIMEOUT_MS } from "../utils/limits.js";
+import { QUERY_TIMEOUT_MS } from "../platform/utils/limits.js";
 import { parseQueryIntent } from "./parse-intent.js";
 import { executeImpactAnalysis, calculateImpactRisk } from "./impact-analysis.js";
 import { preprocessQuery, isValidQuery } from "./preprocess.js";
-import { sanitizeQuery } from "../security/sanitize.js";
+import { sanitizeQuery } from "../platform/security/sanitize.js";
 import { calculateConfidence } from "./confidence.js";
 
 /**

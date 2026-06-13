@@ -10,7 +10,7 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import * as fc from "fast-check";
 import { OllamaEmbeddingAdapter } from "./ollama-embedding-adapter.js";
-import type { OllamaConfig } from "../config/types.js";
+import type { OllamaConfig } from "../platform/config/types.js";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 

@@ -1,6 +1,7 @@
 import { Command, CommanderError } from "commander";
 import * as fs from "fs";
 import { Language } from "../core/domain.js";
+import type { ObsidianExportConfig } from "../platform/config/index.js";
 import { detectDirectoryLanguage } from "../parser/language.js";
 
 export interface CLIConfig {
@@ -15,11 +16,6 @@ export interface CLIConfig {
    * Defaults to false for incremental/update behavior.
    */
   refresh?: boolean;
-}
-
-export interface ObsidianExportConfig {
-  readonly outputPath: string;
-  readonly verbose: boolean;
 }
 
 export type CLICommand =

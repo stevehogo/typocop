@@ -4,7 +4,7 @@
  */
 import { existsSync } from "node:fs";
 import { parseArgs, executeCLI, CLIValidationError } from "./index.js";
-import { configurationManager, ConfigurationError, PrefixValidationError } from "../config/index.js";
+import { configurationManager, ConfigurationError, PrefixValidationError } from "../platform/config/index.js";
 import { drainAllPools } from "../db/pool-registry.js";
 
 function formatConfigurationError(err: ConfigurationError): string {

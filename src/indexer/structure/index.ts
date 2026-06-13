@@ -2,8 +2,8 @@ import * as fs from "fs/promises";
 import * as path from "path";
 import type { Language } from "../../core/domain.js";
 import type { FileNode } from "../../core/file-node.js";
-import { shouldIgnorePath } from "../../utils/ignore.js";
-import { MAX_FILE_SIZE } from "../../utils/limits.js";
+import { shouldIgnorePath } from "../../platform/utils/ignore.js";
+import { MAX_FILE_SIZE } from "../../platform/utils/limits.js";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 

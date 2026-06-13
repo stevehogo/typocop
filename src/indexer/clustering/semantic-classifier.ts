@@ -9,7 +9,7 @@
  */
 import type { ClusterCategory, Embedding, Symbol } from "../../core/domain.js";
 import type { EmbeddingAdapter } from "../../core/ports/persistence.js";
-import { verifyEmbeddingText } from "../../security/privacy.js";
+import { verifyEmbeddingText } from "../../platform/security/privacy.js";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 

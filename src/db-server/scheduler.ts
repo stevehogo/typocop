@@ -1,5 +1,5 @@
 import { QueueFullError, RequestTimeoutError, ServerDrainingError } from "./errors.js";
-import { logServerEvent } from "./logger.js";
+import { logServerEvent } from "../platform/logging/logger.js";
 import type { RequestPriority, ScheduledRequest, SchedulerStats } from "./types.js";
 
 export interface RequestScheduler {

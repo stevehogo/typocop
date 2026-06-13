@@ -13,7 +13,7 @@ vi.mock("./parse-intent.js", () => ({
   parseQueryIntent: vi.fn(),
 }));
 
-vi.mock("../security/sanitize.js", () => ({
+vi.mock("../platform/security/sanitize.js", () => ({
   sanitizeQuery: vi.fn((q: string) => q),
 }));
 

@@ -3,7 +3,7 @@ import type {
   Language,
   PackageEcosystem,
 } from "../../core/domain.js";
-import { C_SYSTEM_HEADERS, GO_VCS_HOSTS } from "../../utils/limits.js";
+import { C_SYSTEM_HEADERS, GO_VCS_HOSTS } from "../../platform/utils/limits.js";
 
 function trimImportPath(importPath: string): string {
   return importPath.trim().replace(/^["'<]+|[">']+$/g, "");

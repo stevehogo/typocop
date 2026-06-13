@@ -1,6 +1,6 @@
 import { join } from "node:path";
 
-import type { FullConfig, LadybugClientConfig, LadybugServerConfig } from "../config/types.js";
+import type { FullConfig, LadybugClientConfig, LadybugServerConfig } from "../platform/config/types.js";
 import { createDatabaseAdapter } from "../db/database-adapter.js";
 import type { RemoteDatabaseAdapter } from "../db/remote-database-adapter.js";
 

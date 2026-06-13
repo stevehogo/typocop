@@ -6,7 +6,7 @@ import type { GraphAdapter, GraphNode } from "../core/ports/persistence.js";
 import { prop } from "../core/ports/persistence.js";
 import type { Symbol, Relationship, Process, QueryResult, RiskLevel, SymbolKind, Visibility } from "../core/domain.js";
 import { graphNodeToCluster } from "./process-helpers.js";
-import { MAX_TRAVERSAL_DEPTH } from "../utils/limits.js";
+import { MAX_TRAVERSAL_DEPTH } from "../platform/utils/limits.js";
 
 /** Core component name patterns that elevate risk to CRITICAL. */
 const CORE_COMPONENT_PATTERNS = [

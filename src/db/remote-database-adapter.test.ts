@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import type { LadybugClientConfig } from "../config/types.js";
+import type { LadybugClientConfig } from "../platform/config/types.js";
 import { RemoteDatabaseAdapter } from "./remote-database-adapter.js";
 import type { RpcClientBundle, UnaryRpcMethod } from "./remote-rpc-client.js";
 

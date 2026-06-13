@@ -3,9 +3,9 @@ import { fileURLToPath } from "node:url";
 import * as grpc from "@grpc/grpc-js";
 import * as protoLoader from "@grpc/proto-loader";
 
-import type { FullConfig, LadybugServerConfig } from "../config/types.js";
+import type { FullConfig, LadybugServerConfig } from "../platform/config/types.js";
 import { removeDiscoveryFile, writeDiscoveryFile } from "./discovery.js";
-import { logServerEvent } from "./logger.js";
+import { logServerEvent } from "../platform/logging/logger.js";
 import { toServiceError } from "./errors.js";
 import { InMemoryMetricsCollector } from "./metrics.js";
 import { DefaultOperationRouter } from "./router.js";

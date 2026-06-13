@@ -7,7 +7,7 @@ import * as grpc from "@grpc/grpc-js";
 import * as protoLoader from "@grpc/proto-loader";
 import * as lockfile from "proper-lockfile";
 
-import type { LadybugClientConfig } from "../config/types.js";
+import type { LadybugClientConfig } from "../platform/config/types.js";
 import type { DiscoveryFile } from "../db-server/types.js";
 import { toGrpcTarget, waitForReady } from "./remote-grpc.js";
 

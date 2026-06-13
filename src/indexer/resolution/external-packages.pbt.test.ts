@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import * as fc from "fast-check";
 import type { Language, Symbol } from "../../core/domain.js";
-import { C_SYSTEM_HEADERS } from "../../utils/limits.js";
+import { C_SYSTEM_HEADERS } from "../../platform/utils/limits.js";
 import {
   buildAliases,
   detectEcosystem,

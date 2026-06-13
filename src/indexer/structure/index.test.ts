@@ -3,7 +3,7 @@ import * as fc from "fast-check";
 import * as fs from "fs/promises";
 import * as path from "path";
 import { walkFileTree, readFileContents, detectLanguageFromPath } from "./index.js";
-import { MAX_FILE_SIZE } from "../../utils/limits.js";
+import { MAX_FILE_SIZE } from "../../platform/utils/limits.js";
 
 vi.mock("fs/promises");
 

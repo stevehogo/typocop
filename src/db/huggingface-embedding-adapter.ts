@@ -12,9 +12,9 @@ import {
   pipeline,
   type FeatureExtractionPipeline,
 } from "@huggingface/transformers";
-import type { HuggingFaceConfig } from "../config/types.js";
+import type { HuggingFaceConfig } from "../platform/config/types.js";
 import type { Embedding } from "../core/domain.js";
-import { verifyEmbeddingText } from "../security/privacy.js";
+import { verifyEmbeddingText } from "../platform/security/privacy.js";
 import type { EmbeddingAdapter } from "../core/ports/persistence.js";
 
 /**

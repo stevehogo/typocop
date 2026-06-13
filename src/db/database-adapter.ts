@@ -5,8 +5,8 @@
  * Requirements: 1.1, 4.5, 5.1, 6.1, 6.2, 6.3, 6.4
  */
 
-import type { FullConfig } from "../config/types.js";
-import type { LadybugClientConfig, LadybugRuntimeMode } from "../config/types.js";
+import type { FullConfig } from "../platform/config/types.js";
+import type { LadybugClientConfig, LadybugRuntimeMode } from "../platform/config/types.js";
 import type {
   DatabaseAdapter,
   EmbeddingAdapter,

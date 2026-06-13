@@ -6,7 +6,7 @@ import type {
   EmbeddingConfig,
   LadybugClientConfig,
   OllamaConfig,
-} from "../config/types.js";
+} from "../platform/config/types.js";
 import { HuggingFaceEmbeddingAdapter } from "./huggingface-embedding-adapter.js";
 import { NoOpEmbeddingAdapter } from "./noop-embedding-adapter.js";
 import { OllamaEmbeddingAdapter } from "./ollama-embedding-adapter.js";

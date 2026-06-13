@@ -5,7 +5,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { OllamaEmbeddingAdapter } from "./ollama-embedding-adapter.js";
-import type { OllamaConfig } from "../config/types.js";
+import type { OllamaConfig } from "../platform/config/types.js";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
