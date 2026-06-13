@@ -74,6 +74,13 @@ Prefer Typocop MCP tools over manual grepping/file-walking when you need symbol 
 
 Do not re-read files for information Typocop already provided unless you need exact implementation details.
 
+## Documentation Conventions
+
+- **Never edit or overwrite an existing documentation file.** To correct, update, or supersede a doc (e.g. a stale `docs/ARCHITECTURE.md`), write a **new** dated Markdown file in `docs/refactoring/` that states what it supersedes — leave the original untouched. Docs are append-only.
+- Store **all refactoring documents** (architecture/refactoring proposals, module analyses, code-structure plans, cleanup/migration strategies) in `docs/refactoring/`. Create the folder if missing; never leave these at the repo root or loose in `docs/`. See `.agents/rules/refactoring-docs.md`.
+- Bug post-mortems / incident analyses go in `docs/issues/`; user and setup guides stay in `docs/`.
+- **Mermaid diagrams** in any markdown must follow `.kiro/steering/mermaid.md` for cross-renderer compatibility (VS Code, GitHub, Kiro). Gist: use `graph TD`/`graph LR` only — never `stateDiagram-v2` or `flowchart`; keep node labels short and alphanumeric (no `:` `/` `()` `<br/>` or backticks); edge labels are letters + spaces only (no `/` `,` `_` `-`); don't label dotted arrows (`-.->`); no `style`/hex-color statements (use `classDef` or omit); keep diagrams under ~30 nodes. See the rule file for the full reference and examples.
+
 ## Directories to Treat Carefully
 
 - `legacy-parser/` is reference material; do not modify unless explicitly requested.
