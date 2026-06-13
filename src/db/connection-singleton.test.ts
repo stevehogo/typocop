@@ -66,7 +66,7 @@ const instantSleep = vi.fn().mockResolvedValue(undefined);
  * Prefixed with /tmp/ to look like real paths.
  */
 const dbPathArb = fc
-  .stringMatching(/^[a-zA-Z0-9_-]+$/, { minLength: 1, maxLength: 30 })
+  .stringMatching(/^[a-zA-Z0-9_-]{1,30}$/)
   .map((s) => `/tmp/${s}.ladybug`);
 
 // ─── Bug Condition Tests ──────────────────────────────────────────────────────
@@ -271,7 +271,7 @@ describe("Preservation: Cache-Miss Behavior", () => {
           existing.push(instance);
           databaseInstances.set(path, existing);
           return instance as ReturnType<typeof makeMockDatabase>;
-        });
+        } as unknown as typeof Database);
 
         try {
           // Act & Assert
@@ -298,7 +298,7 @@ describe("Preservation: Cache-Miss Behavior", () => {
               existing.push(instance);
               databaseInstances.set(path, existing);
               return instance;
-            });
+            } as unknown as typeof Database);
           }
         }
       }),

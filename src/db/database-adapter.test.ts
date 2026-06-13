@@ -180,19 +180,19 @@ describe("LadybugDatabaseAdapter", () => {
     it("should return the graph adapter after initialization", async () => {
       const adapter = new LadybugDatabaseAdapter(makeConfig(false));
       await adapter.initialize();
-      expect((adapter.getGraphAdapter() as Record<string, unknown>).__type).toBe("graph");
+      expect((adapter.getGraphAdapter() as unknown as Record<string, unknown>).__type).toBe("graph");
     });
 
     it("should return the vector adapter after initialization", async () => {
       const adapter = new LadybugDatabaseAdapter(makeConfig(false));
       await adapter.initialize();
-      expect((adapter.getVectorAdapter() as Record<string, unknown>).__type).toBe("vector");
+      expect((adapter.getVectorAdapter() as unknown as Record<string, unknown>).__type).toBe("vector");
     });
 
     it("should return the embedding adapter after initialization", async () => {
       const adapter = new LadybugDatabaseAdapter(makeConfig(false));
       await adapter.initialize();
-      expect((adapter.getEmbeddingAdapter() as Record<string, unknown>).__type).toBe("noop-embedding");
+      expect((adapter.getEmbeddingAdapter() as unknown as Record<string, unknown>).__type).toBe("noop-embedding");
     });
 
     it("should throw when getGraphAdapter() is called before initialize()", () => {
@@ -224,13 +224,13 @@ describe("createDatabaseAdapter", () => {
   it("should select OllamaEmbeddingAdapter when ollama.enabled is true", async () => {
     const adapter = await createDatabaseAdapter(makeConfig(true));
     expect(MockedOllamaAdapter).toHaveBeenCalled();
-    expect((adapter.getEmbeddingAdapter() as Record<string, unknown>).__type).toBe("ollama-embedding");
+    expect((adapter.getEmbeddingAdapter() as unknown as Record<string, unknown>).__type).toBe("ollama-embedding");
   });
 
   it("should select NoOpEmbeddingAdapter when ollama.enabled is false", async () => {
     const adapter = await createDatabaseAdapter(makeConfig(false));
     expect(MockedNoOpAdapter).toHaveBeenCalled();
-    expect((adapter.getEmbeddingAdapter() as Record<string, unknown>).__type).toBe("noop-embedding");
+    expect((adapter.getEmbeddingAdapter() as unknown as Record<string, unknown>).__type).toBe("noop-embedding");
   });
 
   it("returns a remote adapter in client mode after ensuring the server", async () => {
@@ -317,19 +317,19 @@ describe("Provider-based adapter selection (Req 6.1-6.4)", () => {
   it("should set __type to 'huggingface-embedding' when provider is 'huggingface'", async () => {
     const adapter = await createDatabaseAdapter(makeProviderConfig("huggingface"));
     const embedding = adapter.getEmbeddingAdapter();
-    expect((embedding as Record<string, unknown>).__type).toBe("huggingface-embedding");
+    expect((embedding as unknown as Record<string, unknown>).__type).toBe("huggingface-embedding");
   });
 
   it("should set __type to 'ollama-embedding' when provider is 'ollama'", async () => {
     const adapter = await createDatabaseAdapter(makeProviderConfig("ollama"));
     const embedding = adapter.getEmbeddingAdapter();
-    expect((embedding as Record<string, unknown>).__type).toBe("ollama-embedding");
+    expect((embedding as unknown as Record<string, unknown>).__type).toBe("ollama-embedding");
   });
 
   it("should set __type to 'noop-embedding' when provider is 'none'", async () => {
     const adapter = await createDatabaseAdapter(makeProviderConfig("none"));
     const embedding = adapter.getEmbeddingAdapter();
-    expect((embedding as Record<string, unknown>).__type).toBe("noop-embedding");
+    expect((embedding as unknown as Record<string, unknown>).__type).toBe("noop-embedding");
   });
 
   it("should instantiate exactly one adapter type per provider", async () => {

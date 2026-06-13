@@ -12,7 +12,12 @@ const mockAcquire = vi.fn();
 const mockRelease = vi.fn();
 const mockStats = vi.fn();
 
-function createMockPool(): { drain: typeof mockDrain } {
+function createMockPool(): {
+  drain: typeof mockDrain;
+  acquire: typeof mockAcquire;
+  release: typeof mockRelease;
+  stats: typeof mockStats;
+} {
   return {
     drain: vi.fn().mockResolvedValue(undefined),
     acquire: mockAcquire,

@@ -34,7 +34,7 @@ describe("detectDirectoryLanguage", () => {
 
   it("returns the dominant language based on file count", () => {
     vi.mocked(fs.readdirSync).mockReturnValue(
-      ["a.ts", "b.ts", "c.ts", "d.py"] as unknown as fs.Dirent[]
+      ["a.ts", "b.ts", "c.ts", "d.py"] as unknown as fs.Dirent<Buffer<ArrayBuffer>>[]
     );
     vi.mocked(fs.statSync).mockReturnValue({ isDirectory: () => false } as fs.Stats);
 
@@ -44,7 +44,7 @@ describe("detectDirectoryLanguage", () => {
 
   it("returns null when no recognized files are found", () => {
     vi.mocked(fs.readdirSync).mockReturnValue(
-      ["README.md", "LICENSE", ".gitignore"] as unknown as fs.Dirent[]
+      ["README.md", "LICENSE", ".gitignore"] as unknown as fs.Dirent<Buffer<ArrayBuffer>>[]
     );
     vi.mocked(fs.statSync).mockReturnValue({ isDirectory: () => false } as fs.Stats);
 
@@ -55,13 +55,13 @@ describe("detectDirectoryLanguage", () => {
   it("skips node_modules, vendor, and dist directories", () => {
     vi.mocked(fs.readdirSync).mockImplementation((dir) => {
       if (String(dir) === "/project") {
-        return ["node_modules", "src"] as unknown as fs.Dirent[];
+        return ["node_modules", "src"] as unknown as fs.Dirent<Buffer<ArrayBuffer>>[];
       }
       if (String(dir).endsWith("src")) {
-        return ["index.ts"] as unknown as fs.Dirent[];
+        return ["index.ts"] as unknown as fs.Dirent<Buffer<ArrayBuffer>>[];
       }
       // node_modules — should never be reached
-      return ["evil.php"] as unknown as fs.Dirent[];
+      return ["evil.php"] as unknown as fs.Dirent<Buffer<ArrayBuffer>>[];
     });
     vi.mocked(fs.statSync).mockImplementation((p) => ({
       isDirectory: () => String(p).endsWith("src") || String(p).endsWith("node_modules"),

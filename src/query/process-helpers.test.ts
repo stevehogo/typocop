@@ -29,11 +29,11 @@ function makeSymbolNode(id: string): GraphNode {
   };
 }
 
-function nodeRow(node: GraphNode): { n: { labels: string[]; properties: Record<string, string> } } {
+function nodeRow(node: GraphNode): { n: { labels: readonly string[]; properties: Readonly<Record<string, unknown>> } } {
   return { n: { labels: node.labels, properties: node.properties } };
 }
 
-function processRow(node: GraphNode): { p: { labels: string[]; properties: Record<string, string> } } {
+function processRow(node: GraphNode): { p: { labels: readonly string[]; properties: Readonly<Record<string, unknown>> } } {
   return { p: { labels: node.labels, properties: node.properties } };
 }
 

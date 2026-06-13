@@ -7,6 +7,7 @@ import type { DatabaseAdapter } from "../db/types.js";
 import { handleMCPRequest, createConnectionState } from "./handler.js";
 import type { MCPContext } from "./handler.js";
 import { createAuthConfig } from "./auth.js";
+import type { AuthConfig } from "./auth.js";
 
 // Mock the tools module
 vi.mock("./tools.js", () => ({
@@ -145,7 +146,7 @@ describe("handleMCPRequest", () => {
   });
 
   it("bypasses authentication when disabled", async () => {
-    mockContext.authConfig = createAuthConfig([], false);
+    (mockContext as { authConfig: AuthConfig }).authConfig = createAuthConfig([], false);
 
     const result = await handleMCPRequest(
       { method: "get_symbol_context", params: { symbolName: "test" } },

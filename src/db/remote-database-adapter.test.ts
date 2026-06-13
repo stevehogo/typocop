@@ -101,7 +101,7 @@ describe("RemoteDatabaseAdapter", () => {
   });
 
   it("includes prefix, timeout, and auth metadata in requests", async () => {
-    let captured: CapturedCall | null = null;
+    let captured: CapturedCall | null = null as CapturedCall | null;
 
     const graphClient: FakeClient = {
       ...createNoopClient(),

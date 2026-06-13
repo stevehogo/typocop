@@ -36,7 +36,7 @@ describe("Ladybug connection server priority scheduling — integration test", (
     vi.restoreAllMocks();
     process.removeAllListeners("SIGTERM");
     process.removeAllListeners("SIGINT");
-    const grpcModule = await import("@grpc/grpc-js") as {
+    const grpcModule = await import("@grpc/grpc-js") as unknown as {
       readonly __clearServers: () => void;
     };
     grpcModule.__clearServers();
@@ -55,6 +55,7 @@ describe("Ladybug connection server priority scheduling — integration test", (
     const order: string[] = [];
     const originalRunCypherWrite = LadybugGraphAdapter.prototype.runCypherWrite;
     vi.spyOn(LadybugGraphAdapter.prototype, "runCypherWrite").mockImplementation(async function (
+      this: LadybugGraphAdapter,
       query,
       params,
     ) {
@@ -71,6 +72,7 @@ describe("Ladybug connection server priority scheduling — integration test", (
     });
     const originalQueryNodes = LadybugGraphAdapter.prototype.queryNodes;
     vi.spyOn(LadybugGraphAdapter.prototype, "queryNodes").mockImplementation(async function (
+      this: LadybugGraphAdapter,
       ...args
     ) {
       order.push("query");
@@ -90,7 +92,7 @@ describe("Ladybug connection server priority scheduling — integration test", (
       const queuedWrite = writeSymbol(client, "queued-write");
       const queuedRead = client.getGraphAdapter().queryNodes("Symbol");
 
-      const grpcModule = await import("@grpc/grpc-js") as {
+      const grpcModule = await import("@grpc/grpc-js") as unknown as {
         readonly __getServer: (address: string) => {
           readonly implementations: Map<string, Record<string, (...args: any[]) => any>>;
         } | undefined;

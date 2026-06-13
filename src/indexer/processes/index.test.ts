@@ -221,7 +221,7 @@ describe("findEntryPoints", () => {
 
 describe("traceExecution", () => {
   it("returns undefined when path is shorter than MIN_PROCESS_STEPS", () => {
-    const graph = new Map([["a", new Set(["b"])], ["b", new Set()]]);
+    const graph = new Map([["a", new Set(["b"])], ["b", new Set<string>()]]);
     const descriptions = new Map([["a", "A"], ["b", "B"]]);
     // a → b is 2 steps, should be valid
     const result = traceExecution("a", graph, descriptions);
@@ -242,7 +242,7 @@ describe("traceExecution", () => {
     const graph = new Map([
       ["a", new Set(["b"])],
       ["b", new Set(["c"])],
-      ["c", new Set()],
+      ["c", new Set<string>()],
     ]);
     const descriptions = new Map([["a", "A"], ["b", "B"], ["c", "C"]]);
     const result = traceExecution("a", graph, descriptions);
@@ -259,7 +259,7 @@ describe("traceAllExecutions", () => {
     const graph = new Map([
       ["a", new Set(["b"])],
       ["b", new Set(["c"])],
-      ["c", new Set()],
+      ["c", new Set<string>()],
     ]);
     const descriptions = new Map([["a", "A"], ["b", "B"], ["c", "C"]]);
     const traces = traceAllExecutions(["a", "a"], graph, descriptions);
@@ -267,7 +267,7 @@ describe("traceAllExecutions", () => {
   });
 
   it("returns empty array when no entry points produce valid traces", () => {
-    const graph = new Map([["a", new Set()]]);
+    const graph = new Map([["a", new Set<string>()]]);
     const descriptions = new Map([["a", "A"]]);
     const traces = traceAllExecutions(["a"], graph, descriptions);
     expect(traces).toHaveLength(0);

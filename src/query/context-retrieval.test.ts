@@ -65,15 +65,15 @@ function makeGraphAdapter(responses: unknown[][]): GraphAdapter {
 }
 
 // Wrap a GraphNode in the Cypher row format returned by runCypher
-function nodeRow(node: GraphNode): { n: { labels: string[]; properties: Record<string, string> } } {
+function nodeRow(node: GraphNode): { n: { labels: readonly string[]; properties: Readonly<Record<string, unknown>> } } {
   return { n: { labels: node.labels, properties: node.properties } };
 }
 
-function processRow(node: GraphNode): { p: { labels: string[]; properties: Record<string, string> } } {
+function processRow(node: GraphNode): { p: { labels: readonly string[]; properties: Readonly<Record<string, unknown>> } } {
   return { p: { labels: node.labels, properties: node.properties } };
 }
 
-function clusterRow(node: GraphNode): { c: { labels: string[]; properties: Record<string, string> } } {
+function clusterRow(node: GraphNode): { c: { labels: readonly string[]; properties: Readonly<Record<string, unknown>> } } {
   return { c: { labels: node.labels, properties: node.properties } };
 }
 

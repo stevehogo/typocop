@@ -38,6 +38,7 @@ const STUB_RESOLUTION = { kind: "exact" as const, node: { id: "sym-1", labels: [
 
 const STUB_QUERY_RESULT = {
   resolution: STUB_RESOLUTION,
+  targetKind: "symbol" as const,
   symbols: [
     {
       id: "sym-1",

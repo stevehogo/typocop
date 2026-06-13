@@ -121,7 +121,7 @@ describe("startConnectionServer", () => {
       discoveryPath,
     });
 
-    const grpcModule = await import("@grpc/grpc-js") as {
+    const grpcModule = await import("@grpc/grpc-js") as unknown as {
       readonly __getServer: (serverAddress: string) => {
         readonly implementations: Map<string, Record<string, any>>;
       } | undefined;
@@ -139,7 +139,7 @@ describe("startConnectionServer", () => {
 
       const healthService = boundServer?.implementations.get("Health");
       expect(healthService?.Check).toBeTypeOf("function");
-      await expect(invokeUnary(healthService.Check, {})).resolves.toEqual({
+      await expect(invokeUnary(healthService!.Check, {})).resolves.toEqual({
         status: 1,
         message: "SERVING",
       });
@@ -169,7 +169,7 @@ describe("startConnectionServer", () => {
       discoveryPath,
     });
 
-    const grpcModule = await import("@grpc/grpc-js") as {
+    const grpcModule = await import("@grpc/grpc-js") as unknown as {
       readonly __getServer: (serverAddress: string) => {
         readonly implementations: Map<string, Record<string, any>>;
       } | undefined;

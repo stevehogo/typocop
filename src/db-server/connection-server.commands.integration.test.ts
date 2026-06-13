@@ -36,7 +36,7 @@ describe("Ladybug connection server command surface — integration test", () =>
     vi.restoreAllMocks();
     process.removeAllListeners("SIGTERM");
     process.removeAllListeners("SIGINT");
-    const grpcModule = await import("@grpc/grpc-js") as {
+    const grpcModule = await import("@grpc/grpc-js") as unknown as {
       readonly __clearServers: () => void;
     };
     grpcModule.__clearServers();
@@ -48,7 +48,7 @@ describe("Ladybug connection server command surface — integration test", () =>
     const server = await startConnectionServer(serverConfig);
 
     try {
-      const grpcModule = await import("@grpc/grpc-js") as {
+      const grpcModule = await import("@grpc/grpc-js") as unknown as {
         readonly __getServer: (address: string) => {
           readonly implementations: Map<string, Record<string, (...args: any[]) => any>>;
         } | undefined;

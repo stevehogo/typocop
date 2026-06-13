@@ -96,7 +96,6 @@ describe("Property-based tests: Refresh parameter functionality", () => {
 
   it("Property 1: Refresh clears all graph data", async () => {
     const { executeCLI } = await import("./executor.js");
-    const { CLICommand } = await import("./parser.js");
 
     await fc.assert(
       fc.asyncProperty(

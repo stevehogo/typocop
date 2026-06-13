@@ -37,7 +37,7 @@ describe("Ladybug connection server adapter equivalence — integration test", (
     vi.restoreAllMocks();
     process.removeAllListeners("SIGTERM");
     process.removeAllListeners("SIGINT");
-    const grpcModule = await import("@grpc/grpc-js") as {
+    const grpcModule = await import("@grpc/grpc-js") as unknown as {
       readonly __clearServers: () => void;
     };
     grpcModule.__clearServers();

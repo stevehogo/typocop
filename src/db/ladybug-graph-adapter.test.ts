@@ -118,7 +118,7 @@ describe("LadybugGraphAdapter", () => {
 
   describe("initializeSchema", () => {
     it("creates ExternalDependency and DEPENDS_ON tables", async () => {
-      const adapter = createAdapter("tpc_");
+      const adapter = createAdapter("tpc_") as LadybugGraphAdapter;
       await adapter.initializeSchema();
 
       const executedQueries = mockQuery.mock.calls.map((call) => call[0] as string);

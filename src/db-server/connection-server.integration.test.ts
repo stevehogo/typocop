@@ -39,7 +39,7 @@ describe("Ladybug connection server — integration tests", () => {
     vi.restoreAllMocks();
     process.removeAllListeners("SIGTERM");
     process.removeAllListeners("SIGINT");
-    const grpcModule = await import("@grpc/grpc-js") as {
+    const grpcModule = await import("@grpc/grpc-js") as unknown as {
       readonly __clearServers: () => void;
     };
     grpcModule.__clearServers();
@@ -101,6 +101,7 @@ describe("Ladybug connection server — integration tests", () => {
 
     const originalQueryNodes = LadybugGraphAdapter.prototype.queryNodes;
     vi.spyOn(LadybugGraphAdapter.prototype, "queryNodes").mockImplementation(async function (
+      this: LadybugGraphAdapter,
       ...args
     ) {
       await gate.promise;
