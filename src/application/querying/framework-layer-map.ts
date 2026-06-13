@@ -4,7 +4,7 @@
  *
  * Requirements: 4.1
  */
-import type { FrameworkLayerConfig } from "./framework-layers.js";
+import type { FrameworkLayerConfig } from "./framework-layer-types.js";
 
 const NESTJS_CONFIG: FrameworkLayerConfig = {
   framework: "nestjs",

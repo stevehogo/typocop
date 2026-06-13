@@ -9,7 +9,7 @@
  */
 import { describe, it, expect } from "vitest";
 import * as fc from "fast-check";
-import { processArbitrary } from "../../../types/arbitraries.js";
+import { processArbitrary } from "../../../../tests/support/arbitraries.js";
 import type { Symbol, Relationship } from "../../../core/domain.js";
 import {
   findEntryPoints,

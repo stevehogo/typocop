@@ -12,7 +12,7 @@ import { describe, it, expect } from "vitest";
 import * as fc from "fast-check";
 import * as path from "path";
 import { generateSymbolId, extractAllSymbols } from "./index.js";
-import { symbolArbitrary, locationArbitrary, fileNodeArbitrary } from "../../../types/arbitraries.js";
+import { symbolArbitrary, locationArbitrary, fileNodeArbitrary } from "../../../../tests/support/arbitraries.js";
 import type { FileNode } from "../structure/index.js";
 
 // ─── Unit tests: generateSymbolId ─────────────────────────────────────────────

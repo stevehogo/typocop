@@ -25,7 +25,7 @@ import {
   resolveImplementations,
   resolveReferences,
 } from "./index.js";
-import { symbolArbitrary } from "../../../types/arbitraries.js";
+import { symbolArbitrary } from "../../../../tests/support/arbitraries.js";
 import type { Symbol } from "../../../core/domain.js";
 
 // ─── Test helpers ─────────────────────────────────────────────────────────────

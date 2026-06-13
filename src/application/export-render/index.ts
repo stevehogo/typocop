@@ -6,15 +6,11 @@ import type { DatabaseAdapter } from "../../core/ports/persistence.js";
 import { configurationManager, type ObsidianExportConfig } from "../../platform/config/index.js";
 import { fetchAllGraphData } from "./graph-reader.js";
 import { renderVault } from "./renderer.js";
-import { writeVault } from "./vault-writer.js";
+import { writeVault, type WriteResult } from "./vault-writer.js";
 
 // --- Public types ---
 
-export interface WriteResult {
-  readonly filesWritten: number;
-  readonly directoriesCreated: number;
-  readonly totalBytes: number;
-}
+export type { WriteResult } from "./vault-writer.js";
 
 // --- Re-exports ---
 

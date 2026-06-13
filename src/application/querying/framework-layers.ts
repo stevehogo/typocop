@@ -7,15 +7,9 @@
 import type { GraphNode } from "../../core/ports/persistence.js";
 import { prop } from "../../core/ports/persistence.js";
 import { FRAMEWORK_LAYER_MAP } from "./framework-layer-map.js";
+import type { TraceLayer, FrameworkLayerConfig } from "./framework-layer-types.js";
 
-/** The six possible trace layer classifications. */
-export type TraceLayer = "api" | "controller" | "service" | "repository" | "model" | "unknown";
-
-/** Layer pattern configuration for a specific framework. */
-export interface FrameworkLayerConfig {
-  readonly framework: string;
-  readonly layers: Readonly<Record<TraceLayer, readonly RegExp[]>>;
-}
+export type { TraceLayer, FrameworkLayerConfig } from "./framework-layer-types.js";
 
 /** Order in which layers are checked during classification. */
 const LAYER_ORDER: readonly TraceLayer[] = ["api", "controller", "service", "repository", "model"] as const;

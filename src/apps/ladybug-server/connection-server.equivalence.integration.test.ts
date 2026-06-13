@@ -5,12 +5,12 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@grpc/proto-loader", async () => {
-  const { createProtoLoaderMock } = await import("./grpc-test-mocks.js");
+  const { createProtoLoaderMock } = await import("../../../tests/support/grpc-test-mocks.js");
   return createProtoLoaderMock();
 });
 
 vi.mock("@grpc/grpc-js", async () => {
-  const { createGrpcJsMock } = await import("./grpc-test-mocks.js");
+  const { createGrpcJsMock } = await import("../../../tests/support/grpc-test-mocks.js");
   return createGrpcJsMock();
 });
 
@@ -24,7 +24,7 @@ import {
   makeServerConfig,
   sortNodes,
   sortRelationships,
-} from "./connection-server.test-support.js";
+} from "../../../tests/support/connection-server.test-support.js";
 
 describe("Ladybug connection server adapter equivalence — integration test", () => {
   beforeEach(() => {

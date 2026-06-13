@@ -6,7 +6,13 @@ import { rm, mkdir, writeFile } from "node:fs/promises";
 import { join, dirname, resolve, normalize } from "node:path";
 
 import type { VaultContent } from "./renderer.js";
-import type { WriteResult } from "./index.js";
+
+/** Result of writing a rendered vault to disk. */
+export interface WriteResult {
+  readonly filesWritten: number;
+  readonly directoriesCreated: number;
+  readonly totalBytes: number;
+}
 
 /**
  * Validates that no file in the vault content escapes the output directory

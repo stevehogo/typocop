@@ -14,7 +14,7 @@ import type {
   Embedding,
   Process,
   ProcessStep,
-} from "../core/domain.js";
+} from "../../src/core/domain.js";
 
 // ─── Primitives ───────────────────────────────────────────────────────────────
 
@@ -134,7 +134,7 @@ export const processArbitrary = (): fc.Arbitrary<Process> =>
 
 // ─── FileNode (for parsing tests) ─────────────────────────────────────────────
 
-import type { FileNode } from "../application/indexing/structure/index.js";
+import type { FileNode } from "../../src/application/indexing/structure/index.js";
 
 const languageArbitrary = (): fc.Arbitrary<string> =>
   fc.constantFrom(

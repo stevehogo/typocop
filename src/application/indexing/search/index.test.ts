@@ -4,7 +4,7 @@
 import { describe, it, expect, vi } from "vitest";
 import * as fc from "fast-check";
 import type { Symbol, Cluster, Embedding } from "../../../core/domain.js";
-import { symbolArbitrary, clusterArbitrary, embeddingArbitrary } from "../../../types/arbitraries.js";
+import { symbolArbitrary, clusterArbitrary, embeddingArbitrary } from "../../../../tests/support/arbitraries.js";
 import {
   formatSymbolForEmbedding,
   formatClusterForEmbedding,

@@ -4,7 +4,7 @@ import {
   createResolutionContext,
   TIER_CONFIDENCE,
 } from "./resolution-context.js";
-import { symbolArbitrary } from "../../../types/arbitraries.js";
+import { symbolArbitrary } from "../../../../tests/support/arbitraries.js";
 
 // ─── Example tests ────────────────────────────────────────────────────────────
 

@@ -6,7 +6,7 @@
 import { describe, it } from "vitest";
 import * as fc from "fast-check";
 import { calculateImpactRisk } from "./impact-analysis.js";
-import { symbolArbitrary } from "../../types/arbitraries.js";
+import { symbolArbitrary } from "../../../tests/support/arbitraries.js";
 import type { Symbol } from "../../core/domain.js";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────

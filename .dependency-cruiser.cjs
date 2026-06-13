@@ -15,6 +15,6 @@ module.exports = {
     { name: "app-no-up", severity: "error", from: { path: "^src/application/" }, to: { path: "^src/apps/" } },
     { name: "app-no-sibling", severity: "error", from: { path: "^src/application/([^/]+)/" }, to: { path: "^src/application/(?!$1/)[^/]+/" } },
     { name: "apps-no-sibling", severity: "error", from: { path: "^src/apps/([^/]+)/" }, to: { path: "^src/apps/(?!$1/)[^/]+/" } },
-    { name: "no-orphans", severity: "warn", from: { orphan: true, pathNot: "\\.d\\.ts$" }, to: {} },
+    { name: "no-orphans", severity: "error", from: { orphan: true, pathNot: "\\.d\\.ts$" }, to: {} },
   ],
 };

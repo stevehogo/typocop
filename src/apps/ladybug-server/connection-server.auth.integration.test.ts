@@ -5,18 +5,18 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@grpc/proto-loader", async () => {
-  const { createProtoLoaderMock } = await import("./grpc-test-mocks.js");
+  const { createProtoLoaderMock } = await import("../../../tests/support/grpc-test-mocks.js");
   return createProtoLoaderMock();
 });
 
 vi.mock("@grpc/grpc-js", async () => {
-  const { createGrpcJsMock } = await import("./grpc-test-mocks.js");
+  const { createGrpcJsMock } = await import("../../../tests/support/grpc-test-mocks.js");
   return createGrpcJsMock();
 });
 
 import { RemoteDatabaseAdapter } from "../../infrastructure/remote-transport/remote-adapters/remote-database-adapter.js";
 import { startConnectionServer } from "./server.js";
-import { makeClientConfig, makeServerConfig } from "./connection-server.test-support.js";
+import { makeClientConfig, makeServerConfig } from "../../../tests/support/connection-server.test-support.js";
 
 describe("Ladybug connection server auth enforcement — integration test", () => {
   beforeEach(() => {

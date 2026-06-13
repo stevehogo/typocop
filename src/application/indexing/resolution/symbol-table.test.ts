@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import * as fc from "fast-check";
 import { createSymbolTable, buildSymbolTable } from "./symbol-table.js";
-import { symbolArbitrary } from "../../../types/arbitraries.js";
+import { symbolArbitrary } from "../../../../tests/support/arbitraries.js";
 
 // ─── createSymbolTable ────────────────────────────────────────────────────────
 

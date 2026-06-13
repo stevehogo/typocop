@@ -9,7 +9,7 @@
  */
 import { describe, it } from "vitest";
 import * as fc from "fast-check";
-import { symbolArbitrary, locationArbitrary, clusterArbitrary } from "./arbitraries.js";
+import { symbolArbitrary, locationArbitrary, clusterArbitrary } from "./support/arbitraries.js";
 
 // ─── Property 1: Symbol Uniqueness ───────────────────────────────────────────
 
