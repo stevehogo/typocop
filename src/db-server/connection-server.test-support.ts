@@ -7,9 +7,9 @@ import { join } from "node:path";
 // intermittently hang/crash on native teardown ("worker exited unexpectedly").
 // Kept scoped here (not a global setupFile) to avoid loading the heavy native
 // stack — and its memory cost — into every unrelated unit-test worker.
-import "../db/huggingface-embedding-adapter.js";
+import "../infrastructure/embeddings/huggingface-embedding-adapter.js";
 import type { FullConfig, LadybugClientConfig, LadybugServerConfig } from "../platform/config/types.js";
-import { createDatabaseAdapter } from "../db/database-adapter.js";
+import { createDatabaseAdapter } from "../infrastructure/persistence/database-adapter.js";
 import type { RemoteDatabaseAdapter } from "../infrastructure/remote-transport/remote-adapters/remote-database-adapter.js";
 
 export function makeServerConfig(root: string, overrides: Partial<LadybugServerConfig> = {}): LadybugServerConfig {

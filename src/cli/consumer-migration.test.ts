@@ -44,7 +44,7 @@ describe("MCP server transport.onclose (Req 11.1)", () => {
     );
 
     expect(serverSource).toMatch(
-      /import\s*\{[^}]*drainAllPools[^}]*\}\s*from\s*["']\.\.\/db\/pool-registry/,
+      /import\s*\{[^}]*drainAllPools[^}]*\}\s*from\s*["']\.\.\/infrastructure\/persistence\/pool-registry/,
     );
   });
 });
@@ -59,7 +59,7 @@ describe("CLI executor with pool-backed adapter (Req 11.2)", () => {
     );
 
     expect(executorSource).toMatch(
-      /import\s*\{[^}]*createDatabaseAdapter[^}]*\}\s*from\s*["']\.\.\/db\/database-adapter/,
+      /import\s*\{[^}]*createDatabaseAdapter[^}]*\}\s*from\s*["']\.\.\/infrastructure\/persistence\/database-adapter/,
     );
   });
 
@@ -108,7 +108,7 @@ describe("Obsidian CLI drainAllPools on exit (Req 11.3)", () => {
     );
 
     expect(obsidianSource).toMatch(
-      /import\s*\{[^}]*drainAllPools[^}]*\}\s*from\s*["']\.\.\/db\/pool-registry/,
+      /import\s*\{[^}]*drainAllPools[^}]*\}\s*from\s*["']\.\.\/infrastructure\/persistence\/pool-registry/,
     );
   });
 
@@ -156,7 +156,7 @@ describe("Obsidian CLI drainAllPools on exit (Req 11.3)", () => {
 describe("No direct createLadybugConnection outside src/db/ (Req 11.4)", () => {
   it("should not have createLadybugConnection imports in production code outside src/db/", () => {
     const srcDir = path.resolve("src");
-    const dbDir = path.resolve("src/db");
+    const dbDir = path.resolve("src/infrastructure/persistence");
     const violations: string[] = [];
 
     function walkDir(dir: string): void {

@@ -9,9 +9,9 @@ import { configurationManager, ConfigurationError, PrefixValidationError } from 
 import chalk from "chalk";
 import ora from "ora";
 import { executeObsidianExport } from "../obsidian-export/index.js";
-import { createDatabaseAdapter } from "../db/database-adapter.js";
-import { createEmbeddingAdapterFromConfig } from "../db/embedding-factory.js";
-import { drainAllPools } from "../db/pool-registry.js";
+import { createDatabaseAdapter } from "../infrastructure/persistence/database-adapter.js";
+import { createEmbeddingAdapterFromConfig } from "../infrastructure/embeddings/embedding-factory.js";
+import { drainAllPools } from "../infrastructure/persistence/pool-registry.js";
 
 function formatConfigurationError(err: ConfigurationError): string {
   if (err instanceof PrefixValidationError) {

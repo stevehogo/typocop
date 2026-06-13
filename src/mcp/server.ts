@@ -8,9 +8,9 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { createMCPServer } from "./registration.js";
 import { executeTool } from "./tools.js";
-import { createDatabaseAdapter } from "../db/database-adapter.js";
-import { createEmbeddingAdapterFromConfig } from "../db/embedding-factory.js";
-import { drainAllPools } from "../db/pool-registry.js";
+import { createDatabaseAdapter } from "../infrastructure/persistence/database-adapter.js";
+import { createEmbeddingAdapterFromConfig } from "../infrastructure/embeddings/embedding-factory.js";
+import { drainAllPools } from "../infrastructure/persistence/pool-registry.js";
 import { configurationManager, ConfigurationError, PrefixValidationError } from "../platform/config/index.js";
 import type { MCPToolResponse } from "../core/domain.js";
 import type { DatabaseAdapter } from "../core/ports/persistence.js";

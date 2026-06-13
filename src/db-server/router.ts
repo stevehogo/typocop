@@ -1,7 +1,7 @@
 import { status } from "@grpc/grpc-js";
 
-import { LadybugGraphAdapter } from "../db/ladybug-graph-adapter.js";
-import { LadybugVectorAdapter } from "../db/ladybug-vector-adapter.js";
+import { LadybugGraphAdapter } from "../infrastructure/persistence/ladybug-graph-adapter.js";
+import { LadybugVectorAdapter } from "../infrastructure/persistence/ladybug-vector-adapter.js";
 import type { GraphNode, GraphRelationship } from "../core/ports/persistence.js";
 import type { Embedding, SearchResult } from "../core/domain.js";
 import { InMemoryMetricsCollector, type MetricsCollector } from "./metrics.js";

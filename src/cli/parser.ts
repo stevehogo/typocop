@@ -2,7 +2,7 @@ import { Command, CommanderError } from "commander";
 import * as fs from "fs";
 import { Language } from "../core/domain.js";
 import type { ObsidianExportConfig } from "../platform/config/index.js";
-import { detectDirectoryLanguage } from "../parser/language.js";
+import { detectDirectoryLanguage } from "../infrastructure/parsing/language.js";
 
 export interface CLIConfig {
   sourcePath: string;

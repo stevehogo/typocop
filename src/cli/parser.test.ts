@@ -1,10 +1,10 @@
 import { describe, it, expect, vi } from "vitest";
 import { parseArgs } from "./parser.js";
 import * as fs from "fs";
-import * as languageModule from "../parser/language.js";
+import * as languageModule from "../infrastructure/parsing/language.js";
 
 vi.mock("fs");
-vi.mock("../parser/language.js", async (importOriginal) => {
+vi.mock("../infrastructure/parsing/language.js", async (importOriginal) => {
   const actual = await importOriginal<typeof languageModule>();
   return { ...actual, detectDirectoryLanguage: vi.fn() };
 });

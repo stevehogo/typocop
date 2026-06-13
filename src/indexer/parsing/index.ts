@@ -7,19 +7,19 @@
  * Requirements: 3.2, 4.1, 4.2
  */
 import type { Symbol, Language } from "../../core/domain.js";
-import type { ASTNode } from "../../parser/ast-node.js";
+import type { ASTNode } from "../../infrastructure/parsing/ast-node.js";
 import type { FileNode } from "../structure/index.js";
-import { initParser } from "../../parser/init.js";
-import { parseFile, ParseError } from "../../parser/parse-file.js";
+import { initParser } from "../../infrastructure/parsing/init.js";
+import { parseFile, ParseError } from "../../infrastructure/parsing/parse-file.js";
 import {
   extractSymbolsWithQueries,
   extractSymbols,
   type RawRelationshipHint,
-} from "../../parser/extract-symbols.js";
+} from "../../infrastructure/parsing/extract-symbols.js";
 import Parser from "tree-sitter";
 import * as path from "path";
 
-export type { RawRelationshipHint } from "../../parser/extract-symbols.js";
+export type { RawRelationshipHint } from "../../infrastructure/parsing/extract-symbols.js";
 
 /** Combined output of Phase 2 */
 export interface ParsingResult {

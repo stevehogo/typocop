@@ -7,7 +7,7 @@ import { executeCLI } from "./executor.js";
 import { CLICommand } from "./parser.js";
 import ora from "ora";
 import * as pipeline from "../indexer/pipeline.js";
-import * as dbAdapter from "../db/database-adapter.js";
+import * as dbAdapter from "../infrastructure/persistence/database-adapter.js";
 
 vi.mock("ora", () => {
   const oraMock = {
@@ -22,11 +22,11 @@ vi.mock("ora", () => {
 
 // ── Mock DatabaseAdapter via vi.mock factory (hoisted) ────────────────────────
 
-vi.mock("../db/database-adapter.js", () => ({
+vi.mock("../infrastructure/persistence/database-adapter.js", () => ({
   createDatabaseAdapter: vi.fn(),
 }));
 
-vi.mock("../db/embedding-factory.js", () => ({
+vi.mock("../infrastructure/embeddings/embedding-factory.js", () => ({
   createEmbeddingAdapterFromConfig: vi.fn(() => ({
     isEnabled: () => false, embedText: async () => null, getDimensions: () => 0,
   })),

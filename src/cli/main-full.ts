@@ -5,7 +5,7 @@
 import { existsSync } from "node:fs";
 import { parseArgs, executeCLI, CLIValidationError } from "./index.js";
 import { configurationManager, ConfigurationError, PrefixValidationError } from "../platform/config/index.js";
-import { drainAllPools } from "../db/pool-registry.js";
+import { drainAllPools } from "../infrastructure/persistence/pool-registry.js";
 
 function formatConfigurationError(err: ConfigurationError): string {
   if (err instanceof PrefixValidationError) {

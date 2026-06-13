@@ -14,7 +14,7 @@ vi.mock("@grpc/grpc-js", async () => {
   return createGrpcJsMock();
 });
 
-import { createDatabaseAdapter } from "../db/database-adapter.js";
+import { createDatabaseAdapter } from "../infrastructure/persistence/database-adapter.js";
 import { RemoteDatabaseAdapter } from "../infrastructure/remote-transport/remote-adapters/remote-database-adapter.js";
 import { startConnectionServer } from "./server.js";
 import {

@@ -33,7 +33,7 @@ vi.mock("ora", () => {
   return { default: vi.fn(() => oraMock) };
 });
 
-vi.mock("../db/database-adapter.js", () => ({
+vi.mock("../infrastructure/persistence/database-adapter.js", () => ({
   createDatabaseAdapter: vi.fn().mockImplementation(async () => ({
     initialize: vi.fn().mockResolvedValue(undefined),
     close: vi.fn().mockResolvedValue(undefined),
@@ -53,7 +53,7 @@ vi.mock("../db/database-adapter.js", () => ({
   })),
 }));
 
-vi.mock("../db/embedding-factory.js", () => ({
+vi.mock("../infrastructure/embeddings/embedding-factory.js", () => ({
   createEmbeddingAdapterFromConfig: vi.fn(() => ({
     isEnabled: () => false, embedText: async () => null, getDimensions: () => 0,
   })),

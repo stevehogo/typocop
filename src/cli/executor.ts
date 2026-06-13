@@ -5,8 +5,8 @@
 import { CLICommand } from "./parser.js";
 import chalk from "chalk";
 import ora from "ora";
-import { createDatabaseAdapter } from "../db/database-adapter.js";
-import { createEmbeddingAdapterFromConfig } from "../db/embedding-factory.js";
+import { createDatabaseAdapter } from "../infrastructure/persistence/database-adapter.js";
+import { createEmbeddingAdapterFromConfig } from "../infrastructure/embeddings/embedding-factory.js";
 import { runIndexingPipeline, type PipelineConfig } from "../indexer/pipeline.js";
 import { configurationManager } from "../platform/config/index.js";
 import type { DatabaseAdapter } from "../core/ports/persistence.js";

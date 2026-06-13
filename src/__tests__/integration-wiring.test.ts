@@ -56,7 +56,7 @@ describe("Integration Wiring", () => {
 
   describe("Database Adapter Wiring", () => {
     it("should export createDatabaseAdapter from db module", async () => {
-      const { createDatabaseAdapter } = await import("../db/database-adapter.js");
+      const { createDatabaseAdapter } = await import("../infrastructure/persistence/database-adapter.js");
       expect(createDatabaseAdapter).toBeDefined();
       expect(typeof createDatabaseAdapter).toBe("function");
     });

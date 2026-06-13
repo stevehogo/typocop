@@ -41,7 +41,7 @@ vi.mock("../mcp/index.js", () => ({
   startMCPServer: mockStartMCPServer,
 }));
 
-vi.mock("../db/pool-registry.js", () => ({
+vi.mock("../infrastructure/persistence/pool-registry.js", () => ({
   drainAllPools: mockDrainAllPools,
 }));
 

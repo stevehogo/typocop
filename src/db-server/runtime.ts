@@ -1,8 +1,8 @@
 import type { Connection, Database } from "@ladybugdb/core";
 
-import { createEmbeddedConnection, type LadybugConnection } from "../db/index.js";
-import { LadybugGraphAdapter } from "../db/ladybug-graph-adapter.js";
-import { LadybugVectorAdapter } from "../db/ladybug-vector-adapter.js";
+import { createEmbeddedConnection, type LadybugConnection } from "../infrastructure/persistence/index.js";
+import { LadybugGraphAdapter } from "../infrastructure/persistence/ladybug-graph-adapter.js";
+import { LadybugVectorAdapter } from "../infrastructure/persistence/ladybug-vector-adapter.js";
 import { logServerEvent } from "../platform/logging/logger.js";
 
 export interface EmbeddedDatabaseRuntime {
