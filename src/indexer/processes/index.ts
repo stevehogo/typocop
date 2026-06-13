@@ -6,7 +6,7 @@
  *
  * Requirements: 3.5, 7.1–7.7
  */
-import type { Symbol, Relationship, Process } from "../../types/index.js";
+import type { Symbol, Relationship, Process } from "../../core/domain.js";
 import { findEntryPoints, buildCallGraph } from "./entry-points.js";
 import { traceAllExecutions } from "./trace.js";
 import { analyzeDataFlow, inferProcessName } from "./data-flow.js";

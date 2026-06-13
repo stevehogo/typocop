@@ -4,7 +4,7 @@
  */
 import { describe, it, expect, vi } from "vitest";
 import { fetchAllGraphData } from "./graph-reader.js";
-import type { GraphAdapter } from "../db/types.js";
+import type { GraphAdapter } from "../core/ports/persistence.js";
 
 // --- Mock helpers ---
 

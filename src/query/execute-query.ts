@@ -2,8 +2,8 @@
  * Query execution engine.
  * Requirements: 9.3, 9.4, 9.5, 9.6, 9.7, 23.3, 7.1
  */
-import type { DatabaseAdapter } from "../db/types.js";
-import type { Query, QueryResult } from "../types/index.js";
+import type { DatabaseAdapter } from "../core/ports/persistence.js";
+import type { Query, QueryResult } from "../core/domain.js";
 import { QUERY_TIMEOUT_MS } from "../utils/limits.js";
 import { parseQueryIntent } from "./parse-intent.js";
 import { executeImpactAnalysis, calculateImpactRisk } from "./impact-analysis.js";

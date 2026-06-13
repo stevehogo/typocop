@@ -7,8 +7,8 @@
  *
  * Requirements: 10.1, 10.2, 10.3, 10.5, 10.6
  */
-import type { ClusterCategory, Embedding, Symbol } from "../../types/index.js";
-import type { EmbeddingAdapter } from "../../db/types.js";
+import type { ClusterCategory, Embedding, Symbol } from "../../core/domain.js";
+import type { EmbeddingAdapter } from "../../core/ports/persistence.js";
 import { verifyEmbeddingText } from "../../security/privacy.js";
 
 // ─── Constants ────────────────────────────────────────────────────────────────

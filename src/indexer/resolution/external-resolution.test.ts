@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Symbol } from "../../types/index.js";
+import type { Symbol } from "../../core/domain.js";
 import { resolveHints } from "./index.js";
 
 function makeSymbol(id: string, filePath: string): Symbol {

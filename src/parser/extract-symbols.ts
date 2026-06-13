@@ -1,6 +1,6 @@
 import * as crypto from "crypto";
 import Parser from "tree-sitter";
-import type { Language, Symbol, SymbolKind, Visibility, Modifier } from "../types/index.js";
+import type { Language, Symbol, SymbolKind, Visibility, Modifier } from "../core/domain.js";
 import type { ASTNode } from "./ast-node.js";
 import { LANGUAGE_QUERIES } from "./queries.js";
 

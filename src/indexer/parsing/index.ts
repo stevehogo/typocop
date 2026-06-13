@@ -6,7 +6,7 @@
  *
  * Requirements: 3.2, 4.1, 4.2
  */
-import type { Symbol, Language } from "../../types/index.js";
+import type { Symbol, Language } from "../../core/domain.js";
 import type { ASTNode } from "../../parser/ast-node.js";
 import type { FileNode } from "../structure/index.js";
 import { initParser } from "../../parser/init.js";

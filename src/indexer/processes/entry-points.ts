@@ -8,7 +8,7 @@
  *
  * Requirements: 3.5, 7.1
  */
-import type { Symbol, Relationship } from "../../types/index.js";
+import type { Symbol, Relationship } from "../../core/domain.js";
 
 // ─── Name patterns ────────────────────────────────────────────────────────────
 

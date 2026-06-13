@@ -4,8 +4,8 @@
  * Requirements: 7.3, 7.4, 7.5
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import type { DatabaseAdapter, GraphAdapter, VectorAdapter, EmbeddingAdapter, GraphNode } from "../db/types.js";
-import type { SearchResult } from "../types/index.js";
+import type { DatabaseAdapter, GraphAdapter, VectorAdapter, EmbeddingAdapter, GraphNode } from "../core/ports/persistence.js";
+import type { SearchResult } from "../core/domain.js";
 import { sanitizeQuery, executeSmartSearchTool, computeConfidence, buildSummary } from "./smart-search-tool.js";
 
 // ── Mock adapter factory ──────────────────────────────────────────────────────

@@ -10,7 +10,7 @@
 import { describe, it, expect } from "vitest";
 import * as fc from "fast-check";
 import { processArbitrary } from "../../types/arbitraries.js";
-import type { Symbol, Relationship } from "../../types/index.js";
+import type { Symbol, Relationship } from "../../core/domain.js";
 import {
   findEntryPoints,
   buildCallGraph,

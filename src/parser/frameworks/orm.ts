@@ -2,7 +2,7 @@
  * Shared ORM parsers for Express/Fastify.
  * Requirements: 14.4, 14.5
  */
-import type { Symbol } from "../../types/index.js";
+import type { Symbol } from "../../core/domain.js";
 import { extractSymbols } from "../extract-symbols.js";
 import { fromSyntaxNode } from "../ast-node.js";
 import fs from "fs/promises";

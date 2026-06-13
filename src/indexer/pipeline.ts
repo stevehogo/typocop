@@ -15,8 +15,8 @@ import type {
   Process,
   Relationship,
   Symbol,
-} from "../types/index.js";
-import type { DatabaseAdapter, GraphAdapter, VectorAdapter, EmbeddingAdapter } from "../db/types.js";
+} from "../core/domain.js";
+import type { DatabaseAdapter, GraphAdapter, VectorAdapter, EmbeddingAdapter } from "../core/ports/persistence.js";
 import { walkFileTree, type FileNode } from "./structure/index.js";
 import { extractAllSymbols } from "./parsing/index.js";
 import { resolveReferences } from "./resolution/index.js";

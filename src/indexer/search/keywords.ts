@@ -1,6 +1,6 @@
 // Phase 6: Keyword extraction and index building for symbols
 
-import type { Symbol } from "../../types/index.js";
+import type { Symbol } from "../../core/domain.js";
 
 /** Common stop words to filter from keyword extraction */
 const STOP_WORDS = new Set([

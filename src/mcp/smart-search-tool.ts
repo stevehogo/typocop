@@ -2,9 +2,9 @@
  * smart_search MCP tool — semantic symbol search via DatabaseAdapter.
  * Requirements: 1.1–1.8, 2.1–2.3, 7.1, 7.3, 7.4
  */
-import type { DatabaseAdapter, GraphAdapter, GraphNode } from "../db/types.js";
-import { prop } from "../db/types.js";
-import type { MCPToolResponse } from "../types/index.js";
+import type { DatabaseAdapter, GraphAdapter, GraphNode } from "../core/ports/persistence.js";
+import { prop } from "../core/ports/persistence.js";
+import type { MCPToolResponse } from "../core/domain.js";
 import { sanitizeQuery as sanitizeQueryImpl } from "../security/sanitize.js";
 
 // Re-export for testing

@@ -1,4 +1,4 @@
-import type { GraphAdapter, GraphNode, GraphRelationship } from "./types.js";
+import type { GraphAdapter, GraphNode, GraphRelationship } from "../core/ports/persistence.js";
 import type { RemoteRpcClient, RpcRequestMetadata } from "./remote-rpc-client.js";
 
 interface QueryNodesRequest {

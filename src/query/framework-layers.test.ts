@@ -3,7 +3,7 @@
  * Validates: Requirements 4.1, 4.2, 4.3, 4.4, 4.6
  */
 import { describe, it, expect } from "vitest";
-import type { GraphNode } from "../db/types.js";
+import type { GraphNode } from "../core/ports/persistence.js";
 import { detectFramework, classifyLayer, GENERIC_LAYER_CONFIG } from "./framework-layers.js";
 
 // ─── Factories ────────────────────────────────────────────────────────────────

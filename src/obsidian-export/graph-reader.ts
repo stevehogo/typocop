@@ -2,7 +2,7 @@
  * GraphReader — fetches all graph data via GraphAdapter.
  * Requirements: 2.1–2.9
  */
-import type { GraphAdapter, GraphNode } from "../db/types.js";
+import type { GraphAdapter, GraphNode } from "../core/ports/persistence.js";
 
 export interface ExportedSymbol {
   readonly id: string;

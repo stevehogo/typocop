@@ -4,8 +4,8 @@
  */
 import Fastify from "fastify";
 import type { FastifyInstance } from "fastify";
-import type { DatabaseAdapter } from "../db/types.js";
-import type { Query, QueryResult, RelationType } from "../types/index.js";
+import type { DatabaseAdapter } from "../core/ports/persistence.js";
+import type { Query, QueryResult, RelationType } from "../core/domain.js";
 import { executeQuery } from "./execute-query.js";
 import { sanitizeQuery } from "../security/sanitize.js";
 import { configurationManager, ConfigurationError } from "../config/index.js";

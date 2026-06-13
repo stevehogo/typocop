@@ -5,7 +5,7 @@
  * - fileIndex: Map<filePath, Map<name, SymbolDefinition>> — O(1) exact lookup per file
  * - globalIndex: Map<name, SymbolDefinition[]> — global lookup across all files
  */
-import type { Symbol } from "../../types/index.js";
+import type { Symbol } from "../../core/domain.js";
 
 export interface SymbolDefinition {
   /** References Symbol.id from src/types/index.ts */

@@ -6,7 +6,7 @@
  *
  * Requirements: 3.5, 7.2, 7.3, 7.4, 7.6
  */
-import type { ProcessStep } from "../../types/index.js";
+import type { ProcessStep } from "../../core/domain.js";
 import type { CallGraph } from "./entry-points.js";
 import { MAX_TRAVERSAL_DEPTH } from "../../utils/limits.js";
 

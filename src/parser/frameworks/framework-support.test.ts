@@ -5,7 +5,7 @@
  */
 import { describe, it, expect } from "vitest";
 import * as fc from "fast-check";
-import type { FrameworkSupport, Language, TracingLevel } from "../../types/index.js";
+import type { FrameworkSupport, Language, TracingLevel } from "../../core/domain.js";
 import { validateFrameworkSupport, assertValidFrameworkSupport } from "./framework-support.js";
 
 // ─── Arbitraries ─────────────────────────────────────────────────────────────

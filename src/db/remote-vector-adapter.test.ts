@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import type { Embedding } from "../types/index.js";
+import type { Embedding } from "../core/domain.js";
 import { RemoteVectorAdapter } from "./remote-vector-adapter.js";
 import type {
   RemoteRpcClient,

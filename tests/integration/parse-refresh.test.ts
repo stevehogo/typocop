@@ -15,7 +15,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import type { DatabaseAdapter } from "../../src/db/types.js";
+import type { DatabaseAdapter } from "../../src/core/ports/persistence.js";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 

@@ -5,9 +5,9 @@
  */
 
 import type { OllamaConfig } from "../config/types.js";
-import type { Embedding } from "../types/index.js";
+import type { Embedding } from "../core/domain.js";
 import { verifyEmbeddingText } from "../security/privacy.js";
-import type { EmbeddingAdapter } from "./types.js";
+import type { EmbeddingAdapter } from "../core/ports/persistence.js";
 
 /** Response shape from Ollama's /api/embeddings endpoint. */
 interface OllamaEmbeddingResponse {

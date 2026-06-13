@@ -2,9 +2,9 @@
  * Pre-commit check query logic.
  * Requirements: 11b.1, 11b.2, 11b.3, 11b.4, 11b.5, 7.2
  */
-import type { GraphAdapter, GraphNode } from "../db/types.js";
-import { prop } from "../db/types.js";
-import type { Symbol, Relationship, Process, QueryResult, RiskLevel, SymbolKind, Visibility } from "../types/index.js";
+import type { GraphAdapter, GraphNode } from "../core/ports/persistence.js";
+import { prop } from "../core/ports/persistence.js";
+import type { Symbol, Relationship, Process, QueryResult, RiskLevel, SymbolKind, Visibility } from "../core/domain.js";
 import { graphNodeToCluster } from "./process-helpers.js";
 import { MAX_TRAVERSAL_DEPTH } from "../utils/limits.js";
 

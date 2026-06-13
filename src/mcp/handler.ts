@@ -2,7 +2,7 @@
  * MCP request handler.
  * Requirements: 15.3, 15.4, 15.5, 15.7, 7.1
  */
-import type { DatabaseAdapter } from "../db/types.js";
+import type { DatabaseAdapter } from "../core/ports/persistence.js";
 import type { MCPRequest, MCPResponse, MCPError } from "./types.js";
 import type { AuthConfig } from "./auth.js";
 import { MCPValidationError, MCPAuthenticationError } from "./types.js";

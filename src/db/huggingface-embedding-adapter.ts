@@ -13,9 +13,9 @@ import {
   type FeatureExtractionPipeline,
 } from "@huggingface/transformers";
 import type { HuggingFaceConfig } from "../config/types.js";
-import type { Embedding } from "../types/index.js";
+import type { Embedding } from "../core/domain.js";
 import { verifyEmbeddingText } from "../security/privacy.js";
-import type { EmbeddingAdapter } from "./types.js";
+import type { EmbeddingAdapter } from "../core/ports/persistence.js";
 
 /**
  * Generates embeddings in-process using `@huggingface/transformers`.

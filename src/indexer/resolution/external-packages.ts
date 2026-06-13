@@ -2,7 +2,7 @@ import type {
   ExternalDependencyNode,
   Language,
   PackageEcosystem,
-} from "../../types/index.js";
+} from "../../core/domain.js";
 import { C_SYSTEM_HEADERS, GO_VCS_HOSTS } from "../../utils/limits.js";
 
 function trimImportPath(importPath: string): string {

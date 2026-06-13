@@ -1,5 +1,5 @@
 import { status } from "@grpc/grpc-js";
-import type { GraphNode, GraphRelationship } from "../../db/types.js";
+import type { GraphNode, GraphRelationship } from "../../core/ports/persistence.js";
 import { toServiceError } from "../errors.js";
 import type { GraphOperation, OperationRouter } from "../router.js";
 import type { RequestMetadata } from "../types.js";

@@ -9,7 +9,7 @@
 import { describe, it, expect } from "vitest";
 import * as fc from "fast-check";
 import { clusterArbitrary, symbolArbitrary } from "../../types/arbitraries.js";
-import type { Symbol, Relationship } from "../../types/index.js";
+import type { Symbol, Relationship } from "../../core/domain.js";
 import { buildClusterGraph, calculateCohesion } from "./graph.js";
 import { louvainClustering } from "./louvain.js";
 import { classifyCluster } from "./enrichment.js";

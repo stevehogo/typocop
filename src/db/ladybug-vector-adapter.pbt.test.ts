@@ -14,7 +14,7 @@ import { describe, it, expect } from "vitest";
 import * as fc from "fast-check";
 import type { LbugValue } from "@ladybugdb/core";
 import { LadybugVectorAdapter, SEMANTIC_SEARCH_THRESHOLD } from "./ladybug-vector-adapter.js";
-import type { SearchResult, Embedding } from "../types/index.js";
+import type { SearchResult, Embedding } from "../core/domain.js";
 
 // ─── Arbitraries ─────────────────────────────────────────────────────────────
 

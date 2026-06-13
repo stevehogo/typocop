@@ -10,7 +10,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import * as fc from "fast-check";
-import type { DatabaseAdapter, GraphAdapter, VectorAdapter, EmbeddingAdapter } from "../db/types.js";
+import type { DatabaseAdapter, GraphAdapter, VectorAdapter, EmbeddingAdapter } from "../core/ports/persistence.js";
 
 // ---------------------------------------------------------------------------
 // Mock query modules — return minimal valid results immediately

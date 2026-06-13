@@ -2,7 +2,7 @@
  * Query result formatting.
  * Requirements: 9.4, 9.5
  */
-import type { QueryResult } from "../types/index.js";
+import type { QueryResult } from "../core/domain.js";
 
 /**
  * Format a QueryResult into a human-readable string.

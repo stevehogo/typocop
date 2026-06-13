@@ -7,7 +7,7 @@
  *   6.3 Existing four tools still return valid MCPToolResponse (Req 3.1, 7.1)
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import type { DatabaseAdapter, GraphAdapter, VectorAdapter, EmbeddingAdapter } from "../../src/db/types.js";
+import type { DatabaseAdapter, GraphAdapter, VectorAdapter, EmbeddingAdapter } from "../../src/core/ports/persistence.js";
 import { createMCPServer } from "../../src/mcp/registration.js";
 import { executeTool } from "../../src/mcp/tools.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";

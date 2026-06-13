@@ -2,7 +2,7 @@
  * FastAPI framework-specific parser.
  * Requirements: 14.7, 14.10
  */
-import type { Symbol, FrameworkSupport } from "../../types/index.js";
+import type { Symbol, FrameworkSupport } from "../../core/domain.js";
 import { extractSymbols } from "../extract-symbols.js";
 import { fromSyntaxNode } from "../ast-node.js";
 import path from "path";

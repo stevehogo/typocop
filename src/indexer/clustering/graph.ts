@@ -6,7 +6,7 @@
  *
  * Requirements: 3.4, 6.1
  */
-import type { Symbol, Relationship } from "../../types/index.js";
+import type { Symbol, Relationship } from "../../core/domain.js";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 

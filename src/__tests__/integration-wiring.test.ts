@@ -62,7 +62,7 @@ describe("Integration Wiring", () => {
     });
 
     it("should export DatabaseAdapter types from db module", async () => {
-      const module = await import("../db/types.js");
+      const module = await import("../core/ports/persistence.js");
       expect(module).toBeDefined();
     });
   });

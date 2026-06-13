@@ -5,8 +5,8 @@
  *
  * Requirements: 3.5, 7.5, 7.7
  */
-import type { Symbol, Relationship, DataFlowEdge } from "../../types/index.js";
-import type { ProcessStep } from "../../types/index.js";
+import type { Symbol, Relationship, DataFlowEdge } from "../../core/domain.js";
+import type { ProcessStep } from "../../core/domain.js";
 
 // ─── Data flow analysis ───────────────────────────────────────────────────────
 

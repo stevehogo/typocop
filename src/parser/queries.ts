@@ -9,7 +9,7 @@
  *   @heritage.*     — extends, implements, trait-impl
  */
 
-import type { Language } from "../types/index.js";
+import type { Language } from "../core/domain.js";
 
 export const TYPESCRIPT_QUERIES = `
 (class_declaration

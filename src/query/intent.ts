@@ -5,7 +5,7 @@
  * Classifies natural language query text into a QueryIntent.
  * Confidence is always >= 0.7 (Req 9.2, 21.6, 24.3).
  */
-import type { QueryIntent } from "../types/index.js";
+import type { QueryIntent } from "../core/domain.js";
 
 interface ClassifiedIntent {
   readonly intent: QueryIntent;

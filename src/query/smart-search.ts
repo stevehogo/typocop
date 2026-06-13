@@ -2,8 +2,8 @@
  * Smart search query implementation.
  * Requirements: 11.1, 11.2, 11.3, 11.4, 11.5, 22.3, 7.3, 7.4
  */
-import type { GraphAdapter, VectorAdapter, EmbeddingAdapter } from "../db/types.js";
-import type { Symbol, Cluster, Process, SearchResult } from "../types/index.js";
+import type { GraphAdapter, VectorAdapter, EmbeddingAdapter } from "../core/ports/persistence.js";
+import type { Symbol, Cluster, Process, SearchResult } from "../core/domain.js";
 import { preprocessQuery } from "./preprocess.js";
 
 // ─── Graph query helpers using GraphAdapter ───────────────────────────────────

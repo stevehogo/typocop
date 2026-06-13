@@ -6,8 +6,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { LbugValue } from "@ladybugdb/core";
 import { LadybugVectorAdapter, SEMANTIC_SEARCH_THRESHOLD } from "./ladybug-vector-adapter.js";
-import type { VectorAdapter } from "./types.js";
-import type { Embedding } from "../types/index.js";
+import type { VectorAdapter } from "../core/ports/persistence.js";
+import type { Embedding } from "../core/domain.js";
 
 // ─── Mock LadybugDB Connection ───────────────────────────────────────────────
 

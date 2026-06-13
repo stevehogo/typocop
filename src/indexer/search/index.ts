@@ -1,7 +1,7 @@
 // Phase 6: Search index orchestrator
 // Combines keyword indexing and embedding generation into a unified SearchIndex
 
-import type { Symbol, Cluster, Embedding } from "../../types/index.js";
+import type { Symbol, Cluster, Embedding } from "../../core/domain.js";
 import { buildKeywordIndex } from "./keywords.js";
 import { formatSymbolForEmbedding, formatClusterForEmbedding } from "./format.js";
 

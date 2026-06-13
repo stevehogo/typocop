@@ -2,9 +2,9 @@
  * Context retrieval query implementation - 360° view of a symbol.
  * Requirements: 12.1, 12.2, 12.3, 12.4, 12.5, 12.6, 7.2, 1.1, 1.2, 1.4, 1.5
  */
-import type { GraphAdapter, GraphNode } from "../db/types.js";
-import { prop } from "../db/types.js";
-import type { Relationship, Process, QueryResult } from "../types/index.js";
+import type { GraphAdapter, GraphNode } from "../core/ports/persistence.js";
+import { prop } from "../core/ports/persistence.js";
+import type { Relationship, Process, QueryResult } from "../core/domain.js";
 import { graphNodeToCluster } from "./process-helpers.js";
 import { type CypherNodeRow, rowToNode, graphNodeToSymbol } from "./graph-helpers.js";
 import { MAX_TRAVERSAL_DEPTH } from "../utils/limits.js";

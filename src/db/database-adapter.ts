@@ -12,7 +12,7 @@ import type {
   EmbeddingAdapter,
   GraphAdapter,
   VectorAdapter,
-} from "./types.js";
+} from "../core/ports/persistence.js";
 import type { PooledConnection } from "./pool-types.js";
 import type { ConnectionPool } from "./connection-pool.js";
 import { getPool } from "./pool-registry.js";

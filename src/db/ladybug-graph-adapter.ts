@@ -6,7 +6,7 @@
  */
 
 import type { Connection, LbugValue, NodeValue, RelValue } from "@ladybugdb/core";
-import type { GraphAdapter, GraphNode, GraphRelationship } from "./types.js";
+import type { GraphAdapter, GraphNode, GraphRelationship } from "../core/ports/persistence.js";
 
 /**
  * Implements `GraphAdapter` using LadybugDB's Connection.query() API.

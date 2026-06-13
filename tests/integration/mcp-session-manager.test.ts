@@ -7,7 +7,7 @@
  * Requirements: 7.1, 7.5
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import type { DatabaseAdapter, GraphAdapter, VectorAdapter, EmbeddingAdapter } from "../../src/db/types.js";
+import type { DatabaseAdapter, GraphAdapter, VectorAdapter, EmbeddingAdapter } from "../../src/core/ports/persistence.js";
 import { executeTool } from "../../src/mcp/tools.js";
 
 // ---------------------------------------------------------------------------

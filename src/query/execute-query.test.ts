@@ -3,8 +3,8 @@
  * Validates: Requirements 7.1, 7.2, 7.3, 7.4, 7.5
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import type { DatabaseAdapter, GraphAdapter, VectorAdapter, EmbeddingAdapter } from "../db/types.js";
-import type { QueryResult, Embedding } from "../types/index.js";
+import type { DatabaseAdapter, GraphAdapter, VectorAdapter, EmbeddingAdapter } from "../core/ports/persistence.js";
+import type { QueryResult, Embedding } from "../core/domain.js";
 import { executeQuery } from "./execute-query.js";
 
 // ─── Mock modules ─────────────────────────────────────────────────────────────

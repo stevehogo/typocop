@@ -11,7 +11,7 @@ import type {
   Symbol,
   Relationship,
   RelationType,
-} from "../../types/index.js";
+} from "../../core/domain.js";
 import type { RawRelationshipHint } from "../parsing/index.js";
 import { buildSymbolTable } from "./symbol-table.js";
 import { createResolutionContext } from "./resolution-context.js";

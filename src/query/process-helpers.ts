@@ -2,9 +2,9 @@
  * Shared helpers for converting graph nodes to Process and Cluster domain objects.
  * Requirements: 2.1, 3.2
  */
-import type { Process, Cluster, ClusterCategory } from "../types/index.js";
-import type { GraphAdapter, GraphNode } from "../db/types.js";
-import { prop } from "../db/types.js";
+import type { Process, Cluster, ClusterCategory } from "../core/domain.js";
+import type { GraphAdapter, GraphNode } from "../core/ports/persistence.js";
+import { prop } from "../core/ports/persistence.js";
 
 /**
  * Convert a Process GraphNode to a Process domain object.

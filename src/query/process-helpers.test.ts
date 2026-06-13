@@ -6,7 +6,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import * as fc from "fast-check";
-import type { GraphAdapter, GraphNode } from "../db/types.js";
+import type { GraphAdapter, GraphNode } from "../core/ports/persistence.js";
 import { executeContextRetrieval } from "./context-retrieval.js";
 import { executeImpactAnalysis } from "./impact-analysis.js";
 

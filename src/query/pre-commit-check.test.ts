@@ -4,7 +4,7 @@
  */
 import { describe, it, expect } from "vitest";
 import { calculatePreCommitRisk } from "./pre-commit-check.js";
-import type { Symbol } from "../types/index.js";
+import type { Symbol } from "../core/domain.js";
 
 // ─── Test Helpers ─────────────────────────────────────────────────────────────
 

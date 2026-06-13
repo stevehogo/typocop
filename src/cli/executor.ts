@@ -8,7 +8,7 @@ import ora from "ora";
 import { createDatabaseAdapter } from "../db/database-adapter.js";
 import { runIndexingPipeline, type PipelineConfig } from "../indexer/pipeline.js";
 import { configurationManager } from "../config/index.js";
-import type { DatabaseAdapter } from "../db/types.js";
+import type { DatabaseAdapter } from "../core/ports/persistence.js";
 import { executeObsidianExport } from "../obsidian-export/index.js";
 
 export interface ClearingStats {

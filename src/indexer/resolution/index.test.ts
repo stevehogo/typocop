@@ -10,7 +10,7 @@
  */
 import { describe, it, expect } from "vitest";
 import * as fc from "fast-check";
-import type { SymbolKind } from "../../types/index.js";
+import type { SymbolKind } from "../../core/domain.js";
 import {
   buildSymbolMap,
   findImports,
@@ -26,7 +26,7 @@ import {
   resolveReferences,
 } from "./index.js";
 import { symbolArbitrary } from "../../types/arbitraries.js";
-import type { Symbol } from "../../types/index.js";
+import type { Symbol } from "../../core/domain.js";
 
 // ─── Test helpers ─────────────────────────────────────────────────────────────
 

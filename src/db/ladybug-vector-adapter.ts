@@ -6,8 +6,8 @@
  */
 
 import type { Connection, LbugValue } from "@ladybugdb/core";
-import type { VectorAdapter } from "./types.js";
-import type { Embedding, SearchResult } from "../types/index.js";
+import type { VectorAdapter } from "../core/ports/persistence.js";
+import type { Embedding, SearchResult } from "../core/domain.js";
 
 /** Minimum cosine similarity score for search results. Requirement 3.4 */
 export const SEMANTIC_SEARCH_THRESHOLD = 0.60;

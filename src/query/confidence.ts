@@ -2,7 +2,7 @@
  * Confidence score calculation for query results.
  * Requirements: 9.4, 21.2
  */
-import type { Symbol, Relationship, QueryIntent, SearchResult } from "../types/index.js";
+import type { Symbol, Relationship, QueryIntent, SearchResult } from "../core/domain.js";
 
 /**
  * Calculate confidence score based on similarity scores and result completeness.

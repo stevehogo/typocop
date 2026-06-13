@@ -6,8 +6,8 @@
  *
  * Requirements: 3.4, 6.1–6.6, 21.5, 24.1, 24.2
  */
-import type { Symbol, Relationship, Cluster } from "../../types/index.js";
-import type { EmbeddingAdapter } from "../../db/types.js";
+import type { Symbol, Relationship, Cluster } from "../../core/domain.js";
+import type { EmbeddingAdapter } from "../../core/ports/persistence.js";
 import { buildClusterGraph, calculateCohesion } from "./graph.js";
 import { louvainClustering, generateHeuristicLabel } from "./louvain.js";
 import { enrichCluster } from "./enrichment.js";

@@ -9,8 +9,8 @@
  */
 import { describe, it, expect, beforeAll } from "vitest";
 import * as fc from "fast-check";
-import type { ClusterCategory, Embedding } from "../../types/index.js";
-import type { EmbeddingAdapter } from "../../db/types.js";
+import type { ClusterCategory, Embedding } from "../../core/domain.js";
+import type { EmbeddingAdapter } from "../../core/ports/persistence.js";
 import {
   SemanticClusterClassifier,
   ALL_CATEGORIES,

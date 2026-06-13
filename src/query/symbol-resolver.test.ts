@@ -3,7 +3,7 @@
  * Validates: Requirements 1.1, 1.2, 1.3, 1.4, 1.6, 2.1, 2.2
  */
 import { describe, it, expect, vi } from "vitest";
-import type { GraphAdapter } from "../db/types.js";
+import type { GraphAdapter } from "../core/ports/persistence.js";
 import type { CypherNodeRow } from "./graph-helpers.js";
 import { resolveSymbol, suggestSimilarSymbols } from "./symbol-resolver.js";
 

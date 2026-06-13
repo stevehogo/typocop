@@ -34,7 +34,7 @@ import type {
   EmbeddingAdapter,
   GraphAdapter,
   VectorAdapter,
-} from "./types.js";
+} from "../core/ports/persistence.js";
 
 interface RemoteDatabaseAdapterOptions {
   readonly createClients?: (target: string) => RpcClientBundle;

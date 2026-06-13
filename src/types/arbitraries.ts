@@ -14,7 +14,7 @@ import type {
   Embedding,
   Process,
   ProcessStep,
-} from "./index.js";
+} from "../core/domain.js";
 
 // ─── Primitives ───────────────────────────────────────────────────────────────
 

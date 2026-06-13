@@ -3,7 +3,7 @@
  * Requirements: 12.1, 12.2, 12.3, 12.4, 12.5, 12.6, 7.2
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import type { GraphAdapter, GraphNode } from "../db/types.js";
+import type { GraphAdapter, GraphNode } from "../core/ports/persistence.js";
 import { executeContextRetrieval } from "./context-retrieval.js";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────

@@ -3,7 +3,7 @@
  * Requirements: 7.1
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import type { DatabaseAdapter } from "../db/types.js";
+import type { DatabaseAdapter } from "../core/ports/persistence.js";
 import { handleMCPRequest, createConnectionState } from "./handler.js";
 import type { MCPContext } from "./handler.js";
 import { createAuthConfig } from "./auth.js";

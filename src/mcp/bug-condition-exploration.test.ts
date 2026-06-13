@@ -8,7 +8,7 @@
  * Requirements: 1.1, 1.2, 7.1
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import type { DatabaseAdapter, GraphAdapter, VectorAdapter, EmbeddingAdapter } from "../db/types.js";
+import type { DatabaseAdapter, GraphAdapter, VectorAdapter, EmbeddingAdapter } from "../core/ports/persistence.js";
 
 // ---------------------------------------------------------------------------
 // Mock query modules

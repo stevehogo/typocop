@@ -11,8 +11,8 @@ import { executeTool } from "./tools.js";
 import { createDatabaseAdapter } from "../db/database-adapter.js";
 import { drainAllPools } from "../db/pool-registry.js";
 import { configurationManager, ConfigurationError, PrefixValidationError } from "../config/index.js";
-import type { MCPToolResponse } from "../types/index.js";
-import type { DatabaseAdapter } from "../db/types.js";
+import type { MCPToolResponse } from "../core/domain.js";
+import type { DatabaseAdapter } from "../core/ports/persistence.js";
 
 /**
  * Strip the configured prefix from relationship types in an MCP tool response.

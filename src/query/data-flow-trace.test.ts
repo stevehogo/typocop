@@ -4,7 +4,7 @@
  */
 import { describe, it, expect } from "vitest";
 import * as fc from "fast-check";
-import type { Symbol, SymbolKind } from "../types/index.js";
+import type { Symbol, SymbolKind } from "../core/domain.js";
 
 /**
  * Property 16: Framework Tracing Completeness

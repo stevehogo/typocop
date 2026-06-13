@@ -13,7 +13,7 @@ vi.mock("@grpc/grpc-js", () => ({
 
 import { RemoteGraphAdapter } from "../db/remote-graph-adapter.js";
 import { RemoteVectorAdapter } from "../db/remote-vector-adapter.js";
-import type { GraphNode, GraphRelationship } from "../db/types.js";
+import type { GraphNode, GraphRelationship } from "../core/ports/persistence.js";
 import { createGraphService } from "./services/graph.js";
 import { createVectorService } from "./services/vector.js";
 import { DefaultOperationRouter } from "./router.js";

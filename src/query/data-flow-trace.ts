@@ -2,8 +2,8 @@
  * Data flow tracing query logic.
  * Requirements: 13.1, 13.2, 13.3, 13.4, 13.5, 13.6, 13.7, 7.2, 1.1, 1.2, 1.4, 1.5, 4.2, 4.3, 4.4, 4.5
  */
-import type { GraphAdapter, GraphNode } from "../db/types.js";
-import type { Symbol, Relationship, QueryResult } from "../types/index.js";
+import type { GraphAdapter, GraphNode } from "../core/ports/persistence.js";
+import type { Symbol, Relationship, QueryResult } from "../core/domain.js";
 import { MAX_TRAVERSAL_DEPTH } from "../utils/limits.js";
 import { rowToNode, graphNodeToSymbol } from "./graph-helpers.js";
 import type { CypherNodeRow } from "./graph-helpers.js";

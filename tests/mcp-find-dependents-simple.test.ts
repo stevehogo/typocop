@@ -4,9 +4,9 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import type { DatabaseAdapter, GraphAdapter } from "../src/db/types.js";
+import type { DatabaseAdapter, GraphAdapter } from "../src/core/ports/persistence.js";
 import { executeTool } from "../src/mcp/tools.js";
-import type { MCPToolResponse } from "../src/types/index.js";
+import type { MCPToolResponse } from "../src/core/domain.js";
 
 // Mock the query modules
 vi.mock("../src/query/impact-analysis.js", () => ({

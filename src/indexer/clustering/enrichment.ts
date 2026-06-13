@@ -9,8 +9,8 @@
  *
  * Requirements: 3.4, 6.3, 6.4, 6.6, 22.2, 24.1, 24.2
  */
-import type { Cluster, ClusterCategory, Symbol } from "../../types/index.js";
-import type { EmbeddingAdapter } from "../../db/types.js";
+import type { Cluster, ClusterCategory, Symbol } from "../../core/domain.js";
+import type { EmbeddingAdapter } from "../../core/ports/persistence.js";
 import { verifyEnrichmentPrompt } from "../../security/privacy.js";
 import {
   SemanticClusterClassifier,

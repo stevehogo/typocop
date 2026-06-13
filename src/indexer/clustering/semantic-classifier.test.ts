@@ -12,8 +12,8 @@
  * Requirements: 10.1, 10.2, 10.3, 10.4
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import type { EmbeddingAdapter } from "../../db/types.js";
-import type { Cluster, ClusterCategory, Embedding, Symbol } from "../../types/index.js";
+import type { EmbeddingAdapter } from "../../core/ports/persistence.js";
+import type { Cluster, ClusterCategory, Embedding, Symbol } from "../../core/domain.js";
 import {
   SemanticClusterClassifier,
   cosineSimilarity,

@@ -6,8 +6,8 @@
  * Requirements: 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 2.1, 2.2, 2.5, 2.6
  */
 
-import type { GraphAdapter, GraphNode } from "../db/types.js";
-import { prop } from "../db/types.js";
+import type { GraphAdapter, GraphNode } from "../core/ports/persistence.js";
+import { prop } from "../core/ports/persistence.js";
 import type { CypherNodeRow } from "./graph-helpers.js";
 import { rowToNode } from "./graph-helpers.js";
 import { levenshteinDistance } from "./levenshtein.js";

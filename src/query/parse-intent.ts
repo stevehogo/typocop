@@ -2,7 +2,7 @@
  * Query intent classification.
  * Requirements: 9.1, 9.2, 11b.1, 21.6
  */
-import type { QueryIntent } from "../types/index.js";
+import type { QueryIntent } from "../core/domain.js";
 import { classifyIntent } from "./intent.js";
 
 /**

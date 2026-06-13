@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { GraphAdapter, GraphNode } from "../db/types.js";
+import type { GraphAdapter, GraphNode } from "../core/ports/persistence.js";
 import { executeImpactAnalysis, findExternalDependencyByAlias } from "./impact-analysis.js";
 
 function makeGraphNode(

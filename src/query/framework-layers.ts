@@ -4,8 +4,8 @@
  *
  * Requirements: 4.1, 4.2, 4.3, 4.4, 4.5, 4.6
  */
-import type { GraphNode } from "../db/types.js";
-import { prop } from "../db/types.js";
+import type { GraphNode } from "../core/ports/persistence.js";
+import { prop } from "../core/ports/persistence.js";
 import { FRAMEWORK_LAYER_MAP } from "./framework-layer-map.js";
 
 /** The six possible trace layer classifications. */

@@ -2,7 +2,7 @@
  * FrameworkSupport validation rules.
  * Requirements: 25.1, 25.2, 25.3, 25.4
  */
-import type { FrameworkSupport } from "../../types/index.js";
+import type { FrameworkSupport } from "../../core/domain.js";
 
 export type ValidationError =
   | { rule: "atLeastOneCapability"; message: string }

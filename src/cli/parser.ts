@@ -1,6 +1,6 @@
 import { Command, CommanderError } from "commander";
 import * as fs from "fs";
-import { Language } from "../types/index.js";
+import { Language } from "../core/domain.js";
 import { detectDirectoryLanguage } from "../parser/language.js";
 
 export interface CLIConfig {

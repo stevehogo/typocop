@@ -21,7 +21,7 @@ const mockConnection = {
 };
 
 import { LadybugGraphAdapter } from "./ladybug-graph-adapter.js";
-import type { GraphAdapter } from "./types.js";
+import type { GraphAdapter } from "../core/ports/persistence.js";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 

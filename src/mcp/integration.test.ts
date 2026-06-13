@@ -4,7 +4,7 @@
  * Requirements: 7.5
  */
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import type { DatabaseAdapter, GraphAdapter, VectorAdapter, EmbeddingAdapter } from "../db/types.js";
+import type { DatabaseAdapter, GraphAdapter, VectorAdapter, EmbeddingAdapter } from "../core/ports/persistence.js";
 import { handleMCPRequest } from "./handler.js";
 import type { MCPContext } from "./handler.js";
 import { createAuthConfig } from "./auth.js";

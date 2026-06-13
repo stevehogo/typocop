@@ -4,8 +4,8 @@
  * Requirements: 4.4, 4.5
  */
 
-import type { Embedding } from "../types/index.js";
-import type { EmbeddingAdapter } from "./types.js";
+import type { Embedding } from "../core/domain.js";
+import type { EmbeddingAdapter } from "../core/ports/persistence.js";
 
 /**
  * Embedding adapter that does nothing.

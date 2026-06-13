@@ -10,8 +10,8 @@
  * - VectorAdapter.indexSymbol is called for each embedding (Req 8.4)
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import type { Symbol, Cluster, Process, Relationship, Embedding } from "../types/index.js";
-import type { DatabaseAdapter, GraphAdapter, VectorAdapter, EmbeddingAdapter } from "../db/types.js";
+import type { Symbol, Cluster, Process, Relationship, Embedding } from "../core/domain.js";
+import type { DatabaseAdapter, GraphAdapter, VectorAdapter, EmbeddingAdapter } from "../core/ports/persistence.js";
 
 // ─── Stub data ────────────────────────────────────────────────────────────────
 

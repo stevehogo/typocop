@@ -19,8 +19,8 @@ import { parseQueryIntent } from "./parse-intent.js";
 import { executeQuery } from "./execute-query.js";
 import { formatResponse } from "./format-response.js";
 import { calculateConfidence } from "./confidence.js";
-import type { Query, QueryResult, Symbol, Relationship, QueryIntent } from "../types/index.js";
-import type { DatabaseAdapter, GraphAdapter, VectorAdapter, EmbeddingAdapter } from "../db/types.js";
+import type { Query, QueryResult, Symbol, Relationship, QueryIntent } from "../core/domain.js";
+import type { DatabaseAdapter, GraphAdapter, VectorAdapter, EmbeddingAdapter } from "../core/ports/persistence.js";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 

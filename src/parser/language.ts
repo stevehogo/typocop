@@ -1,6 +1,6 @@
 import path from "path";
 import { readdirSync, statSync } from "node:fs";
-import type { Language } from "../types/index.js";
+import type { Language } from "../core/domain.js";
 
 // Re-export Language type for convenience
 export type { Language };

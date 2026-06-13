@@ -1,6 +1,7 @@
 import * as fs from "fs/promises";
 import * as path from "path";
-import type { Language } from "../../types/index.js";
+import type { Language } from "../../core/domain.js";
+import type { FileNode } from "../../core/file-node.js";
 import { shouldIgnorePath } from "../../utils/ignore.js";
 import { MAX_FILE_SIZE } from "../../utils/limits.js";
 
@@ -12,12 +13,8 @@ export interface ScannedFile {
   readonly size: number;
 }
 
-/** Enriched file entry with language detection — still no content */
-export interface FileNode {
-  readonly path: string;
-  readonly size: number;
-  readonly language: Language;
-}
+// FileNode moved to core/file-node.ts (PR2); re-exported here for existing importers.
+export type { FileNode };
 
 // ─── Extension → Language map ─────────────────────────────────────────────────
 

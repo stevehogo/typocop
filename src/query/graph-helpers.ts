@@ -3,9 +3,9 @@
  * impact-analysis.ts, and data-flow-trace.ts to eliminate duplication.
  * Requirements: 5.5
  */
-import type { GraphNode } from "../db/types.js";
-import { prop } from "../db/types.js";
-import type { Symbol, SymbolKind, Visibility } from "../types/index.js";
+import type { GraphNode } from "../core/ports/persistence.js";
+import { prop } from "../core/ports/persistence.js";
+import type { Symbol, SymbolKind, Visibility } from "../core/domain.js";
 
 /** Shape returned by Cypher queries that project a single `n` node. */
 export interface CypherNodeRow {

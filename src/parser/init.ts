@@ -1,5 +1,5 @@
 import Parser from "tree-sitter";
-import type { Language } from "../types/index.js";
+import type { Language } from "../core/domain.js";
 
 /**
  * Initialize a tree-sitter Parser with the grammar for the given language.
