@@ -1,0 +1,65 @@
+[
+  {
+    "type": "cycle",
+    "from": "src/obsidian-export/index.ts",
+    "to": "src/obsidian-export/vault-writer.ts",
+    "unresolvedTo": "./vault-writer.js",
+    "dependencyTypes": [
+      "local",
+      "import"
+    ],
+    "rule": {
+      "severity": "error",
+      "name": "no-cycles"
+    },
+    "cycle": [
+      {
+        "name": "src/obsidian-export/vault-writer.ts",
+        "dependencyTypes": [
+          "local",
+          "import"
+        ]
+      },
+      {
+        "name": "src/obsidian-export/index.ts",
+        "dependencyTypes": [
+          "local",
+          "type-only",
+          "import"
+        ]
+      }
+    ]
+  },
+  {
+    "type": "cycle",
+    "from": "src/query/framework-layer-map.ts",
+    "to": "src/query/framework-layers.ts",
+    "unresolvedTo": "./framework-layers.js",
+    "dependencyTypes": [
+      "local",
+      "type-only",
+      "import"
+    ],
+    "rule": {
+      "severity": "error",
+      "name": "no-cycles"
+    },
+    "cycle": [
+      {
+        "name": "src/query/framework-layers.ts",
+        "dependencyTypes": [
+          "local",
+          "type-only",
+          "import"
+        ]
+      },
+      {
+        "name": "src/query/framework-layer-map.ts",
+        "dependencyTypes": [
+          "local",
+          "import"
+        ]
+      }
+    ]
+  }
+]
