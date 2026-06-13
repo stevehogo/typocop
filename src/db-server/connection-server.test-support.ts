@@ -1,5 +1,13 @@
 import { join } from "node:path";
 
+// Side-effect import: load the HuggingFace adapter (-> @huggingface/transformers
+// -> onnxruntime) into the module graph of every real-Kùzu integration worker
+// that uses this support module. The DB adapters used to pull this implicitly
+// before the §14 embedding inversion (PR4); without it these workers
+// intermittently hang/crash on native teardown ("worker exited unexpectedly").
+// Kept scoped here (not a global setupFile) to avoid loading the heavy native
+// stack — and its memory cost — into every unrelated unit-test worker.
+import "../db/huggingface-embedding-adapter.js";
 import type { FullConfig, LadybugClientConfig, LadybugServerConfig } from "../platform/config/types.js";
 import { createDatabaseAdapter } from "../db/database-adapter.js";
 import type { RemoteDatabaseAdapter } from "../db/remote-database-adapter.js";

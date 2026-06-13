@@ -53,6 +53,14 @@ vi.mock("./autostart.js", () => ({
 }));
 
 import { createDatabaseAdapter, LadybugDatabaseAdapter } from "./database-adapter.js";
+import type { EmbeddingAdapter } from "../core/ports/persistence.js";
+
+// Embedding is injected since §14; this stub stands in for any provider.
+const stubEmbedding = {
+  isEnabled: () => false,
+  embedText: async () => null,
+  getDimensions: () => 0,
+} as unknown as EmbeddingAdapter;
 
 function makeConfig(runtimeMode: "server" | "client") {
   return {
@@ -114,7 +122,7 @@ describe("createDatabaseAdapter — property tests", () => {
         };
         mockEnsureServerAndConnect.mockResolvedValue(remoteAdapter);
 
-        const adapter = await createDatabaseAdapter(makeConfig(runtimeMode));
+        const adapter = await createDatabaseAdapter(makeConfig(runtimeMode), stubEmbedding);
 
         if (runtimeMode === "server") {
           expect(adapter).toBeInstanceOf(LadybugDatabaseAdapter);

@@ -1,8 +1,5 @@
-import type {
-  EmbeddingConfig,
-  LadybugClientConfig,
-  OllamaConfig,
-} from "../platform/config/types.js";
+import type { LadybugClientConfig } from "../platform/config/types.js";
+import type { EmbeddingAdapter } from "../core/ports/persistence.js";
 import { readdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -39,8 +36,8 @@ interface AutostartDependencies {
 
 interface EnsureServerAndConnectOptions {
   readonly manager?: AutostartManager;
-  readonly embeddingConfig?: EmbeddingConfig;
-  readonly ollamaConfig?: OllamaConfig;
+  /** Embedding adapter injected by the composition root (§14). */
+  readonly embeddingAdapter?: EmbeddingAdapter;
 }
 
 export interface AutostartManager {
@@ -192,8 +189,7 @@ export async function ensureServerAndConnect(
   await manager.ensureServer(config);
 
   const adapter = new RemoteDatabaseAdapter(config, {
-    embeddingConfig: options.embeddingConfig,
-    ollamaConfig: options.ollamaConfig,
+    embeddingAdapter: options.embeddingAdapter,
   });
   await adapter.initialize();
   return adapter;

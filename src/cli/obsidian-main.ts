@@ -10,6 +10,7 @@ import chalk from "chalk";
 import ora from "ora";
 import { executeObsidianExport } from "../obsidian-export/index.js";
 import { createDatabaseAdapter } from "../db/database-adapter.js";
+import { createEmbeddingAdapterFromConfig } from "../db/embedding-factory.js";
 import { drainAllPools } from "../db/pool-registry.js";
 
 function formatConfigurationError(err: ConfigurationError): string {
@@ -144,7 +145,7 @@ export async function runObsidianCLI(argv: string[]): Promise<void> {
       spinner.info("Verbose mode enabled.");
     }
     const adapterConfig = configurationManager.getConfiguration();
-    const adapter = await createDatabaseAdapter(adapterConfig);
+    const adapter = await createDatabaseAdapter(adapterConfig, createEmbeddingAdapterFromConfig(adapterConfig));
     try {
       const result = await executeObsidianExport(command.config, adapter);
       await ensureGitignore(outputPath);

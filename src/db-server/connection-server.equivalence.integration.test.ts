@@ -48,7 +48,8 @@ describe("Ladybug connection server adapter equivalence — integration test", (
     const remoteServerConfig = makeServerConfig(join(root, "remote"), { port: 7622 });
     const server = await startConnectionServer(remoteServerConfig);
     const remoteAdapter = new RemoteDatabaseAdapter(makeClientConfig(remoteServerConfig));
-    const localAdapter = await createDatabaseAdapter(makeFullConfig(join(root, "local", "db.ladybug")));
+    const noopEmbedding = { isEnabled: () => false, embedText: async () => null, getDimensions: () => 0 };
+    const localAdapter = await createDatabaseAdapter(makeFullConfig(join(root, "local", "db.ladybug")), noopEmbedding);
 
     try {
       await remoteAdapter.initialize();

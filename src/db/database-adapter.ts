@@ -18,9 +18,6 @@ import type { ConnectionPool } from "./connection-pool.js";
 import { getPool } from "./pool-registry.js";
 import { LadybugGraphAdapter } from "./ladybug-graph-adapter.js";
 import { LadybugVectorAdapter } from "./ladybug-vector-adapter.js";
-import { HuggingFaceEmbeddingAdapter } from "./huggingface-embedding-adapter.js";
-import { OllamaEmbeddingAdapter } from "./ollama-embedding-adapter.js";
-import { NoOpEmbeddingAdapter } from "./noop-embedding-adapter.js";
 
 /**
  * Facade combining graph, vector, and embedding adapters over a single
@@ -29,8 +26,9 @@ import { NoOpEmbeddingAdapter } from "./noop-embedding-adapter.js";
  * - Req 1.1: Implements `DatabaseAdapter` interface
  * - Req 8.1: Acquires connections from pool via `getPool()`
  * - Req 6.3: `close()` releases connection back to pool
- * - Req 6.1–6.4: Selects embedding adapter via provider-based switch
- *   (`huggingface` | `ollama` | `none`)
+ * - Req 6.1–6.4: The embedding adapter is **injected** (provider selection
+ *   happens at the composition root via `createEmbeddingAdapter`), so this
+ *   facade never imports a concrete embeddings adapter (§14).
  */
 export class LadybugDatabaseAdapter implements DatabaseAdapter {
   private pool: ConnectionPool | null = null;
@@ -39,7 +37,10 @@ export class LadybugDatabaseAdapter implements DatabaseAdapter {
   private vectorAdapter: VectorAdapter | null = null;
   private embeddingAdapter: EmbeddingAdapter | null = null;
 
-  constructor(private readonly config: FullConfig) {}
+  constructor(
+    private readonly config: FullConfig,
+    private readonly embedding: EmbeddingAdapter,
+  ) {}
 
   async initialize(): Promise<void> {
     this.pool = await getPool(this.config.ladybugdb.dbPath);
@@ -58,18 +59,7 @@ export class LadybugDatabaseAdapter implements DatabaseAdapter {
       this.config.prefix,
     );
 
-    // Req 6.1–6.4: Select embedding adapter based on configured provider
-    switch (this.config.embedding.provider) {
-      case "huggingface":
-        this.embeddingAdapter = new HuggingFaceEmbeddingAdapter(this.config.embedding.huggingface);
-        break;
-      case "ollama":
-        this.embeddingAdapter = new OllamaEmbeddingAdapter(this.config.ollama);
-        break;
-      case "none":
-        this.embeddingAdapter = new NoOpEmbeddingAdapter();
-        break;
-    }
+    this.embeddingAdapter = this.embedding;
 
     await this.vectorAdapter.createTables();
   }
@@ -105,25 +95,24 @@ export class LadybugDatabaseAdapter implements DatabaseAdapter {
 
 /**
  * Factory: creates and initializes a `DatabaseAdapter` from config.
- * Selects the embedding adapter based on `config.embedding.provider`:
- * - `"huggingface"` → HuggingFaceEmbeddingAdapter (Req 6.1)
- * - `"ollama"` → OllamaEmbeddingAdapter (Req 6.2)
- * - `"none"` → NoOpEmbeddingAdapter (Req 6.3)
+ *
+ * The `embeddingAdapter` is injected by the caller (composition root), which
+ * selects the provider via `createEmbeddingAdapter`. This factory — and the
+ * adapters it builds — never reference concrete embeddings (§14). The same
+ * instance is used for both the embedded and the remote (client) runtime.
  */
 export async function createDatabaseAdapter(
   config: FullConfig,
+  embeddingAdapter: EmbeddingAdapter,
 ): Promise<DatabaseAdapter> {
   validateAdapterFactoryConfig(config);
 
   if (config.ladybugdb.runtimeMode === "client") {
     const { ensureServerAndConnect } = await import("./autostart.js");
-    return ensureServerAndConnect(toLadybugClientConfig(config), {
-      embeddingConfig: config.embedding,
-      ollamaConfig: config.ollama,
-    });
+    return ensureServerAndConnect(toLadybugClientConfig(config), { embeddingAdapter });
   }
 
-  const adapter = new LadybugDatabaseAdapter(config);
+  const adapter = new LadybugDatabaseAdapter(config, embeddingAdapter);
   await adapter.initialize();
   return adapter;
 }

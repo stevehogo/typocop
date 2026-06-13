@@ -9,6 +9,7 @@ import {
 import { createMCPServer } from "./registration.js";
 import { executeTool } from "./tools.js";
 import { createDatabaseAdapter } from "../db/database-adapter.js";
+import { createEmbeddingAdapterFromConfig } from "../db/embedding-factory.js";
 import { drainAllPools } from "../db/pool-registry.js";
 import { configurationManager, ConfigurationError, PrefixValidationError } from "../platform/config/index.js";
 import type { MCPToolResponse } from "../core/domain.js";
@@ -64,7 +65,7 @@ export async function startMCPServer(): Promise<void> {
   console.error(`[mcp] Using prefix: ${prefix}`);
 
   // Create DatabaseAdapter from FullConfig (Req 7.1)
-  const adapter: DatabaseAdapter = await createDatabaseAdapter(config);
+  const adapter: DatabaseAdapter = await createDatabaseAdapter(config, createEmbeddingAdapterFromConfig(config));
 
   // Create MCP server
   const server = createMCPServer();

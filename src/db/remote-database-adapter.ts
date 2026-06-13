@@ -2,14 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import * as grpc from "@grpc/grpc-js";
 
-import type {
-  EmbeddingConfig,
-  LadybugClientConfig,
-  OllamaConfig,
-} from "../platform/config/types.js";
-import { HuggingFaceEmbeddingAdapter } from "./huggingface-embedding-adapter.js";
-import { NoOpEmbeddingAdapter } from "./noop-embedding-adapter.js";
-import { OllamaEmbeddingAdapter } from "./ollama-embedding-adapter.js";
+import type { LadybugClientConfig } from "../platform/config/types.js";
 import { RemoteGraphAdapter } from "./remote-graph-adapter.js";
 import {
   CONNECT_READY_TIMEOUT_MS,
@@ -39,9 +32,11 @@ import type {
 interface RemoteDatabaseAdapterOptions {
   readonly createClients?: (target: string) => RpcClientBundle;
   readonly defaultTimeoutMs?: number;
+  /**
+   * Injected embedding adapter (§14). Selected at the composition root via
+   * `createEmbeddingAdapter`; remote-transport never builds embeddings itself.
+   */
   readonly embeddingAdapter?: EmbeddingAdapter;
-  readonly embeddingConfig?: EmbeddingConfig;
-  readonly ollamaConfig?: OllamaConfig;
 }
 
 export class RemoteDatabaseAdapter implements DatabaseAdapter, RemoteRpcClient {
@@ -75,7 +70,7 @@ export class RemoteDatabaseAdapter implements DatabaseAdapter, RemoteRpcClient {
     this.clients = clients;
     this.graphAdapter = new RemoteGraphAdapter(this);
     this.vectorAdapter = new RemoteVectorAdapter(this);
-    this.embeddingAdapter = this.resolveEmbeddingAdapter();
+    this.embeddingAdapter = this.options.embeddingAdapter ?? null;
   }
 
   async close(): Promise<void> {
@@ -224,24 +219,4 @@ export class RemoteDatabaseAdapter implements DatabaseAdapter, RemoteRpcClient {
     });
   }
 
-  private resolveEmbeddingAdapter(): EmbeddingAdapter {
-    if (this.options.embeddingAdapter) {
-      return this.options.embeddingAdapter;
-    }
-    if (!this.options.embeddingConfig) {
-      return new NoOpEmbeddingAdapter();
-    }
-
-    switch (this.options.embeddingConfig.provider) {
-      case "huggingface":
-        return new HuggingFaceEmbeddingAdapter(this.options.embeddingConfig.huggingface);
-      case "ollama":
-        if (!this.options.ollamaConfig) {
-          throw new Error("ollamaConfig is required when embedding provider is 'ollama'");
-        }
-        return new OllamaEmbeddingAdapter(this.options.ollamaConfig);
-      case "none":
-        return new NoOpEmbeddingAdapter();
-    }
-  }
 }

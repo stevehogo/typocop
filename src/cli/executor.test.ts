@@ -26,6 +26,12 @@ vi.mock("../db/database-adapter.js", () => ({
   createDatabaseAdapter: vi.fn(),
 }));
 
+vi.mock("../db/embedding-factory.js", () => ({
+  createEmbeddingAdapterFromConfig: vi.fn(() => ({
+    isEnabled: () => false, embedText: async () => null, getDimensions: () => 0,
+  })),
+}));
+
 vi.mock("../indexer/pipeline.js", () => ({
   runIndexingPipeline: vi.fn().mockResolvedValue({
     symbols: [],

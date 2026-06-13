@@ -87,6 +87,8 @@ describe("RemoteDatabaseAdapter", () => {
           graph: graphClient,
           vector: vectorClient,
         }) as unknown as RpcClientBundle,
+      // Embedding is injected since §14 (no internal provider switch).
+      embeddingAdapter: { isEnabled: () => false, embedText: async () => null, getDimensions: () => 0 },
     });
 
     await adapter.initialize();

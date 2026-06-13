@@ -6,6 +6,7 @@ import { CLICommand } from "./parser.js";
 import chalk from "chalk";
 import ora from "ora";
 import { createDatabaseAdapter } from "../db/database-adapter.js";
+import { createEmbeddingAdapterFromConfig } from "../db/embedding-factory.js";
 import { runIndexingPipeline, type PipelineConfig } from "../indexer/pipeline.js";
 import { configurationManager } from "../platform/config/index.js";
 import type { DatabaseAdapter } from "../core/ports/persistence.js";
@@ -48,7 +49,7 @@ export async function executeIndexingPipeline(
   console.error(chalk.dim(`[typocop] Effective prefix: ${prefix}`));
 
   const config = configurationManager.getConfiguration();
-  const adapter: DatabaseAdapter = await createDatabaseAdapter(config);
+  const adapter: DatabaseAdapter = await createDatabaseAdapter(config, createEmbeddingAdapterFromConfig(config));
 
   // Create an AbortController for cancellation
   const abortController = new AbortController();
@@ -149,7 +150,7 @@ async function readGraphStatus(): Promise<GraphStatus> {
   console.error(chalk.dim(`[typocop] Effective prefix: ${prefix}`));
 
   const config = configurationManager.getConfiguration();
-  const adapter: DatabaseAdapter = await createDatabaseAdapter(config);
+  const adapter: DatabaseAdapter = await createDatabaseAdapter(config, createEmbeddingAdapterFromConfig(config));
 
   try {
     const graphAdapter = adapter.getGraphAdapter();
@@ -420,7 +421,7 @@ export async function executeCLI(command: CLICommand): Promise<void> {
         }
 
         const adapterConfig = configurationManager.getConfiguration();
-        const adapter = await createDatabaseAdapter(adapterConfig);
+        const adapter = await createDatabaseAdapter(adapterConfig, createEmbeddingAdapterFromConfig(adapterConfig));
         try {
           const result = await executeObsidianExport(command.config, adapter);
 
