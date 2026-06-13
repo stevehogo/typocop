@@ -7,13 +7,13 @@ import { describe, it, expect } from "vitest";
 describe("Integration Wiring", () => {
   describe("Pipeline Orchestration", () => {
     it("should export runIndexingPipeline from indexer", async () => {
-      const { runIndexingPipeline } = await import("../indexer/pipeline.js");
+      const { runIndexingPipeline } = await import("../application/indexing/pipeline.js");
       expect(runIndexingPipeline).toBeDefined();
       expect(typeof runIndexingPipeline).toBe("function");
     });
 
     it("should export PipelineConfig type from indexer", async () => {
-      const module = await import("../indexer/pipeline.js");
+      const module = await import("../application/indexing/pipeline.js");
       expect(module).toBeDefined();
     });
   });
@@ -69,7 +69,7 @@ describe("Integration Wiring", () => {
 
   describe("Type Compatibility", () => {
     it("should have compatible types between pipeline and CLI", async () => {
-      const { runIndexingPipeline } = await import("../indexer/pipeline.js");
+      const { runIndexingPipeline } = await import("../application/indexing/pipeline.js");
       const { executeCLI } = await import("../cli/executor.js");
 
       expect(typeof runIndexingPipeline).toBe("function");
@@ -77,7 +77,7 @@ describe("Integration Wiring", () => {
     });
 
     it("should have compatible types between query server and MCP", async () => {
-      const { executeQuery } = await import("../query/execute-query.js");
+      const { executeQuery } = await import("../application/querying/execute-query.js");
       const { executeTool } = await import("../mcp/tools.js");
 
       expect(typeof executeQuery).toBe("function");

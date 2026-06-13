@@ -3,7 +3,6 @@ import Parser from "tree-sitter";
 import { fromSyntaxNode } from "./ast-node.js";
 import { initParser } from "./init.js";
 import { extractSymbolsWithQueries } from "./extract-symbols.js";
-import { isExternalPackage } from "../../indexer/resolution/external-packages.js";
 
 describe("extractSymbolsWithQueries (ruby imports)", () => {
   let parser: Parser;
@@ -43,6 +42,7 @@ describe("extractSymbolsWithQueries (ruby imports)", () => {
       targetName: "./helper",
       language: "ruby",
     }));
-    expect(isExternalPackage(importHint?.targetName ?? "", "ruby")).toBe(false);
+    // (External-package classification of "./helper" is covered by
+    // external-packages tests; parsing must not import the application layer.)
   });
 });

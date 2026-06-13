@@ -8,7 +8,7 @@ import { parseArgs, CLIValidationError } from "./parser.js";
 import { configurationManager, ConfigurationError, PrefixValidationError } from "../platform/config/index.js";
 import chalk from "chalk";
 import ora from "ora";
-import { executeObsidianExport } from "../obsidian-export/index.js";
+import { executeObsidianExport } from "../application/export-render/index.js";
 import { createDatabaseAdapter } from "../infrastructure/persistence/database-adapter.js";
 import { createEmbeddingAdapterFromConfig } from "../infrastructure/embeddings/embedding-factory.js";
 import { drainAllPools } from "../infrastructure/persistence/pool-registry.js";

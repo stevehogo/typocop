@@ -134,7 +134,7 @@ export const processArbitrary = (): fc.Arbitrary<Process> =>
 
 // ─── FileNode (for parsing tests) ─────────────────────────────────────────────
 
-import type { FileNode } from "../indexer/structure/index.js";
+import type { FileNode } from "../application/indexing/structure/index.js";
 
 const languageArbitrary = (): fc.Arbitrary<string> =>
   fc.constantFrom(

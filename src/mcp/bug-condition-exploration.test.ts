@@ -16,7 +16,7 @@ import type { DatabaseAdapter, GraphAdapter, VectorAdapter, EmbeddingAdapter } f
 
 const STUB_RESOLUTION = { kind: "exact" as const, node: { id: "sym-1", labels: ["Symbol"], properties: { id: "sym-1", name: "TestSymbol" } } };
 
-vi.mock("../query/context-retrieval.js", () => ({
+vi.mock("../application/querying/context-retrieval.js", () => ({
   executeContextRetrieval: vi.fn().mockResolvedValue({
     resolution: STUB_RESOLUTION,
     symbols: [],
@@ -29,7 +29,7 @@ vi.mock("../query/context-retrieval.js", () => ({
   }),
 }));
 
-vi.mock("../query/impact-analysis.js", () => ({
+vi.mock("../application/querying/impact-analysis.js", () => ({
   executeImpactAnalysis: vi.fn().mockResolvedValue({
     resolution: STUB_RESOLUTION,
     targetKind: "symbol",
@@ -43,7 +43,7 @@ vi.mock("../query/impact-analysis.js", () => ({
   }),
 }));
 
-vi.mock("../query/data-flow-trace.js", () => ({
+vi.mock("../application/querying/data-flow-trace.js", () => ({
   executeDataFlowTrace: vi.fn().mockResolvedValue({
     resolution: STUB_RESOLUTION,
     symbols: [],
@@ -130,7 +130,7 @@ describe("Concurrent tool calls through DatabaseAdapter", () => {
   });
 
   it("should propagate errors from one call without affecting others", async () => {
-    const { executeContextRetrieval } = await import("../query/context-retrieval.js");
+    const { executeContextRetrieval } = await import("../application/querying/context-retrieval.js");
     let callCount = 0;
     vi.mocked(executeContextRetrieval).mockImplementation(async () => {
       callCount++;

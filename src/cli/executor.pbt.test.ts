@@ -59,7 +59,7 @@ vi.mock("../infrastructure/embeddings/embedding-factory.js", () => ({
   })),
 }));
 
-vi.mock("../indexer/pipeline.js", () => ({
+vi.mock("../application/indexing/pipeline.js", () => ({
   runIndexingPipeline: mockRunIndexingPipeline,
 }));
 

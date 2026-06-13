@@ -4,9 +4,9 @@
  */
 import type { DatabaseAdapter } from "../core/ports/persistence.js";
 import type { MCPToolResponse, QueryResult } from "../core/domain.js";
-import { executeContextRetrieval } from "../query/context-retrieval.js";
-import { executeImpactAnalysis } from "../query/impact-analysis.js";
-import { executeDataFlowTrace } from "../query/data-flow-trace.js";
+import { executeContextRetrieval } from "../application/querying/context-retrieval.js";
+import { executeImpactAnalysis } from "../application/querying/impact-analysis.js";
+import { executeDataFlowTrace } from "../application/querying/data-flow-trace.js";
 import { executeSmartSearchTool } from "./smart-search-tool.js";
 
 /**

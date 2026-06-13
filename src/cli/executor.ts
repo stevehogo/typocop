@@ -7,10 +7,10 @@ import chalk from "chalk";
 import ora from "ora";
 import { createDatabaseAdapter } from "../infrastructure/persistence/database-adapter.js";
 import { createEmbeddingAdapterFromConfig } from "../infrastructure/embeddings/embedding-factory.js";
-import { runIndexingPipeline, type PipelineConfig } from "../indexer/pipeline.js";
+import { runIndexingPipeline, type PipelineConfig } from "../application/indexing/pipeline.js";
 import { configurationManager } from "../platform/config/index.js";
 import type { DatabaseAdapter } from "../core/ports/persistence.js";
-import { executeObsidianExport } from "../obsidian-export/index.js";
+import { executeObsidianExport } from "../application/export-render/index.js";
 
 export interface ClearingStats {
   nodesDeleted: number;

@@ -6,7 +6,7 @@ import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import { executeCLI } from "./executor.js";
 import { CLICommand } from "./parser.js";
 import ora from "ora";
-import * as pipeline from "../indexer/pipeline.js";
+import * as pipeline from "../application/indexing/pipeline.js";
 import * as dbAdapter from "../infrastructure/persistence/database-adapter.js";
 
 vi.mock("ora", () => {
@@ -32,7 +32,7 @@ vi.mock("../infrastructure/embeddings/embedding-factory.js", () => ({
   })),
 }));
 
-vi.mock("../indexer/pipeline.js", () => ({
+vi.mock("../application/indexing/pipeline.js", () => ({
   runIndexingPipeline: vi.fn().mockResolvedValue({
     symbols: [],
     relationships: [],

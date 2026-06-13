@@ -18,7 +18,7 @@ import type { DatabaseAdapter, GraphAdapter, VectorAdapter, EmbeddingAdapter } f
 
 const STUB_RESOLUTION = { kind: "exact" as const, node: { id: "sym-1", labels: ["Symbol"], properties: { id: "sym-1", name: "TestSymbol" } } };
 
-vi.mock("../query/context-retrieval.js", () => ({
+vi.mock("../application/querying/context-retrieval.js", () => ({
   executeContextRetrieval: vi.fn().mockResolvedValue({
     resolution: STUB_RESOLUTION,
     symbols: [],
@@ -31,7 +31,7 @@ vi.mock("../query/context-retrieval.js", () => ({
   }),
 }));
 
-vi.mock("../query/impact-analysis.js", () => ({
+vi.mock("../application/querying/impact-analysis.js", () => ({
   executeImpactAnalysis: vi.fn().mockResolvedValue({
     resolution: STUB_RESOLUTION,
     targetKind: "symbol",
@@ -45,7 +45,7 @@ vi.mock("../query/impact-analysis.js", () => ({
   }),
 }));
 
-vi.mock("../query/data-flow-trace.js", () => ({
+vi.mock("../application/querying/data-flow-trace.js", () => ({
   executeDataFlowTrace: vi.fn().mockResolvedValue({
     resolution: STUB_RESOLUTION,
     symbols: [],
@@ -164,7 +164,7 @@ describe("Preservation — error propagation (Req 3.2)", () => {
   });
 
   it("should propagate error when query throws", async () => {
-    const { executeContextRetrieval } = await import("../query/context-retrieval.js");
+    const { executeContextRetrieval } = await import("../application/querying/context-retrieval.js");
     vi.mocked(executeContextRetrieval).mockRejectedValueOnce(new Error("query failed"));
 
     const adapter = createMockAdapter();
@@ -176,7 +176,7 @@ describe("Preservation — error propagation (Req 3.2)", () => {
   });
 
   it("should propagate error for find_dependents", async () => {
-    const { executeImpactAnalysis } = await import("../query/impact-analysis.js");
+    const { executeImpactAnalysis } = await import("../application/querying/impact-analysis.js");
     vi.mocked(executeImpactAnalysis).mockRejectedValueOnce(new Error("Impact analysis failed"));
 
     const adapter = createMockAdapter();
@@ -256,13 +256,13 @@ describe("Preservation — property: sequential call sequences behave correctly"
           vi.clearAllMocks();
 
           if (failingTool === "get_symbol_context") {
-            const { executeContextRetrieval } = await import("../query/context-retrieval.js");
+            const { executeContextRetrieval } = await import("../application/querying/context-retrieval.js");
             vi.mocked(executeContextRetrieval).mockRejectedValueOnce(new Error("query error"));
           } else if (failingTool === "find_dependents" || failingTool === "impact_analysis") {
-            const { executeImpactAnalysis } = await import("../query/impact-analysis.js");
+            const { executeImpactAnalysis } = await import("../application/querying/impact-analysis.js");
             vi.mocked(executeImpactAnalysis).mockRejectedValueOnce(new Error("query error"));
           } else {
-            const { executeDataFlowTrace } = await import("../query/data-flow-trace.js");
+            const { executeDataFlowTrace } = await import("../application/querying/data-flow-trace.js");
             vi.mocked(executeDataFlowTrace).mockRejectedValueOnce(new Error("query error"));
           }
 

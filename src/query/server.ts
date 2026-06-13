@@ -6,7 +6,7 @@ import Fastify from "fastify";
 import type { FastifyInstance } from "fastify";
 import type { DatabaseAdapter } from "../core/ports/persistence.js";
 import type { Query, QueryResult, RelationType } from "../core/domain.js";
-import { executeQuery } from "./execute-query.js";
+import { executeQuery } from "../application/querying/execute-query.js";
 import { sanitizeQuery } from "../platform/security/sanitize.js";
 import { configurationManager, ConfigurationError } from "../platform/config/index.js";
 
