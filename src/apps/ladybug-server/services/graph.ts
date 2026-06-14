@@ -67,6 +67,30 @@ export function createGraphService(router: OperationRouter): Record<string, (cal
       }, () => ({ success: true }));
     },
 
+    async CreateNodes(call, callback) {
+      await handle(router, callback, {
+        kind: "CreateNodes",
+        metadata: parseMetadata(call.request.metadata),
+        label: call.request.label || "",
+        nodes: parseJsonArray(call.request.nodesJson) as Array<Record<string, unknown>>,
+        priority: "background_write",
+      }, () => ({ success: true }));
+    },
+
+    async CreateRelationships(call, callback) {
+      await handle(router, callback, {
+        kind: "CreateRelationships",
+        metadata: parseMetadata(call.request.metadata),
+        type: call.request.type || "",
+        relationships: parseJsonArray(call.request.relationshipsJson) as Array<{
+          fromId: string;
+          toId: string;
+          properties?: Record<string, unknown>;
+        }>,
+        priority: "background_write",
+      }, () => ({ success: true }));
+    },
+
     async DeleteNodesByLabel(call, callback) {
       await handle(router, callback, {
         kind: "DeleteNodesByLabel",
@@ -122,6 +146,22 @@ function parseJsonRecord(input: string | undefined): Record<string, unknown> {
   } catch (error) {
     throw error instanceof Error ? error : invalidJson();
   }
+}
+
+function parseJsonArray(input: string | undefined): unknown[] {
+  if (!input) {
+    return [];
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(input);
+  } catch {
+    throw invalidJson("JSON payload is not valid JSON");
+  }
+  if (!Array.isArray(parsed)) {
+    throw invalidJson("JSON payload must decode to an array");
+  }
+  return parsed;
 }
 
 function serializeNodes(nodes: readonly GraphNode[]): Array<Record<string, unknown>> {

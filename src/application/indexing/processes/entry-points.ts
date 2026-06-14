@@ -9,6 +9,7 @@
  * Requirements: 3.5, 7.1
  */
 import type { Symbol, Relationship } from "../../../core/domain.js";
+import { MAX_ENTRY_POINTS } from "../../../platform/utils/limits.js";
 
 // ─── Name patterns ────────────────────────────────────────────────────────────
 
@@ -104,14 +105,28 @@ const ENTRY_POINT_THRESHOLD = 1.0;
  *
  * Returns symbol IDs sorted by score descending.
  *
+ * `prebuiltCallGraph` lets a caller that already built the forward call graph
+ * (e.g. {@link traceProcesses}) reuse it instead of rebuilding it here. When
+ * omitted, the graph is built internally — backward compatible with existing
+ * callers and tests. Results are byte-identical either way.
+ *
+ * `maxEntryPoints` caps how many of the highest-scoring entry points are
+ * returned (Phase F). It defaults to {@link MAX_ENTRY_POINTS} (`Infinity`), so
+ * the default behavior is UNLIMITED and unchanged. Because results are already
+ * sorted by score descending, the cap simply keeps the top-N — it never
+ * reorders or rescore anything.
+ *
  * Requirements: 7.1
  */
 export function findEntryPoints(
   symbols: Symbol[],
   relationships: Relationship[],
+  prebuiltCallGraph?: CallGraph,
+  maxEntryPoints: number = MAX_ENTRY_POINTS,
 ): string[] {
-  const symbolIds = new Set(symbols.map((s) => s.id));
-  const callGraph = buildCallGraph(symbolIds, relationships);
+  const callGraph =
+    prebuiltCallGraph ??
+    buildCallGraph(new Set(symbols.map((s) => s.id)), relationships);
 
   // Build reverse call graph for caller counts
   const callerCounts = new Map<string, number>();
@@ -141,5 +156,7 @@ export function findEntryPoints(
     }
   }
 
-  return candidates.sort((a, b) => b.score - a.score).map((c) => c.id);
+  const sorted = candidates.sort((a, b) => b.score - a.score).map((c) => c.id);
+  // Default cap is Infinity → slice is a no-op, preserving full output.
+  return maxEntryPoints === Infinity ? sorted : sorted.slice(0, Math.max(0, maxEntryPoints));
 }

@@ -16,12 +16,15 @@ export type GraphOperation =
   | { readonly kind: "RunCypherWrite"; readonly metadata: RequestMetadata; readonly query: string; readonly params?: Record<string, unknown>; readonly priority: RequestPriority }
   | { readonly kind: "CreateNode"; readonly metadata: RequestMetadata; readonly label: string; readonly properties: Record<string, unknown>; readonly priority: RequestPriority }
   | { readonly kind: "CreateRelationship"; readonly metadata: RequestMetadata; readonly fromId: string; readonly toId: string; readonly type: string; readonly properties?: Record<string, unknown>; readonly priority: RequestPriority }
+  | { readonly kind: "CreateNodes"; readonly metadata: RequestMetadata; readonly label: string; readonly nodes: ReadonlyArray<Record<string, unknown>>; readonly priority: RequestPriority }
+  | { readonly kind: "CreateRelationships"; readonly metadata: RequestMetadata; readonly type: string; readonly relationships: ReadonlyArray<{ readonly fromId: string; readonly toId: string; readonly properties?: Record<string, unknown> }>; readonly priority: RequestPriority }
   | { readonly kind: "DeleteNodesByLabel"; readonly metadata: RequestMetadata; readonly label: string; readonly priority: RequestPriority }
   | { readonly kind: "DeleteRelationshipsByType"; readonly metadata: RequestMetadata; readonly type: string; readonly priority: RequestPriority };
 
 export type VectorOperation =
   | { readonly kind: "CreateTables"; readonly metadata: RequestMetadata; readonly priority: RequestPriority }
   | { readonly kind: "IndexSymbol"; readonly metadata: RequestMetadata; readonly symbolId: string; readonly embedding: Embedding; readonly metadataMap?: Record<string, string>; readonly priority: RequestPriority }
+  | { readonly kind: "IndexSymbols"; readonly metadata: RequestMetadata; readonly entries: ReadonlyArray<{ readonly symbolId: string; readonly embedding: Embedding; readonly metadata?: Record<string, string> }>; readonly priority: RequestPriority }
   | { readonly kind: "SemanticSearch"; readonly metadata: RequestMetadata; readonly queryEmbedding: Embedding; readonly limit: number; readonly priority: RequestPriority }
   | { readonly kind: "DeleteAll"; readonly metadata: RequestMetadata; readonly priority: RequestPriority };
 
@@ -96,6 +99,30 @@ export class DefaultOperationRouter implements OperationRouter {
         return this.runGraphRequest(op.kind, op.metadata, op.priority, () =>
           this.graphAdapter.createRelationship(op.fromId, op.toId, op.type, op.properties),
         );
+      case "CreateNodes":
+        this.requireNonEmpty(op.label, "label");
+        // Validate each row's MERGE key (id), matching the per-row CreateNode's
+        // intent and the batch IndexSymbols per-entry checks — so malformed batch
+        // rows are rejected with INVALID_ARGUMENT rather than silently producing
+        // a node with a null/empty primary key.
+        for (const node of op.nodes) {
+          this.requireNonEmpty(typeof node["id"] === "string" ? node["id"] : "", "id");
+        }
+        return this.runGraphRequest(op.kind, op.metadata, op.priority, () =>
+          this.graphAdapter.createNodes(op.label, op.nodes),
+        );
+      case "CreateRelationships":
+        this.requireNonEmpty(op.type, "type");
+        // Validate each edge's endpoints, matching the per-row CreateRelationship
+        // checks — otherwise empty fromId/toId rows would reach the adapter's
+        // UNWIND...MATCH and silently match nothing.
+        for (const rel of op.relationships) {
+          this.requireNonEmpty(rel.fromId, "fromId");
+          this.requireNonEmpty(rel.toId, "toId");
+        }
+        return this.runGraphRequest(op.kind, op.metadata, op.priority, () =>
+          this.graphAdapter.createRelationships(op.type, op.relationships),
+        );
       case "DeleteNodesByLabel":
         this.requireNonEmpty(op.label, "label");
         return this.runGraphRequest(op.kind, op.metadata, op.priority, () =>
@@ -121,6 +148,14 @@ export class DefaultOperationRouter implements OperationRouter {
         this.validateEmbedding(op.embedding);
         return this.runVectorRequest(op.kind, op.metadata, op.priority, () =>
           this.vectorAdapter.indexSymbol(op.symbolId, op.embedding, op.metadataMap),
+        );
+      case "IndexSymbols":
+        for (const entry of op.entries) {
+          this.requireNonEmpty(entry.symbolId, "symbolId");
+          this.validateEmbedding(entry.embedding);
+        }
+        return this.runVectorRequest(op.kind, op.metadata, op.priority, () =>
+          this.vectorAdapter.indexSymbols(op.entries),
         );
       case "SemanticSearch":
         this.validateEmbedding(op.queryEmbedding);

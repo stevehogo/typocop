@@ -287,26 +287,125 @@ describe("buildSearchIndex", () => {
     expect(index.embeddings[2].metadata).toHaveProperty("symbolId", "s1");
   });
 
-  it("skips symbols and clusters where embedFn returns null", async () => {
+  it("skips items where embedFn returns null (keyed by formatted text)", async () => {
     const embedding: Embedding = { vector: new Array(1536).fill(0.5), dimensions: 1536 };
     const symbols = [
-      makeSymbol({ id: "s1", name: "login" }),
-      makeSymbol({ id: "s2", name: "logout" }),
+      makeSymbol({ id: "s1", name: "loginAlpha" }),
+      makeSymbol({ id: "s2", name: "logoutBravo" }),
+    ];
+    // Cluster name is the marker we key off so its identity is unambiguous.
+    const clusters = [
+      makeCluster({ id: "c1", name: "ClusterCharlie", symbols: [] }),
+      makeCluster({ id: "c2", name: "ClusterDelta", symbols: [] }),
+    ];
+    // null for s1 and c1, embedding for s2 and c2. Keyed by text (concurrency
+    // does not guarantee a fixed call order).
+    const embedFn = vi.fn(async (text: string) => {
+      if (text.includes("loginAlpha") || text.includes("ClusterCharlie")) return null;
+      return embedding;
+    });
+    const index = await buildSearchIndex(symbols, clusters, embedFn);
+    expect(index.embeddings.map((e) => e.symbolId)).toEqual(["s2", "cluster:c2"]);
+    expect(index.embeddingStats).toEqual({ attempts: 4, successes: 2, failures: 2 });
+  });
+
+  // ─── Phase C: bounded concurrency, determinism, failure accounting ──────────
+
+  it("never runs more than `concurrency` embed calls at once", async () => {
+    const embedding: Embedding = { vector: new Array(1536).fill(0.1), dimensions: 1536 };
+    const symbols = Array.from({ length: 12 }, (_, i) =>
+      makeSymbol({ id: `s${i}`, name: `fn${i}` }),
+    );
+    let inFlight = 0;
+    let maxInFlight = 0;
+    const embedFn = vi.fn(async () => {
+      inFlight++;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      await new Promise((r) => setTimeout(r, 5));
+      inFlight--;
+      return embedding;
+    });
+    const limit = 3;
+    const index = await buildSearchIndex(symbols, [], embedFn, limit);
+    expect(maxInFlight).toBeLessThanOrEqual(limit);
+    expect(maxInFlight).toBeGreaterThan(1); // actually concurrent
+    expect(index.embeddings).toHaveLength(12);
+  });
+
+  it("returns embeddings in deterministic input order (symbols then clusters)", async () => {
+    const embedding: Embedding = { vector: new Array(1536).fill(0.2), dimensions: 1536 };
+    const symbols = [
+      makeSymbol({ id: "s0", name: "alpha" }),
+      makeSymbol({ id: "s1", name: "bravo" }),
+      makeSymbol({ id: "s2", name: "charlie" }),
     ];
     const clusters = [
-      makeCluster({ id: "c1", symbols: ["s1"] }),
-      makeCluster({ id: "c2", symbols: ["s2"] }),
+      makeCluster({ id: "c0", symbols: ["s0", "s1"] }),
+      makeCluster({ id: "c1", symbols: ["s2"] }),
     ];
-    // null for s1, embedding for s2, null for c1, embedding for c2
-    const embedFn = vi.fn()
-      .mockResolvedValueOnce(null)       // s1 symbol
-      .mockResolvedValueOnce(embedding)  // s2 symbol
-      .mockResolvedValueOnce(null)       // c1 cluster
-      .mockResolvedValueOnce(embedding); // c2 cluster
-    const index = await buildSearchIndex(symbols, clusters, embedFn);
-    expect(index.embeddings).toHaveLength(2);
-    expect(index.embeddings[0].symbolId).toBe("s2");
-    expect(index.embeddings[1].symbolId).toBe("cluster:c2");
+    // Resolve later items first to scramble completion order.
+    let n = 0;
+    const embedFn = vi.fn(async () => {
+      const delay = (5 - n++) * 3;
+      await new Promise((r) => setTimeout(r, Math.max(0, delay)));
+      return embedding;
+    });
+    const a = await buildSearchIndex(symbols, clusters, embedFn, 4);
+    const b = await buildSearchIndex(symbols, clusters, embedFn, 1);
+    const ids = (idx: typeof a) => idx.embeddings.map((e) => e.symbolId);
+    expect(ids(a)).toEqual(["s0", "s1", "s2", "cluster:c0", "cluster:c1"]);
+    // Same input → same order regardless of concurrency.
+    expect(ids(a)).toEqual(ids(b));
+  });
+
+  it("counts attempts/successes/failures correctly", async () => {
+    const embedding: Embedding = { vector: new Array(1536).fill(0.3), dimensions: 1536 };
+    const symbols = [
+      makeSymbol({ id: "s0", name: "ok0" }),
+      makeSymbol({ id: "s1", name: "null1" }),
+      makeSymbol({ id: "s2", name: "ok2" }),
+    ];
+    const embedFn = vi.fn(async (text: string) =>
+      text.includes("null1") ? null : embedding,
+    );
+    const index = await buildSearchIndex(symbols, [], embedFn);
+    expect(index.embeddingStats).toEqual({ attempts: 3, successes: 2, failures: 1 });
+    expect(index.embeddings.map((e) => e.symbolId)).toEqual(["s0", "s2"]);
+  });
+
+  it("treats a thrown embedFn as a failure (keyword-only) without rejecting", async () => {
+    const symbols = [makeSymbol({ id: "s0", name: "boom" })];
+    const embedFn = vi.fn(async () => {
+      throw new Error("backend down");
+    });
+    const index = await buildSearchIndex(symbols, [], embedFn);
+    expect(index.embeddings).toEqual([]);
+    expect(index.embeddingStats).toEqual({ attempts: 1, successes: 0, failures: 1 });
+    // Keyword index still intact.
+    expect(index.keywords.size).toBeGreaterThan(0);
+  });
+
+  it("treats a hanging embedFn as a failure via timeout without rejecting", async () => {
+    vi.useFakeTimers();
+    try {
+      const symbols = [makeSymbol({ id: "s0", name: "slow" })];
+      // Never resolves — only the timeout can settle this.
+      const embedFn = vi.fn(() => new Promise<Embedding>(() => {}));
+      const promise = buildSearchIndex(symbols, [], embedFn);
+      await vi.runAllTimersAsync();
+      const index = await promise;
+      expect(index.embeddings).toEqual([]);
+      expect(index.embeddingStats.failures).toBe(1);
+      expect(index.keywords.size).toBeGreaterThan(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("reports zero attempts and empty stats when embedFn is null", async () => {
+    const symbols = [makeSymbol({ id: "s1", name: "login" })];
+    const index = await buildSearchIndex(symbols, [], null);
+    expect(index.embeddingStats).toEqual({ attempts: 0, successes: 0, failures: 0 });
   });
 });
 

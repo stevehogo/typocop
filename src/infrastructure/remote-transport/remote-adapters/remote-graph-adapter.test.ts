@@ -48,6 +48,48 @@ describe("RemoteGraphAdapter", () => {
     );
   });
 
+  it("serializes createNodes batch payloads", async () => {
+    const { rpc, callGraph } = makeRpc();
+    const adapter = new RemoteGraphAdapter(rpc);
+
+    const nodes = [
+      { id: "s1", kind: "function" },
+      { id: "s2", kind: "class" },
+    ];
+    await adapter.createNodes("Symbol", nodes);
+
+    expect(callGraph).toHaveBeenCalledWith(
+      "CreateNodes",
+      expect.objectContaining({
+        label: "Symbol",
+        nodesJson: JSON.stringify(nodes),
+      }),
+    );
+    const [, request] = callGraph.mock.calls[0];
+    expect(JSON.parse(request.nodesJson)).toEqual(nodes);
+  });
+
+  it("serializes createRelationships batch payloads", async () => {
+    const { rpc, callGraph } = makeRpc();
+    const adapter = new RemoteGraphAdapter(rpc);
+
+    const relationships = [
+      { fromId: "a", toId: "b", properties: { step_order: 1 } },
+      { fromId: "c", toId: "d" },
+    ];
+    await adapter.createRelationships("HAS_STEP", relationships);
+
+    expect(callGraph).toHaveBeenCalledWith(
+      "CreateRelationships",
+      expect.objectContaining({
+        type: "HAS_STEP",
+        relationshipsJson: JSON.stringify(relationships),
+      }),
+    );
+    const [, request] = callGraph.mock.calls[0];
+    expect(JSON.parse(request.relationshipsJson)).toEqual(relationships);
+  });
+
   it("deserializes QueryNodes responses", async () => {
     const { rpc } = makeRpc({
       callGraph: async () => ({

@@ -52,6 +52,30 @@ describe("RemoteVectorAdapter", () => {
     );
   });
 
+  it("serializes indexSymbols batch payloads", async () => {
+    const { rpc, callVector } = makeRpc();
+    const adapter = new RemoteVectorAdapter(rpc);
+
+    const entries = [
+      { symbolId: "sym-1", embedding, metadata: { kind: "function" } },
+      { symbolId: "sym-2", embedding: { vector: [0.3, 0.4], dimensions: 2 } },
+    ];
+    await adapter.indexSymbols(entries);
+
+    expect(callVector).toHaveBeenCalledWith(
+      "IndexSymbols",
+      expect.objectContaining({
+        entriesJson: JSON.stringify(entries),
+      }),
+    );
+    const [, request] = callVector.mock.calls[0];
+    const decoded = JSON.parse(request.entriesJson);
+    expect(decoded).toEqual(entries);
+    expect(decoded[0].embedding.vector).toEqual([0.1, 0.2]);
+    expect(decoded[0].embedding.dimensions).toBe(2);
+    expect(decoded[0].metadata).toEqual({ kind: "function" });
+  });
+
   it("deserializes SemanticSearch responses", async () => {
     const { rpc } = makeRpc({
       callVector: async () => ({

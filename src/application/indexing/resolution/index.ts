@@ -239,18 +239,30 @@ export function resolveHints(
   const symbolMap = buildSymbolMap(symbols);
   const extNodes = new Map<string, ExternalDependencyNode>();
 
+  // ─── Prebuilt lookup indexes (built once, used by all hints) ───────────────
+  // symbolById: id → Symbol (used to resolve ctx candidate nodeIds, which are ids)
+  const symbolById = new Map<string, Symbol>();
+  // symbolsByFile: filePath → Symbol[] (was `fileSymbols`).
+  // Kept in original insertion order so caller selection (below) matches the
+  // prior per-hint `.find()` exactly: the FIRST symbol — in original order —
+  // whose [startLine,endLine] range contains the hint line.
+  const symbolsByFile = new Map<string, Symbol[]>();
+  for (const sym of symbols) {
+    symbolById.set(sym.id, sym);
+    const list = symbolsByFile.get(sym.location.filePath) ?? [];
+    list.push(sym);
+    symbolsByFile.set(sym.location.filePath, list);
+  }
+
   // Build resolution context and populate symbol table
   const ctx = createResolutionContext();
   for (const sym of symbols) {
     ctx.symbols.add(sym.location.filePath, sym.name, sym.id, sym.kind);
   }
 
-  const fileSymbols = new Map<string, Symbol[]>();
-  for (const sym of symbols) {
-    const list = fileSymbols.get(sym.location.filePath) ?? [];
-    list.push(sym);
-    fileSymbols.set(sym.location.filePath, list);
-  }
+  // DEPENDS_ON external-dependency fan-out reporting (behavior unchanged; count only).
+  let dependsOnEdgeCount = 0;
+  let maxDependsOnFanOutPerImport = 0;
 
   const relationships: Relationship[] = [];
   const seen = new Set<string>();
@@ -276,8 +288,13 @@ export function resolveHints(
           const sourceId = `${hint.sourceFile}:import:${hint.startLine}`;
           if (isExternalPackage(hint.targetName, hint.language)) {
             const extNode = getOrCreateExtNode(hint.targetName, hint.language, extNodes);
-            const importingSymbols = fileSymbols.get(hint.sourceFile) ?? [];
+            // Fan-out: one dependsOn edge from EVERY symbol in the importing file
+            // to the ext node, per external import. Behavior intentionally
+            // unchanged here — we only measure the amplification (see report below).
+            const importingSymbols = symbolsByFile.get(hint.sourceFile) ?? [];
+            let fanOut = 0;
             for (const importingSymbol of importingSymbols) {
+              const before = relationships.length;
               add({
                 id: relId("dependsOn", importingSymbol.id, extNode.id),
                 source: importingSymbol.id,
@@ -288,6 +305,11 @@ export function resolveHints(
                   packageName: extNode.name,
                 },
               });
+              if (relationships.length > before) fanOut++;
+            }
+            dependsOnEdgeCount += fanOut;
+            if (fanOut > maxDependsOnFanOutPerImport) {
+              maxDependsOnFanOutPerImport = fanOut;
             }
             break;
           }
@@ -304,14 +326,19 @@ export function resolveHints(
           const resolvedSegments = resolvedTargetName.split("/");
           const resolvedLastName = resolvedSegments[resolvedSegments.length - 1];
 
-          // Use resolution context for same-file tier, fall back to symbolMap
+          // Use resolution context for same-file tier, fall back to symbolMap.
+          // ctxResult.candidates[0].nodeId is a SYMBOL ID, so it must be resolved
+          // via symbolById — NOT symbolMap (which is keyed by NAME). The old code
+          // did `symbolMap.get(nodeId)` which (almost) always missed, leaving the
+          // ctx same-file precise tier dead and falling through to the name
+          // fallback. Resolving by id makes the precise tier actually win.
+          const nameFallback = (): Symbol | undefined =>
+            (symbolMap.get(resolvedLastName) ?? symbolMap.get(resolvedTargetName))?.[0]
+            ?? (symbolMap.get(lastName) ?? symbolMap.get(hint.targetName))?.[0];
           const ctxResult = ctx.resolve(resolvedLastName ?? resolvedTargetName, hint.sourceFile);
           const target = ctxResult
-            ? symbolMap.get(ctxResult.candidates[0].nodeId)?.[0]
-              ?? (symbolMap.get(resolvedLastName) ?? symbolMap.get(resolvedTargetName))?.[0]
-              ?? (symbolMap.get(lastName) ?? symbolMap.get(hint.targetName))?.[0]
-            : (symbolMap.get(resolvedLastName) ?? symbolMap.get(resolvedTargetName))?.[0]
-              ?? (symbolMap.get(lastName) ?? symbolMap.get(hint.targetName))?.[0];
+            ? symbolById.get(ctxResult.candidates[0].nodeId) ?? nameFallback()
+            : nameFallback();
           if (target) {
             add({ id: relId("imports", sourceId, target.id), source: sourceId, target: target.id, relType: "imports", metadata: {} });
           } else {
@@ -320,12 +347,19 @@ export function resolveHints(
           break;
         }
         case "call": {
-          const fileSym = fileSymbols.get(hint.sourceFile);
+          // Caller lookup: FIRST symbol (in original file order) whose range
+          // contains the hint line — identical selection to the prior .find().
+          const fileSym = symbolsByFile.get(hint.sourceFile);
           const caller = fileSym?.find((s) => s.location.startLine <= hint.startLine && s.location.endLine >= hint.startLine);
           if (!caller) break;
           const ctxResult = ctx.resolve(hint.targetName, hint.sourceFile);
           const resolvedId = ctxResult?.candidates[0]?.nodeId;
-          const sameFile = resolvedId ? (symbolMap.get(hint.targetName) ?? []).find((s) => s.id === resolvedId) : undefined;
+          // Resolve the ctx candidate id via symbolById (it is an id). The old
+          // `symbolMap.get(name).find(s => s.id === resolvedId)` was name+id and
+          // worked, but the id index is clearer and avoids the name scan. Keep
+          // the same-file refinement semantics: only use it when it differs from
+          // the caller.
+          const sameFile = resolvedId ? symbolById.get(resolvedId) : undefined;
           const target = (sameFile && sameFile.id !== caller.id) ? sameFile
             : (symbolMap.get(hint.targetName) ?? []).find((s) => s.id !== caller.id);
           if (target) add({ id: relId("calls", caller.id, target.id), source: caller.id, target: target.id, relType: "calls", metadata: {} });
@@ -349,12 +383,31 @@ export function resolveHints(
     ctx.clearCache();
   }
 
-  return { relationships, extNodes };
+  return {
+    relationships,
+    extNodes,
+    dependsOnStats: {
+      edgeCount: dependsOnEdgeCount,
+      maxFanOutPerImport: maxDependsOnFanOutPerImport,
+    },
+  };
+}
+
+export interface DependsOnStats {
+  /** Total dependsOn (external-dependency) edges generated. */
+  readonly edgeCount: number;
+  /** Largest number of dependsOn edges created by a single external import. */
+  readonly maxFanOutPerImport: number;
 }
 
 export interface ResolveHintsResult {
   readonly relationships: Relationship[];
   readonly extNodes: Map<string, ExternalDependencyNode>;
+  /**
+   * Reporting only — surfaces the external-dependency fan-out amplification.
+   * Optional because the legacy `resolveReferences` path does not produce it.
+   */
+  readonly dependsOnStats?: DependsOnStats;
 }
 
 // ─── Phase 3 entry point ─────────────────────────────────────────────────────

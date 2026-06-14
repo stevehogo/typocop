@@ -28,6 +28,67 @@ export const TREE_SITTER_MAX_BUFFER = 32 * 1024 * 1024;
 export const getTreeSitterBufferSize = (contentLength: number): number =>
   Math.min(Math.max(contentLength * 2, TREE_SITTER_BUFFER_SIZE), TREE_SITTER_MAX_BUFFER);
 
+/**
+ * Bounded concurrency for Phase 2 parsing (B5).
+ *
+ * Conservative default (plan recommends 4–8). Each concurrent slot owns its own
+ * per-grammar-variant `Parser` instances, so a tree-sitter parser is never
+ * shared across in-flight parses. Higher values trade memory (more parser
+ * instances) for throughput; keep it modest to avoid starving the event loop
+ * during synchronous tree-sitter parses.
+ */
+export const PARSE_CONCURRENCY = 4;
+
+/**
+ * Bounded concurrency for Phase 6 embedding generation (Phase C).
+ *
+ * Conservative default. Local model backends (Ollama, in-process HuggingFace)
+ * can become *slower* under overload, so keep this small (plan recommends 2–4
+ * for local backends). The pipeline may pass an adapter-appropriate value for
+ * remote/HTTP providers later; this default must stay safe for the slowest
+ * (local) case. Used with {@link mapWithConcurrency} so there is never an
+ * unbounded `Promise.all` over embeddings.
+ */
+export const EMBEDDING_CONCURRENCY = 3;
+
+/**
+ * Per-embedding timeout in milliseconds (Phase C).
+ *
+ * Caps a single embedding call so one slow item cannot stall the whole index.
+ * On timeout the item is treated as a failure (skipped → keyword-only), not a
+ * pipeline rejection. Generous enough for a cold local model to respond.
+ */
+export const EMBEDDING_TIMEOUT_MS = 30_000;
+
+/**
+ * Bounded chunk size for batch database writes (Phase D).
+ *
+ * When an adapter implements the OPTIONAL batch methods
+ * (`GraphAdapter.createNodes` / `createRelationships`,
+ * `VectorAdapter.indexSymbols`), the indexing pipeline groups same-label /
+ * same-type rows and splits them into chunks of at most this many rows per
+ * call. This keeps a single write (one query or one RPC) bounded so very large
+ * repos do not build an unbounded statement or payload. The metrics counts
+ * (graphNodeWrites/graphEdgeWrites/vectorWrites) still reflect ROWS written,
+ * not the number of batch calls.
+ */
+export const DB_WRITE_BATCH_SIZE = 500;
+
+/**
+ * Maximum number of traced entry points for Phase 5 process tracing (Phase F).
+ *
+ * Process tracing scales with the number of entry points: every entry point
+ * seeds a depth-first traversal of the call graph. On very large repos this can
+ * produce an excessive number of traces. This cap limits how many entry points
+ * (highest-scoring first) are traced.
+ *
+ * DEFAULT is `Infinity` — i.e. UNLIMITED, preserving current behavior exactly.
+ * Wiring exists so a caller (or a future benchmark-driven default) can clamp the
+ * count without changing the scoring or ordering of entry points. Do not lower
+ * the default without a benchmark demonstrating the need (plan Phase F).
+ */
+export const MAX_ENTRY_POINTS = Infinity;
+
 /** Maximum number of nodes in the knowledge graph (Req 23.2) */
 export const MAX_GRAPH_SIZE_NODES = 500_000;
 
@@ -129,6 +190,55 @@ export async function withQueryTimeout<T>(
     queryFn(),
     createQueryTimeout(timeoutMs)
   ]);
+}
+
+/**
+ * Run an async operation with a timeout that resolves to a SENTINEL instead of
+ * rejecting when it elapses.
+ *
+ * Unlike {@link withQueryTimeout} (which rejects on timeout), this is the
+ * failure-tolerant variant used by embedding generation: a slow item must not
+ * reject the surrounding batch. If `fn()` itself rejects, this still rejects —
+ * callers that need full tolerance should also catch their own throws (the
+ * embedding path does both: catch + this timeout).
+ *
+ * The timer is always cleared so a slow-but-eventually-resolving operation does
+ * not leak a pending timer or keep the event loop alive.
+ *
+ * @param fn        - The async operation to run.
+ * @param timeoutMs - Timeout in milliseconds.
+ * @param onTimeout - Value (or factory) returned when the timeout elapses first.
+ * @returns The operation's result, or the timeout sentinel if it elapses first.
+ */
+export async function withTimeoutOr<T>(
+  fn: () => Promise<T>,
+  timeoutMs: number,
+  onTimeout: T | (() => T),
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const TIMED_OUT = Symbol("timed-out");
+  // Hold the operation promise so we can both race it AND attach a guard handler.
+  // If the timeout wins the race and `fn()` LATER rejects, that rejection would
+  // otherwise be unhandled (the race already settled), emitting a Node
+  // unhandledRejection warning. The guard swallows the late rejection. A
+  // rejection that arrives BEFORE the timeout is still observed by the race
+  // below, so this preserves the "rejects if fn() rejects" contract.
+  const operation = fn();
+  void operation.catch(() => {});
+  try {
+    const result = await Promise.race<T | typeof TIMED_OUT>([
+      operation,
+      new Promise<typeof TIMED_OUT>((resolve) => {
+        timer = setTimeout(() => resolve(TIMED_OUT), timeoutMs);
+      }),
+    ]);
+    if (result === TIMED_OUT) {
+      return typeof onTimeout === "function" ? (onTimeout as () => T)() : onTimeout;
+    }
+    return result;
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
 }
 
 /**

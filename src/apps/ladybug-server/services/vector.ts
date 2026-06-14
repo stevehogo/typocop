@@ -1,5 +1,5 @@
 import { status } from "@grpc/grpc-js";
-import type { SearchResult } from "../../../core/domain.js";
+import type { Embedding, SearchResult } from "../../../core/domain.js";
 import { toServiceError } from "../../../infrastructure/remote-transport/errors.js";
 import type { OperationRouter, VectorOperation } from "../router.js";
 import type { RequestMetadata } from "../types.js";
@@ -24,6 +24,15 @@ export function createVectorService(router: OperationRouter): Record<string, (ca
           dimensions: Number(call.request.embedding?.dimensions || 0),
         },
         metadataMap: parseStringRecord(call.request.metadataJson),
+        priority: "background_write",
+      }, () => ({ success: true }));
+    },
+
+    async IndexSymbols(call, callback) {
+      await handle(router, callback, {
+        kind: "IndexSymbols",
+        metadata: parseMetadata(call.request.metadata),
+        entries: parseEntries(call.request.entriesJson),
         priority: "background_write",
       }, () => ({ success: true }));
     },
@@ -92,6 +101,46 @@ function parseStringRecord(input: string | undefined): Record<string, string> {
   } catch (error) {
     throw error instanceof Error ? error : invalidJson();
   }
+}
+
+function parseJsonArray(input: string | undefined): unknown[] {
+  if (!input) {
+    return [];
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(input);
+  } catch {
+    throw invalidJson("JSON payload is not valid JSON");
+  }
+  if (!Array.isArray(parsed)) {
+    throw invalidJson("JSON payload must decode to an array");
+  }
+  return parsed;
+}
+
+function parseEntries(input: string | undefined): Array<{
+  symbolId: string;
+  embedding: Embedding;
+  metadata?: Record<string, string>;
+}> {
+  return parseJsonArray(input).map((raw) => {
+    const entry = raw as {
+      symbolId?: string;
+      embedding?: { vector?: unknown; dimensions?: unknown };
+      metadata?: Record<string, string>;
+    };
+    return {
+      symbolId: entry.symbolId || "",
+      embedding: {
+        vector: Array.isArray(entry.embedding?.vector)
+          ? entry.embedding!.vector.map(Number)
+          : [],
+        dimensions: Number(entry.embedding?.dimensions || 0),
+      },
+      metadata: entry.metadata,
+    };
+  });
 }
 
 function serializeResults(results: readonly SearchResult[]): Array<Record<string, unknown>> {

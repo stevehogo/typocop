@@ -66,6 +66,32 @@ export class RemoteGraphAdapter implements GraphAdapter {
     });
   }
 
+  async createNodes(
+    label: string,
+    nodes: ReadonlyArray<Record<string, unknown>>,
+  ): Promise<void> {
+    await this.rpc.callGraph("CreateNodes", {
+      metadata: this.rpc.buildRequestMetadata(),
+      label,
+      nodesJson: JSON.stringify(nodes),
+    });
+  }
+
+  async createRelationships(
+    type: string,
+    relationships: ReadonlyArray<{
+      readonly fromId: string;
+      readonly toId: string;
+      readonly properties?: Record<string, unknown>;
+    }>,
+  ): Promise<void> {
+    await this.rpc.callGraph("CreateRelationships", {
+      metadata: this.rpc.buildRequestMetadata(),
+      type,
+      relationshipsJson: JSON.stringify(relationships),
+    });
+  }
+
   async queryNodes(
     label: string,
     filter: Record<string, unknown> = {},

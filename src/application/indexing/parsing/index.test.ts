@@ -8,9 +8,11 @@
  * - Property 1 (Bugfix): Bug Condition - File Path Completeness — Validates: Requirements 2.1, 2.2, 2.3, 2.4
  * - Property 2 (Bugfix): Preservation - Extraction Logic Unchanged — Validates: Requirements 3.1, 3.2, 3.3, 3.4, 3.5, 3.6
  */
-import { describe, it, expect } from "vitest";
+import { afterEach, beforeEach, describe, it, expect } from "vitest";
 import * as fc from "fast-check";
 import * as path from "path";
+import * as os from "node:os";
+import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { generateSymbolId, extractAllSymbols } from "./index.js";
 import { symbolArbitrary, locationArbitrary, fileNodeArbitrary } from "../../../../tests/support/arbitraries.js";
 import type { FileNode } from "../structure/index.js";
@@ -529,11 +531,212 @@ describe("Property 2 (Bugfix): Preservation - Extraction Logic Unchanged", () =>
           expect(kind).toBe(kind);
           expect(line).toBe(line);
           expect(col).toBe(col);
-          
+
           return true;
         },
       ),
       { numRuns: 100 },
     );
+  });
+});
+
+// ─── PR3 B3: stateless grammar selection through extractAllSymbols ────────────
+// A `.ts` file parsed in a mixed set that includes a `.tsx` file must yield the
+// same symbols as parsing it alone. Before B3, the shared parser was flipped to
+// the tsx grammar by the `.tsx` file and never restored, so an identical `.ts`
+// file parsed afterward lost symbols (e.g. an angle-bracket type assertion was
+// mis-read as JSX). Now each variant has its own parser, so order is irrelevant.
+
+describe("PR3 B3: extractAllSymbols grammar selection is order-independent", () => {
+  let tmpDir: string;
+
+  const TS_WITH_ASSERTION = `
+export const cast = () => { const v = <Foo>bar; return v; };
+export function alpha() {}
+`;
+  const TSX_SOURCE = `
+export function Widget() { return null; }
+export const helper = (x: number) => x;
+`;
+
+  beforeEach(async () => {
+    tmpDir = await mkdtemp(path.join(os.tmpdir(), "typocop-b3-pipeline-"));
+  });
+  afterEach(async () => {
+    await rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it("a .ts file yields the same symbols whether parsed before or after a .tsx file", async () => {
+    await writeFile(path.join(tmpDir, "a.ts"), TS_WITH_ASSERTION, "utf-8");
+    await writeFile(path.join(tmpDir, "widget.tsx"), TSX_SOURCE, "utf-8");
+
+    const tsNode: FileNode = { path: "a.ts", size: 100, language: "typescript" };
+    const tsxNode: FileNode = { path: "widget.tsx", size: 100, language: "typescript" };
+
+    const tsFirst = await extractAllSymbols([tsNode, tsxNode], tmpDir);
+    const tsAfter = await extractAllSymbols([tsxNode, tsNode], tmpDir);
+
+    const namesIn = (r: Awaited<ReturnType<typeof extractAllSymbols>>, file: string) =>
+      r.symbols.filter((s) => s.location.filePath === file).map((s) => s.name).sort();
+
+    // The .ts file's symbols are identical regardless of ordering vs the .tsx file.
+    expect(namesIn(tsAfter, "a.ts")).toEqual(namesIn(tsFirst, "a.ts"));
+    // And the angle-bracket-assertion arrow `cast` is never dropped.
+    expect(namesIn(tsFirst, "a.ts")).toContain("cast");
+    expect(namesIn(tsFirst, "a.ts")).toContain("alpha");
+  });
+});
+
+// ─── PR3 B4: same-line symbols survive with distinct column-bearing IDs ───────
+// Two symbols declared on the same line previously collided under the query
+// path's column-less ID (`file:name:row`) and `deduplicateById` dropped one.
+// With the unified column-inclusive ID, both survive.
+
+describe("PR3 B4: same-line symbols get distinct IDs and both survive dedup", () => {
+  let tmpDir: string;
+
+  beforeEach(async () => {
+    tmpDir = await mkdtemp(path.join(os.tmpdir(), "typocop-b4-"));
+  });
+  afterEach(async () => {
+    await rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it("two arrow functions on one line both survive with column-distinct IDs", async () => {
+    await writeFile(
+      path.join(tmpDir, "sameline.ts"),
+      "export const first = () => 1; const second = () => 2;\n",
+      "utf-8",
+    );
+    const node: FileNode = { path: "sameline.ts", size: 60, language: "typescript" };
+
+    const { symbols } = await extractAllSymbols([node], tmpDir);
+    const names = symbols.map((s) => s.name).sort();
+
+    // Exactly the two distinct symbols — no duplicate emission. The exported
+    // `first` matches both the bare `lexical_declaration` and the
+    // `export_statement`-wrapped query patterns; anchoring the ID to the name
+    // node collapses those two emissions, so it must appear exactly once.
+    expect(names).toEqual(["first", "second"]);
+    // IDs are unique (no silent merge) and carry the column.
+    const ids = symbols.map((s) => s.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(ids.every((id) => id.split(":").length >= 4)).toBe(true);
+  });
+});
+
+// ─── PR4 B5: bounded-concurrent parsing — same output, deterministic order ────
+// A multi-file, mixed-variant fixture (.ts + .tsx) parsed concurrently must
+// yield the SAME symbols+hints in the SAME order as a serial (concurrency: 1)
+// run. Per-slot parsers mean no shared-parser race across in-flight parses.
+
+describe("PR4 B5: bounded-concurrent parsing equals serial output", () => {
+  let tmpDir: string;
+
+  const files: Array<{ name: string; src: string }> = [
+    { name: "a.ts", src: "export function alpha() {}\nexport class Beta { m() {} }\n" },
+    { name: "b.tsx", src: "export function Widget() { return null; }\nexport const h = (x: number) => x;\n" },
+    { name: "c.ts", src: "export const cast = () => { const v = <Foo>bar; return v; };\nexport function gamma() {}\n" },
+    { name: "d.tsx", src: "export class Panel { render() {} }\nexport function Other() { return null; }\n" },
+    { name: "e.ts", src: "export interface Shape { area(): number; }\nexport function delta() {}\n" },
+    { name: "f.ts", src: "export const first = () => 1; const second = () => 2;\n" },
+  ];
+
+  const nodes = (): FileNode[] =>
+    files.map((f) => ({ path: f.name, size: 200, language: "typescript" as const }));
+
+  beforeEach(async () => {
+    tmpDir = await mkdtemp(path.join(os.tmpdir(), "typocop-b5-"));
+    for (const f of files) {
+      await writeFile(path.join(tmpDir, f.name), f.src, "utf-8");
+    }
+  });
+  afterEach(async () => {
+    await rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it("concurrent (4) output is identical to serial (1) — symbols, hints, order", async () => {
+    const serial = await extractAllSymbols(nodes(), tmpDir, { concurrency: 1 });
+    const concurrent = await extractAllSymbols(nodes(), tmpDir, { concurrency: 4 });
+
+    // Exact array equality preserves both content and ordering.
+    expect(concurrent.symbols.map((s) => s.id)).toEqual(serial.symbols.map((s) => s.id));
+    expect(concurrent.symbols).toEqual(serial.symbols);
+    expect(concurrent.hints).toEqual(serial.hints);
+    expect(concurrent.skippedFiles).toBe(serial.skippedFiles);
+  });
+
+  it("default concurrency matches serial output too", async () => {
+    const serial = await extractAllSymbols(nodes(), tmpDir, { concurrency: 1 });
+    const dflt = await extractAllSymbols(nodes(), tmpDir);
+    expect(dflt.symbols).toEqual(serial.symbols);
+    expect(dflt.hints).toEqual(serial.hints);
+  });
+});
+
+// ─── PR4 B6: onProgress completion hook ───────────────────────────────────────
+// onProgress fires exactly once per file (INCLUDING skipped files), done is
+// monotonic-ish and ends EXACTLY at total.
+
+describe("PR4 B6: onProgress completion hook", () => {
+  let tmpDir: string;
+
+  beforeEach(async () => {
+    tmpDir = await mkdtemp(path.join(os.tmpdir(), "typocop-b6-"));
+  });
+  afterEach(async () => {
+    await rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it("fires exactly fileNodes.length times incl. skipped files; final done === total", async () => {
+    // Good file, an oversized file (skipped via knownSize gate), and a
+    // nonexistent file (skipped via ParseError) — all must still tick progress.
+    await writeFile(path.join(tmpDir, "ok.ts"), "export function ok() {}\n", "utf-8");
+    await writeFile(path.join(tmpDir, "big.ts"), "export function big() {}\n", "utf-8");
+
+    const fileNodes: FileNode[] = [
+      { path: "ok.ts", size: 50, language: "typescript" },
+      // knownSize above MAX_FILE_SIZE → skipped without reading
+      { path: "big.ts", size: 64 * 1024 * 1024, language: "typescript" },
+      { path: "missing.ts", size: 100, language: "typescript" },
+    ];
+
+    const calls: Array<{ done: number; total: number; currentPath?: string }> = [];
+    const result = await extractAllSymbols(fileNodes, tmpDir, {
+      concurrency: 2,
+      onProgress: (done, total, currentPath) => calls.push({ done, total, currentPath }),
+    });
+
+    // Exactly one tick per file.
+    expect(calls.length).toBe(fileNodes.length);
+    // total is constant and equals fileNodes.length.
+    expect(calls.every((c) => c.total === fileNodes.length)).toBe(true);
+    // done values are the integers 1..total in some order (each bump unique).
+    const doneValues = calls.map((c) => c.done).sort((a, b) => a - b);
+    expect(doneValues).toEqual([1, 2, 3]);
+    // Final tick reaches exactly total.
+    expect(Math.max(...calls.map((c) => c.done))).toBe(fileNodes.length);
+    // Two of the three files were skipped.
+    expect(result.skippedFiles).toBe(2);
+  });
+
+  it("done reaches total with a single worker and an all-skipped set", async () => {
+    const fileNodes: FileNode[] = [
+      { path: "gone1.ts", size: 10, language: "typescript" },
+      { path: "gone2.ts", size: 10, language: "typescript" },
+    ];
+    let lastDone = 0;
+    let count = 0;
+    const result = await extractAllSymbols(fileNodes, tmpDir, {
+      concurrency: 1,
+      onProgress: (done) => {
+        count++;
+        lastDone = done;
+      },
+    });
+    expect(count).toBe(2);
+    expect(lastDone).toBe(2);
+    expect(result.skippedFiles).toBe(2);
+    expect(result.symbols).toEqual([]);
   });
 });

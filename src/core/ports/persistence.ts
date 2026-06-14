@@ -51,6 +51,40 @@ export interface GraphAdapter {
     properties?: Record<string, unknown>,
   ): Promise<void>;
 
+  /**
+   * OPTIONAL batch fast-path for inserting many nodes that share a single
+   * `label`. When implemented, callers may hand an adapter one chunk of
+   * same-label rows per call instead of looping {@link createNode}. When this
+   * method is ABSENT, callers MUST fall back to per-row {@link createNode}; the
+   * stored result is identical either way (same prefixing — adapter-owned, same
+   * properties). Grouping is single-label by design, matching how the indexing
+   * pipeline already groups its writes (Symbol/Cluster/Process/...). Chunk sizes
+   * are bounded by the caller (see DB_WRITE_BATCH_SIZE).
+   */
+  createNodes?(
+    label: string,
+    nodes: ReadonlyArray<Record<string, unknown>>,
+  ): Promise<void>;
+
+  /**
+   * OPTIONAL batch fast-path for inserting many relationships that share a
+   * single `type`. When implemented, callers may hand an adapter one chunk of
+   * same-type edges per call instead of looping {@link createRelationship}.
+   * When this method is ABSENT, callers MUST fall back to per-row
+   * {@link createRelationship}; the stored result is identical either way.
+   * Grouping is single-type by design (the pipeline groups by relationship
+   * type, e.g. CONTAINS / HAS_STEP / DEPENDS_ON). Chunk sizes are bounded by the
+   * caller (see DB_WRITE_BATCH_SIZE).
+   */
+  createRelationships?(
+    type: string,
+    relationships: ReadonlyArray<{
+      readonly fromId: string;
+      readonly toId: string;
+      readonly properties?: Record<string, unknown>;
+    }>,
+  ): Promise<void>;
+
   queryNodes(
     label: string,
     filter?: Record<string, unknown>,
@@ -84,6 +118,22 @@ export interface VectorAdapter {
     symbolId: string,
     embedding: Embedding,
     metadata?: Record<string, string>,
+  ): Promise<void>;
+
+  /**
+   * OPTIONAL batch fast-path for indexing many symbol embeddings at once. When
+   * implemented, callers may hand an adapter one chunk of entries per call
+   * instead of looping {@link indexSymbol}. When this method is ABSENT, callers
+   * MUST fall back to per-row {@link indexSymbol}; the stored result is
+   * identical either way. Chunk sizes are bounded by the caller (see
+   * DB_WRITE_BATCH_SIZE).
+   */
+  indexSymbols?(
+    entries: ReadonlyArray<{
+      readonly symbolId: string;
+      readonly embedding: Embedding;
+      readonly metadata?: Record<string, string>;
+    }>,
   ): Promise<void>;
 
   semanticSearch(

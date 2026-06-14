@@ -71,6 +71,23 @@ export class LadybugGraphAdapter implements GraphAdapter {
     return result.getAll();
   }
 
+  /** Parameterized exec mirroring {@link execWithSchemaRetry}: on a missing-table
+   *  error, recreate the schema and retry once. */
+  private async execWithParamsSchemaRetry(
+    query: string,
+    params: Record<string, unknown>,
+  ): Promise<Record<string, LbugValue>[]> {
+    try {
+      return await this.execWithParams(query, params);
+    } catch (error) {
+      if (!this.isMissingTableError(error)) {
+        throw error;
+      }
+      await this.initializeSchema(true);
+      return this.execWithParams(query, params);
+    }
+  }
+
   /**
    * Create all required node and relationship tables.
    * LadybugDB (Kùzu) requires explicit schema before data insertion.
@@ -128,6 +145,37 @@ export class LadybugGraphAdapter implements GraphAdapter {
     await this.execWithSchemaRetry(`MERGE (n:${prefixedLabel} {id: "${props.id}"}) ${setClause}`);
   }
 
+  /**
+   * Batch fast-path: insert many same-label nodes in ONE parameterized query.
+   * The pipeline already chunks by DB_WRITE_BATCH_SIZE, so `nodes` is a bounded
+   * chunk — we do NOT re-chunk here. Columns are derived from the union of row
+   * keys (excluding the primary key `id`); within a label the pipeline sends
+   * uniform rows, but unioning is defensive against minor shape drift.
+   */
+  async createNodes(
+    label: string,
+    nodes: ReadonlyArray<Record<string, unknown>>,
+  ): Promise<void> {
+    if (nodes.length === 0) return;
+    const prefixedLabel = this.prefixLabel(label);
+
+    // Union of non-id keys across all rows (defensive; rows are normally uniform).
+    const columns = new Set<string>();
+    for (const node of nodes) {
+      for (const key of Object.keys(node)) {
+        if (key !== "id") columns.add(key);
+      }
+    }
+    const cols = [...columns];
+    const setClause = cols.length > 0
+      ? "SET " + cols.map((c) => `n.${c} = row.${c}`).join(", ")
+      : "";
+
+    const query =
+      `UNWIND $rows AS row MERGE (n:${prefixedLabel} {id: row.id}) ${setClause}`.trimEnd();
+    await this.execWithParamsSchemaRetry(query, { rows: nodes });
+  }
+
   /** Known rel table properties declared in schema. */
   private static readonly REL_SCHEMA_PROPS: Record<string, Set<string>> = {
     HAS_STEP: new Set(["step_order"]),
@@ -166,6 +214,55 @@ export class LadybugGraphAdapter implements GraphAdapter {
     await this.execWithSchemaRetry(
       `MATCH (a:${fromLabel} {id: "${fromId}"}), (b:${toLabel} {id: "${toId}"}) MERGE (a)-[r:${prefixedType}]->(b)${setClause}`,
     );
+  }
+
+  /**
+   * Batch fast-path: insert many same-type relationships in ONE parameterized
+   * query. `relationships` is a bounded chunk (pipeline-chunked) — not re-chunked
+   * here. Only properties declared in the rel table schema (REL_SCHEMA_PROPS) are
+   * SET; everything else is dropped to satisfy Kùzu's strict rel schema.
+   */
+  async createRelationships(
+    type: string,
+    relationships: ReadonlyArray<{
+      readonly fromId: string;
+      readonly toId: string;
+      readonly properties?: Record<string, unknown>;
+    }>,
+  ): Promise<void> {
+    if (relationships.length === 0) return;
+    const prefixedType = this.prefixType(type);
+    const labels = LadybugGraphAdapter.REL_LABEL_MAP[type] ?? ["Symbol", "Symbol"];
+    const fromLabel = this.prefixLabel(labels[0]);
+    const toLabel = this.prefixLabel(labels[1]);
+
+    const allowed = LadybugGraphAdapter.REL_SCHEMA_PROPS[type] ?? new Set<string>();
+    const props = [...allowed];
+    const setClause = props.length > 0
+      ? " ON CREATE SET " + props.map((p) => `r.${p} = rel.${p}`).join(", ") +
+        " ON MATCH SET " + props.map((p) => `r.${p} = rel.${p}`).join(", ")
+      : "";
+
+    // Flatten each row to { fromId, toId, <allowed props> } so the prepared
+    // statement binds a uniform struct shape.
+    const rels = relationships.map((rel) => {
+      const flat: Record<string, unknown> = { fromId: rel.fromId, toId: rel.toId };
+      for (const p of props) {
+        flat[p] = rel.properties?.[p];
+      }
+      return flat;
+    });
+
+    // NOTE: Kùzu rejects struct-field access inside a node-pattern property map
+    // (e.g. `(a {id: rel.fromId})`) for an UNWIND'd struct param — it throws
+    // `unordered_map::at`. Bind the ids in a WHERE clause instead; the planner
+    // resolves both endpoints via their primary-key index, so this is not a
+    // cartesian scan.
+    const query =
+      `UNWIND $rels AS rel MATCH (a:${fromLabel}), (b:${toLabel}) ` +
+      `WHERE a.id = rel.fromId AND b.id = rel.toId ` +
+      `MERGE (a)-[r:${prefixedType}]->(b)${setClause}`;
+    await this.execWithParamsSchemaRetry(query, { rels });
   }
 
   async queryNodes(
@@ -283,6 +380,12 @@ export class LadybugGraphAdapter implements GraphAdapter {
     params: Record<string, unknown> = {},
   ): Promise<void> {
     const prefixed = this.prefixQuery(query);
+    // When params are provided, bind them via the parameterized (prepare/execute)
+    // path; the previous implementation silently ignored them.
+    if (Object.keys(params).length > 0) {
+      await this.execWithParamsSchemaRetry(prefixed, params);
+      return;
+    }
     await this.execWithSchemaRetry(prefixed);
   }
 }

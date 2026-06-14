@@ -118,7 +118,10 @@ function setupDefaultMocks(): void {
   mockResolveReferences.mockReturnValue({ relationships: [], extNodes: new Map() });
   mockClusterSymbols.mockResolvedValue([]);
   mockTraceProcesses.mockReturnValue([]);
-  mockBuildSearchIndex.mockResolvedValue({ keywords: new Map(), symbolCount: 1, embeddings: [] });
+  mockBuildSearchIndex.mockResolvedValue({
+    keywords: new Map(), symbolCount: 1, embeddings: [],
+    embeddingStats: { attempts: 0, successes: 0, failures: 0 },
+  });
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
@@ -234,6 +237,99 @@ describe("runIndexingPipeline — DatabaseAdapter integration", () => {
   });
 });
 
+describe("storeInDatabases — batch fast-path (Phase D / PR7)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    setupDefaultMocks();
+  });
+
+  it("routes through batch methods when present; metrics count ROWS, not batch calls", async () => {
+    const { adapter, graph, vector } = makeMockAdapter(true);
+    // Equip the adapters with the OPTIONAL batch methods.
+    (graph as { createNodes?: ReturnType<typeof vi.fn> }).createNodes = vi
+      .fn()
+      .mockResolvedValue(undefined);
+    (graph as { createRelationships?: ReturnType<typeof vi.fn> }).createRelationships = vi
+      .fn()
+      .mockResolvedValue(undefined);
+    (vector as { indexSymbols?: ReturnType<typeof vi.fn> }).indexSymbols = vi
+      .fn()
+      .mockResolvedValue(undefined);
+
+    const cluster: Cluster = {
+      id: "cluster-1", name: "Auth", symbols: ["stub", "stub2"],
+      confidence: 0.9, category: "authentication",
+    };
+    const process: Process = {
+      id: "proc-1", name: "Login", entryPoint: "stub",
+      steps: [
+        { order: 0, symbolId: "stub", description: "entry" },
+        { order: 1, symbolId: "stub2", description: "next" },
+      ],
+      dataFlow: [],
+    };
+    const relationship: Relationship = {
+      id: "rel-1", source: "stub", target: "stub2", relType: "calls", metadata: {},
+    };
+
+    mockExtractAllSymbols.mockResolvedValue({
+      symbols: [STUB_SYMBOL, { ...STUB_SYMBOL, id: "stub2", name: "stub2" }],
+      hints: [], skippedFiles: 0,
+    });
+    mockResolveReferences.mockReturnValue({ relationships: [relationship], extNodes: new Map() });
+    mockClusterSymbols.mockResolvedValue([cluster]);
+    mockTraceProcesses.mockReturnValue([process]);
+    mockBuildSearchIndex.mockResolvedValue({
+      keywords: new Map(), symbolCount: 2,
+      embeddings: [
+        { symbolId: "stub", embedding: STUB_EMBEDDING, metadata: {} },
+        { symbolId: "stub2", embedding: STUB_EMBEDDING, metadata: {} },
+      ],
+      embeddingStats: { attempts: 2, successes: 2, failures: 0 },
+    });
+
+    const result = await runIndexingPipeline({
+      sourcePath: ".", language: "typescript", verbose: false, adapter,
+    });
+
+    const createNodes = (graph as unknown as { createNodes: ReturnType<typeof vi.fn> }).createNodes;
+    const createRelationships = (graph as unknown as { createRelationships: ReturnType<typeof vi.fn> }).createRelationships;
+    const indexSymbols = (vector as unknown as { indexSymbols: ReturnType<typeof vi.fn> }).indexSymbols;
+
+    // Batch path taken — per-row methods untouched.
+    expect(graph.createNode).not.toHaveBeenCalled();
+    expect(graph.createRelationship).not.toHaveBeenCalled();
+    expect(vector.indexSymbol).not.toHaveBeenCalled();
+
+    // Nodes grouped by label, all rows present in batches.
+    const nodeBatches = createNodes.mock.calls as Array<[string, Array<Record<string, unknown>>]>;
+    const nodeRowsByLabel = new Map<string, Array<Record<string, unknown>>>();
+    for (const [label, part] of nodeBatches) {
+      expect(part.length).toBeLessThanOrEqual(500);
+      nodeRowsByLabel.set(label, [...(nodeRowsByLabel.get(label) ?? []), ...part]);
+    }
+    expect(nodeRowsByLabel.get("Symbol")).toHaveLength(2);
+    expect(nodeRowsByLabel.get("Cluster")).toHaveLength(1);
+    expect(nodeRowsByLabel.get("Process")).toHaveLength(1);
+
+    // Relationships grouped by type.
+    const relTypes = (createRelationships.mock.calls as Array<[string, unknown[]]>).map(([t]) => t);
+    expect(relTypes).toEqual(expect.arrayContaining(["CALLS", "CONTAINS", "HAS_STEP"]));
+
+    // Vector entries batched.
+    const vecBatches = indexSymbols.mock.calls as Array<[Array<unknown>]>;
+    expect(vecBatches.flatMap(([part]) => part)).toHaveLength(2);
+
+    // Metrics count ROWS, not batch calls.
+    // 2 symbols + 1 cluster + 1 process = 4 node rows.
+    expect(result.metrics.graphNodeWrites).toBe(4);
+    // 1 CALLS + 2 CONTAINS + 2 HAS_STEP = 5 edge rows.
+    expect(result.metrics.graphEdgeWrites).toBe(5);
+    expect(result.metrics.vectorWrites).toBe(2);
+    expect(result.embeddingCount).toBe(2);
+  });
+});
+
 describe("Phase 6 — EmbeddingAdapter and VectorAdapter", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -246,7 +342,10 @@ describe("Phase 6 — EmbeddingAdapter and VectorAdapter", () => {
     mockBuildSearchIndex.mockImplementation(async (_s: unknown, _c: unknown, embedFn: unknown) => {
       expect(embedFn).not.toBeNull();
       if (typeof embedFn === "function") await embedFn("test text");
-      return { keywords: new Map(), symbolCount: 1, embeddings: [] };
+      return {
+        keywords: new Map(), symbolCount: 1, embeddings: [],
+        embeddingStats: { attempts: 0, successes: 0, failures: 0 },
+      };
     });
 
     await runIndexingPipeline({ sourcePath: ".", language: "typescript", verbose: false, adapter });
@@ -259,7 +358,10 @@ describe("Phase 6 — EmbeddingAdapter and VectorAdapter", () => {
 
     mockBuildSearchIndex.mockImplementation(async (_s: unknown, _c: unknown, embedFn: unknown) => {
       expect(embedFn).toBeNull();
-      return { keywords: new Map(), symbolCount: 1, embeddings: [] };
+      return {
+        keywords: new Map(), symbolCount: 1, embeddings: [],
+        embeddingStats: { attempts: 0, successes: 0, failures: 0 },
+      };
     });
 
     await runIndexingPipeline({ sourcePath: ".", language: "typescript", verbose: false, adapter });
@@ -277,6 +379,7 @@ describe("Phase 6 — EmbeddingAdapter and VectorAdapter", () => {
         { symbolId: "sym-1", embedding: STUB_EMBEDDING, metadata: { clusterId: "c1" } },
         { symbolId: "sym-2", embedding: STUB_EMBEDDING, metadata: { clusterId: "c2" } },
       ],
+      embeddingStats: { attempts: 2, successes: 2, failures: 0 },
     });
 
     const result = await runIndexingPipeline({ sourcePath: ".", language: "typescript", verbose: false, adapter });
@@ -304,5 +407,118 @@ describe("Phase 6 — EmbeddingAdapter and VectorAdapter", () => {
 
     expect(result.embeddingCount).toBe(0);
     expect(vector.indexSymbol).not.toHaveBeenCalled();
+  });
+
+  it("surfaces embedding failure counts in metrics and logs them, without failing (Phase C)", async () => {
+    const { adapter, vector } = makeMockAdapter(true);
+    const stderrSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    // Some succeeded, some failed (null/timeout/error → keyword-only).
+    mockBuildSearchIndex.mockResolvedValue({
+      keywords: new Map([["user", ["sym-1"]]]), symbolCount: 1,
+      embeddings: [
+        { symbolId: "sym-1", embedding: STUB_EMBEDDING, metadata: {} },
+      ],
+      embeddingStats: { attempts: 3, successes: 1, failures: 2 },
+    });
+
+    try {
+      const result = await runIndexingPipeline({ sourcePath: ".", language: "typescript", verbose: false, adapter });
+
+      // Pipeline did NOT fail; successful embedding still stored.
+      expect(result.embeddingCount).toBe(1);
+      expect(vector.indexSymbol).toHaveBeenCalledTimes(1);
+      // Failure counts surfaced in metrics.
+      expect(result.metrics.embeddingAttempts).toBe(3);
+      expect(result.metrics.embeddingFailures).toBe(2);
+      // Failures logged (not silently swallowed), on stderr.
+      const logged = stderrSpy.mock.calls.some(([msg]) =>
+        typeof msg === "string" && msg.includes("2 of 3") && msg.includes("failed"),
+      );
+      expect(logged).toBe(true);
+    } finally {
+      stderrSpy.mockRestore();
+    }
+  });
+
+  it("passes semanticClassification through to clusterSymbols (default true)", async () => {
+    const { adapter } = makeMockAdapter(true);
+    await runIndexingPipeline({ sourcePath: ".", language: "typescript", verbose: false, adapter });
+    // arg order: symbols, relationships, aiClient, embeddingAdapter, semanticClassification
+    expect(mockClusterSymbols.mock.calls[0]?.[4]).toBe(true);
+
+    vi.clearAllMocks();
+    setupDefaultMocks();
+    await runIndexingPipeline({
+      sourcePath: ".", language: "typescript", verbose: false, adapter, semanticClassification: false,
+    });
+    expect(mockClusterSymbols.mock.calls[0]?.[4]).toBe(false);
+  });
+});
+
+// ─── B6 progress wiring ─────────────────────────────────────────────────────
+
+describe("runIndexingPipeline — Phase 2 progress (B6)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    setupDefaultMocks();
+  });
+
+  it("passes an onProgress callback to extractAllSymbols", async () => {
+    const { adapter } = makeMockAdapter(false);
+    await runIndexingPipeline({ sourcePath: ".", language: "typescript", verbose: false, adapter });
+
+    expect(mockExtractAllSymbols).toHaveBeenCalledTimes(1);
+    const options = mockExtractAllSymbols.mock.calls[0]?.[2] as { onProgress?: unknown } | undefined;
+    expect(typeof options?.onProgress).toBe("function");
+  });
+
+  it("writes nothing to stdout, even when extractAllSymbols drives onProgress", async () => {
+    const { adapter } = makeMockAdapter(false);
+    const stdoutSpy = vi.spyOn(process.stdout, "write").mockReturnValue(true);
+
+    // Drive the supplied hook like the real bounded-concurrency loop would,
+    // including a skipped file so the counter still reaches total.
+    mockExtractAllSymbols.mockImplementation(
+      async (_files: unknown, _root: unknown, opts: { onProgress?: (d: number, t: number, p?: string) => void } = {}) => {
+        const total = 3;
+        for (let done = 1; done <= total; done++) opts.onProgress?.(done, total, `f${done}.ts`);
+        return { symbols: [STUB_SYMBOL], hints: [], skippedFiles: 1 };
+      },
+    );
+
+    try {
+      await runIndexingPipeline({ sourcePath: ".", language: "typescript", verbose: false, adapter });
+      expect(stdoutSpy).not.toHaveBeenCalled();
+    } finally {
+      stdoutSpy.mockRestore();
+    }
+  });
+
+  it("stays quiet (no stderr progress chatter) in non-TTY non-verbose mode", async () => {
+    const { adapter } = makeMockAdapter(false);
+    const originalIsTTY = process.stderr.isTTY;
+    Object.defineProperty(process.stderr, "isTTY", { value: false, configurable: true });
+    const stderrSpy = vi.spyOn(process.stderr, "write").mockReturnValue(true);
+
+    mockExtractAllSymbols.mockImplementation(
+      async (_files: unknown, _root: unknown, opts: { onProgress?: (d: number, t: number, p?: string) => void } = {}) => {
+        for (let done = 1; done <= 5; done++) opts.onProgress?.(done, 5, `f${done}.ts`);
+        return { symbols: [STUB_SYMBOL], hints: [], skippedFiles: 0 };
+      },
+    );
+
+    try {
+      await runIndexingPipeline({ sourcePath: ".", language: "typescript", verbose: false, adapter });
+      // The renderer must emit no progress lines in non-TTY non-verbose mode.
+      // (Other pipeline stderr logging is gated behind verbose, so nothing here.)
+      const progressWrites = stderrSpy.mock.calls.filter(([c]) =>
+        typeof c === "string" && c.includes("Phase 2: parsing"),
+      );
+      expect(progressWrites).toHaveLength(0);
+    } finally {
+      stderrSpy.mockRestore();
+      Object.defineProperty(process.stderr, "isTTY", { value: originalIsTTY, configurable: true });
+    }
   });
 });

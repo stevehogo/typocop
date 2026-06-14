@@ -6,14 +6,15 @@
  *   5: Cluster Minimum Size       — at least 2 symbols         (Req 6.4)
  *   6: Cluster Symbol Validity    — all symbol IDs exist        (Req 6.5)
  */
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import * as fc from "fast-check";
 import { clusterArbitrary, symbolArbitrary } from "../../../../tests/support/arbitraries.js";
 import type { Symbol, Relationship } from "../../../core/domain.js";
 import { buildClusterGraph, calculateCohesion } from "./graph.js";
 import { louvainClustering } from "./louvain.js";
-import { classifyCluster } from "./enrichment.js";
+import { classifyCluster, resetSharedClassifier } from "./enrichment.js";
 import { clusterSymbols } from "./index.js";
+import type { EmbeddingAdapter } from "../../../core/ports/persistence.js";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -321,5 +322,50 @@ describe("clusterSymbols", () => {
       expect(c.confidence).toBeGreaterThanOrEqual(0.0);
       expect(c.confidence).toBeLessThanOrEqual(1.0);
     }
+  });
+
+  // ─── Phase C: semanticClassification opt-out (default preserves behavior) ────
+
+  it("skips embedding (keyword classification) when semanticClassification is false", async () => {
+    resetSharedClassifier();
+    const embedText = vi.fn(async () => ({ vector: new Array(8).fill(0.1), dimensions: 8 }));
+    const adapter: EmbeddingAdapter = {
+      isEnabled: () => true,
+      embedText,
+      getDimensions: () => 8,
+    };
+    const symbols = [
+      makeSymbol("a", "loginUser", "function"),
+      makeSymbol("b", "validateToken", "function"),
+    ];
+    const rels = [makeRel("a", "b")];
+
+    const clusters = await clusterSymbols(symbols, rels, undefined, adapter, false);
+
+    // No embeddings requested at all → no Phase 4 cluster embedding work.
+    expect(embedText).not.toHaveBeenCalled();
+    // Keyword classification still produces a category.
+    expect(clusters.every((c) => c.category === "authentication")).toBe(true);
+  });
+
+  it("uses semantic classification by default when the adapter is enabled", async () => {
+    resetSharedClassifier();
+    const embedText = vi.fn(async () => ({ vector: new Array(8).fill(0.1), dimensions: 8 }));
+    const adapter: EmbeddingAdapter = {
+      isEnabled: () => true,
+      embedText,
+      getDimensions: () => 8,
+    };
+    const symbols = [
+      makeSymbol("a", "loginUser", "function"),
+      makeSymbol("b", "validateToken", "function"),
+    ];
+    const rels = [makeRel("a", "b")];
+
+    await clusterSymbols(symbols, rels, undefined, adapter);
+
+    // Default (semanticClassification omitted) embeds — current behavior preserved.
+    expect(embedText).toHaveBeenCalled();
+    resetSharedClassifier();
   });
 });

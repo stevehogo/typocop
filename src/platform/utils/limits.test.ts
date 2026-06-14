@@ -4,11 +4,98 @@ import {
   MAX_GRAPH_SIZE_NODES,
   QUERY_TIMEOUT_MS,
   MAX_TRAVERSAL_DEPTH,
+  PARSE_CONCURRENCY,
+  EMBEDDING_CONCURRENCY,
+  EMBEDDING_TIMEOUT_MS,
+  DB_WRITE_BATCH_SIZE,
   isFileSizeValid,
   isGraphSizeValid,
   withQueryTimeout,
+  withTimeoutOr,
   isTraversalDepthValid,
 } from './limits.js';
+
+describe('PARSE_CONCURRENCY', () => {
+  it('is a positive integer in a sane range (B5 conservative default)', () => {
+    expect(Number.isInteger(PARSE_CONCURRENCY)).toBe(true);
+    expect(PARSE_CONCURRENCY).toBeGreaterThanOrEqual(1);
+    expect(PARSE_CONCURRENCY).toBeLessThanOrEqual(16);
+  });
+});
+
+describe('EMBEDDING_CONCURRENCY', () => {
+  it('is a small positive integer safe for local backends (Phase C, 2-4)', () => {
+    expect(Number.isInteger(EMBEDDING_CONCURRENCY)).toBe(true);
+    expect(EMBEDDING_CONCURRENCY).toBeGreaterThanOrEqual(2);
+    expect(EMBEDDING_CONCURRENCY).toBeLessThanOrEqual(4);
+  });
+});
+
+describe('EMBEDDING_TIMEOUT_MS', () => {
+  it('is a positive duration', () => {
+    expect(EMBEDDING_TIMEOUT_MS).toBeGreaterThan(0);
+  });
+});
+
+describe('DB_WRITE_BATCH_SIZE', () => {
+  it('is a bounded positive integer chunk size (Phase D)', () => {
+    expect(Number.isInteger(DB_WRITE_BATCH_SIZE)).toBe(true);
+    expect(DB_WRITE_BATCH_SIZE).toBeGreaterThanOrEqual(1);
+    // Bounded so a single batch write stays a reasonable statement/payload size.
+    expect(DB_WRITE_BATCH_SIZE).toBeLessThanOrEqual(10_000);
+  });
+});
+
+describe('withTimeoutOr', () => {
+  it('resolves with the operation result when it completes in time', async () => {
+    const result = await withTimeoutOr(async () => 'ok', 100, 'fallback');
+    expect(result).toBe('ok');
+  });
+
+  it('resolves with the sentinel value when the operation times out', async () => {
+    const result = await withTimeoutOr(
+      async () => {
+        await new Promise((r) => setTimeout(r, 200));
+        return 'late';
+      },
+      20,
+      'fallback',
+    );
+    expect(result).toBe('fallback');
+  });
+
+  it('supports a lazy sentinel factory', async () => {
+    const result = await withTimeoutOr(
+      () => new Promise<number>((r) => setTimeout(() => r(1), 200)),
+      20,
+      () => 42,
+    );
+    expect(result).toBe(42);
+  });
+
+  it('still rejects when the operation itself throws', async () => {
+    await expect(
+      withTimeoutOr(async () => {
+        throw new Error('inner failure');
+      }, 100, 'fallback'),
+    ).rejects.toThrow('inner failure');
+  });
+
+  it('does not keep a timer pending after a fast resolve', async () => {
+    vi.useFakeTimers();
+    try {
+      const setSpy = vi.spyOn(global, 'setTimeout');
+      const clearSpy = vi.spyOn(global, 'clearTimeout');
+      const p = withTimeoutOr(async () => 'fast', 1000, 'fallback');
+      await vi.runAllTimersAsync();
+      await expect(p).resolves.toBe('fast');
+      expect(setSpy).toHaveBeenCalled();
+      expect(clearSpy).toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
 
 describe('isFileSizeValid', () => {
   it('returns true for file sizes within limit', () => {

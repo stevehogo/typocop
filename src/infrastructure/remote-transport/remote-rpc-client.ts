@@ -9,12 +9,15 @@ export type GraphRpcMethod =
   | "RunCypherWrite"
   | "CreateNode"
   | "CreateRelationship"
+  | "CreateNodes"
+  | "CreateRelationships"
   | "DeleteNodesByLabel"
   | "DeleteRelationshipsByType";
 
 export type VectorRpcMethod =
   | "CreateTables"
   | "IndexSymbol"
+  | "IndexSymbols"
   | "SemanticSearch"
   | "DeleteAll";
 

@@ -32,7 +32,7 @@ const TOOL_DEFINITIONS = [
         },
         maxResults: {
           type: "number",
-          description: "Maximum number of results to return (default: 50)",
+          description: "Maximum number of results to return (default: 100)",
         },
       },
       required: ["symbolName"],
@@ -54,7 +54,7 @@ const TOOL_DEFINITIONS = [
         },
         maxResults: {
           type: "number",
-          description: "Maximum number of results to return (default: 50)",
+          description: "Maximum number of results to return (default: 100)",
         },
       },
       required: ["symbolName"],
@@ -76,7 +76,7 @@ const TOOL_DEFINITIONS = [
         },
         maxResults: {
           type: "number",
-          description: "Maximum number of results to return (default: 50)",
+          description: "Maximum number of results to return (default: 100)",
         },
       },
       required: ["entryPoint"],
@@ -99,7 +99,7 @@ const TOOL_DEFINITIONS = [
         },
         maxResults: {
           type: "number",
-          description: "Maximum number of results to return (default: 50)",
+          description: "Maximum number of results to return (default: 100)",
         },
       },
       required: ["symbolName"],
@@ -112,7 +112,7 @@ const TOOL_DEFINITIONS = [
       type: "object",
       properties: {
         query: { type: "string", description: "Natural language description" },
-        maxResults: { type: "number", description: "Max symbols to return (default: 10)" },
+        maxResults: { type: "number", description: "Max symbols to return (default: 100)" },
       },
       required: ["query"],
     },

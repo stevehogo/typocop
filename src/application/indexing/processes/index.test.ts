@@ -215,6 +215,69 @@ describe("findEntryPoints", () => {
     const entries = findEntryPoints(symbols, rels);
     expect(entries).not.toContain("b");
   });
+
+  it("produces identical results when given a prebuilt call graph (PR11 reuse)", () => {
+    const symbols = [
+      makeSymbol("ctrl", "handleRequest"),
+      makeSymbol("svc", "processData"),
+      makeSymbol("repo", "saveRecord"),
+    ];
+    const rels = [makeRel("ctrl", "svc"), makeRel("svc", "repo")];
+    const symbolIds = new Set(symbols.map((s) => s.id));
+    const prebuilt = buildCallGraph(symbolIds, rels);
+    // Passing the prebuilt graph must match building it internally.
+    expect(findEntryPoints(symbols, rels, prebuilt)).toEqual(findEntryPoints(symbols, rels));
+  });
+
+  it("default maxEntryPoints is unlimited (output unchanged from no cap)", () => {
+    const symbols = [
+      makeSymbol("ctrl", "handleRequest"),
+      makeSymbol("ctrl2", "handleLogin"),
+      makeSymbol("svc", "processData"),
+      makeSymbol("repo", "saveRecord"),
+    ];
+    const rels = [
+      makeRel("ctrl", "svc"),
+      makeRel("ctrl", "repo"),
+      makeRel("ctrl2", "svc"),
+      makeRel("svc", "repo"),
+    ];
+    // Explicit Infinity must equal the implicit default.
+    expect(findEntryPoints(symbols, rels, undefined, Infinity)).toEqual(
+      findEntryPoints(symbols, rels),
+    );
+  });
+
+  it("caps entry points to the top-N by score when maxEntryPoints is set", () => {
+    const symbols = [
+      makeSymbol("ctrl", "handleRequest"),
+      makeSymbol("ctrl2", "handleLogin"),
+      makeSymbol("svc", "processData"),
+      makeSymbol("repo", "saveRecord"),
+    ];
+    const rels = [
+      makeRel("ctrl", "svc"),
+      makeRel("ctrl", "repo"),
+      makeRel("ctrl2", "svc"),
+      makeRel("svc", "repo"),
+    ];
+    const full = findEntryPoints(symbols, rels);
+    expect(full.length).toBeGreaterThan(1);
+
+    const capped = findEntryPoints(symbols, rels, undefined, 1);
+    expect(capped).toHaveLength(1);
+    // The cap keeps the highest-scoring entries (prefix of the full sorted list).
+    expect(capped).toEqual(full.slice(0, 1));
+  });
+
+  it("a cap of 0 returns no entry points", () => {
+    const symbols = [
+      makeSymbol("ctrl", "handleRequest"),
+      makeSymbol("svc", "processData"),
+    ];
+    const rels = [makeRel("ctrl", "svc")];
+    expect(findEntryPoints(symbols, rels, undefined, 0)).toEqual([]);
+  });
 });
 
 // ─── Unit tests: traceExecution ──────────────────────────────────────────────
@@ -369,6 +432,44 @@ describe("traceProcesses", () => {
         expect(proc.steps[i].order).toBe(i);
       }
     }
+  });
+
+  it("findEntryPoints uses the prebuilt call graph instead of rebuilding (PR11: no duplicate construction)", () => {
+    // Behavioral proof that the prebuilt graph is used and the internal rebuild
+    // is skipped. A module-namespace spy on buildCallGraph would NOT observe the
+    // intra-module call inside findEntryPoints, so it cannot guard this property.
+    // Instead: pass EMPTY relationships but a prebuilt graph WITH edges. If
+    // findEntryPoints rebuilt from `relationships` (the regression), it would see
+    // no edges and return []; using the prebuilt graph yields real entry points.
+    const symbols = [
+      makeSymbol("a", "handleRequest"),
+      makeSymbol("b", "processData"),
+      makeSymbol("c", "saveRecord"),
+    ];
+    const rels = [makeRel("a", "b"), makeRel("b", "c")];
+    const prebuilt = buildCallGraph(new Set(symbols.map((s) => s.id)), rels);
+
+    const fromPrebuilt = findEntryPoints(symbols, [], prebuilt);
+    expect(fromPrebuilt.length).toBeGreaterThan(0);
+    // The prebuilt-graph result must match building from the real relationships,
+    // and must NOT match the empty-relationships rebuild (which yields []).
+    expect(fromPrebuilt).toEqual(findEntryPoints(symbols, rels));
+    expect(findEntryPoints(symbols, [])).toEqual([]);
+  });
+
+  it("process output is unchanged whether or not the graph is reused", () => {
+    const symbols = [
+      makeSymbol("a", "handleRequest"),
+      makeSymbol("b", "processData"),
+      makeSymbol("c", "saveRecord"),
+    ];
+    const rels = [makeRel("a", "b"), makeRel("b", "c")];
+    // traceProcesses uses the prebuilt-graph path; cross-check against findEntryPoints
+    // built without a prebuilt graph to confirm entry points are identical.
+    const symbolIds = new Set(symbols.map((s) => s.id));
+    const prebuilt = buildCallGraph(symbolIds, rels);
+    expect(findEntryPoints(symbols, rels, prebuilt)).toEqual(findEntryPoints(symbols, rels));
+    expect(traceProcesses(symbols, rels).length).toBeGreaterThan(0);
   });
 
   it("all step symbolIds reference symbols in the input set", () => {

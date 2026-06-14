@@ -43,8 +43,9 @@ export function traceProcesses(
     symbols.map((s) => [s.id, s.name]),
   );
 
-  // Step 1: Find entry points (Req 7.1)
-  const entryPoints = findEntryPoints(symbols, relationships);
+  // Step 1: Find entry points (Req 7.1).
+  // Reuse the already-built callGraph instead of rebuilding it internally.
+  const entryPoints = findEntryPoints(symbols, relationships, callGraph);
 
   // Step 2 & 3: Trace executions with cycle detection (Req 7.2, 7.3, 7.4)
   const traces = traceAllExecutions(entryPoints, callGraph, symbolDescriptions);

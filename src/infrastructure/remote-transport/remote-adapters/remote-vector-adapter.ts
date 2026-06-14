@@ -51,6 +51,25 @@ export class RemoteVectorAdapter implements VectorAdapter {
     });
   }
 
+  async indexSymbols(
+    entries: ReadonlyArray<{
+      readonly symbolId: string;
+      readonly embedding: Embedding;
+      readonly metadata?: Record<string, string>;
+    }>,
+  ): Promise<void> {
+    await this.rpc.callVector<
+      {
+        readonly metadata: RpcRequestMetadata;
+        readonly entriesJson: string;
+      },
+      MutationResponse
+    >("IndexSymbols", {
+      metadata: this.rpc.buildRequestMetadata(),
+      entriesJson: JSON.stringify(entries),
+    });
+  }
+
   async semanticSearch(
     queryEmbedding: Embedding,
     limit: number,

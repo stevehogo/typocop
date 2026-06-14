@@ -35,6 +35,22 @@ export class LadybugVectorAdapter implements VectorAdapter {
     return result.getAll();
   }
 
+  /** Execute a parameterized query using prepare + execute. */
+  private async sqlWithParams(
+    query: string,
+    params: Record<string, unknown>,
+  ): Promise<Record<string, LbugValue>[]> {
+    const ps = await this.connection.prepare(query);
+    if (!ps.isSuccess()) {
+      throw new Error(`Query preparation failed: ${ps.getErrorMessage()}`);
+    }
+    const result = await this.connection.execute(ps, params as Record<string, LbugValue>);
+    if (Array.isArray(result)) {
+      return result[0] ? await result[0].getAll() : [];
+    }
+    return result.getAll();
+  }
+
   async createTables(): Promise<void> {
     await this.sql(
       `CREATE NODE TABLE IF NOT EXISTS ${this.tableName} (
@@ -56,6 +72,39 @@ export class LadybugVectorAdapter implements VectorAdapter {
     await this.sql(
       `MERGE (n:${this.tableName} {symbol_id: "${symbolId}"})
        SET n.embedding = ${vecStr}, n.dimensions = ${embedding.dimensions}, n.metadata = ${metaStr}`,
+    );
+  }
+
+  /**
+   * Batch fast-path: index many embeddings in ONE parameterized query.
+   * `entries` is a bounded chunk (pipeline-chunked) — not re-chunked here.
+   *
+   * Metadata round-trip: the per-row {@link indexSymbol} stores the metadata
+   * column as a JSON string (the result of `JSON.stringify(metadata)`) — it
+   * builds a Cypher string literal via `JSON.stringify(JSON.stringify(metadata))`
+   * so the value actually stored is the single-encoded JSON. Here we bind
+   * `JSON.stringify(metadata)` directly as a string parameter, producing the
+   * IDENTICAL stored representation, so `semanticSearch`'s `JSON.parse(metadata)`
+   * round-trips the same on either write path.
+   */
+  async indexSymbols(
+    entries: ReadonlyArray<{
+      readonly symbolId: string;
+      readonly embedding: Embedding;
+      readonly metadata?: Record<string, string>;
+    }>,
+  ): Promise<void> {
+    if (entries.length === 0) return;
+    const rows = entries.map((entry) => ({
+      symbol_id: entry.symbolId,
+      embedding: [...entry.embedding.vector],
+      dimensions: entry.embedding.dimensions,
+      metadata: JSON.stringify(entry.metadata ?? {}),
+    }));
+    await this.sqlWithParams(
+      `UNWIND $rows AS row MERGE (n:${this.tableName} {symbol_id: row.symbol_id})
+       SET n.embedding = row.embedding, n.dimensions = row.dimensions, n.metadata = row.metadata`,
+      { rows },
     );
   }
 

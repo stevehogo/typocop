@@ -153,8 +153,18 @@ let sharedClassifier: SemanticClusterClassifier | null = null;
 /**
  * Enrich a cluster with an AI-generated name and category.
  *
- * When `embeddingAdapter?.isEnabled()` is true, uses semantic classification
- * via Ollama embeddings. Otherwise falls back to keyword-based classification.
+ * When `embeddingAdapter?.isEnabled()` is true AND `semanticClassification` is
+ * not disabled, uses semantic classification via embeddings. Otherwise falls
+ * back to keyword-based classification.
+ *
+ * `semanticClassification` is an opt-OUT (defaults to enabled) so the DEFAULT
+ * behavior is identical to before: semantic classification whenever an
+ * embedding adapter is enabled. It exists so callers can disable Phase 4
+ * cluster embedding when it dominates indexing time (Phase C) — Phase 4
+ * (`buildClusterText`) and Phase 6 (`formatClusterForEmbedding`) embed
+ * DIFFERENT, separately privacy-redacted texts through different code paths, so
+ * sharing one cached embedding across the boundary is not sound; gating the
+ * Phase 4 work is the lower-risk lever.
  *
  * Enforces minimum cluster size of 2 symbols (Req 6.4).
  * Returns the cluster unchanged if it has fewer than 2 symbols.
@@ -167,6 +177,7 @@ export async function enrichCluster(
   heuristicLabel: string,
   aiClient?: AIClient,
   embeddingAdapter?: EmbeddingAdapter,
+  semanticClassification: boolean = true,
 ): Promise<Cluster> {
   // Enforce minimum cluster size invariant
   if (cluster.symbols.length < 2) return cluster;
@@ -180,7 +191,7 @@ export async function enrichCluster(
 
   let category: ClusterCategory;
 
-  if (embeddingAdapter?.isEnabled()) {
+  if (semanticClassification && embeddingAdapter?.isEnabled()) {
     // Semantic classification via Ollama (Req 10.1, 10.4)
     if (!sharedClassifier || !sharedClassifier.isInitialized()) {
       sharedClassifier = new SemanticClusterClassifier();

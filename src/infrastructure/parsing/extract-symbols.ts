@@ -1,8 +1,9 @@
 import * as crypto from "crypto";
 import Parser from "tree-sitter";
 import type { Language, Symbol, SymbolKind, Visibility, Modifier } from "../../core/domain.js";
-import type { ASTNode } from "./ast-node.js";
+import { type ASTNode, fromSyntaxNode } from "./ast-node.js";
 import { LANGUAGE_QUERIES } from "./queries.js";
+import { generateSymbolId } from "./symbol-id.js";
 
 /** Raw relationship hint extracted from AST — resolved into Relationship in Phase 3 */
 export interface RawRelationshipHint {
@@ -107,12 +108,83 @@ function buildSymbol(node: ASTNode, filePath: string): Symbol | null {
 }
 
 /**
+ * Compiled tree-sitter queries cached by the `Parser.Language` they were
+ * compiled against (B2).
+ *
+ * `LANGUAGE_QUERIES` is fixed per language, so the S-expression compilation can
+ * be done once and reused for every subsequent file. The cache key is the actual
+ * grammar object (`parser.getLanguage()`), NOT the file extension: a `Query` is
+ * compiled against a specific grammar and must only run against trees produced by
+ * that same grammar. Keying on the grammar object guarantees the cached query
+ * always matches the tree it queries — even while the parser's grammar is
+ * selected statefully (the tsx vs ts grammars are distinct `Language` objects, so
+ * they get distinct cache entries automatically). `getLanguage()` returns a stable
+ * reference equal to the grammar export, so same-language files share one entry.
+ *
+ * A `null` value records that compilation failed for that grammar, so we don't
+ * retry compilation (and re-log the warning) on every file.
+ *
+ * Concurrency note (B5): this module-level cache is shared across the parse
+ * worker pool, but it is race-free because the whole extraction path
+ * (`extractSymbolsWithQueries` → `getCompiledQuery` → `query.matches`) is fully
+ * synchronous — there is no `await` between the cache `has` check and `set`, so
+ * concurrent workers cannot interleave on the event loop. If extraction ever
+ * gains an `await`, two workers could double-compile a query (harmless duplicate
+ * work, absorbed by identical query output + `deduplicateById`).
+ */
+const queryCache = new Map<Parser.Language, Parser.Query | null>();
+
+/** Test-only counter: number of `new Parser.Query(...)` compilations performed. */
+let queryCompileCount = 0;
+
+/** Test hook — number of query compilations since the last reset. */
+export function getQueryCompileCount(): number {
+  return queryCompileCount;
+}
+
+/** Test hook — clear the query cache and reset the compile counter. */
+export function resetQueryCache(): void {
+  queryCache.clear();
+  queryCompileCount = 0;
+}
+
+/**
+ * Compile (or fetch a cached) tree-sitter query for the given variant.
+ * Returns `null` if compilation has failed for this variant.
+ */
+function getCompiledQuery(
+  lang: Parser.Language,
+  queryString: string,
+  language: Language,
+): Parser.Query | null {
+  if (queryCache.has(lang)) {
+    return queryCache.get(lang) ?? null;
+  }
+
+  try {
+    const query = new Parser.Query(lang, queryString);
+    queryCompileCount++;
+    queryCache.set(lang, query);
+    return query;
+  } catch (err) {
+    console.warn(`[parser] Warning: failed to compile query for ${language}: ${String(err)}`);
+    queryCache.set(lang, null);
+    return null;
+  }
+}
+
+/**
  * Extract symbols AND raw relationship hints using tree-sitter queries.
  * Processes @definition.*, @import, @call, and @heritage captures in one pass.
+ *
+ * Queries the live `Parser.Tree` produced by a single upstream parse (B1) — it
+ * does NOT reparse. The eager `ASTNode` tree is only materialized on the
+ * fallback path (query compilation failure), never on the common path.
+ *
  * Requirements: 3.2, 4.1, 4.2, 5.1, 5.2, 5.3, 5.4
  */
 export function extractSymbolsWithQueries(
-  ast: ASTNode,
+  tree: Parser.Tree,
   filePath: string,
   language: Language,
   parser: Parser,
@@ -120,15 +192,12 @@ export function extractSymbolsWithQueries(
   const queryString = LANGUAGE_QUERIES[language];
   const lang = parser.getLanguage();
 
-  let query: Parser.Query;
-  try {
-    query = new Parser.Query(lang, queryString);
-  } catch (err) {
-    console.warn(`[parser] Warning: failed to compile query for ${language}: ${String(err)}`);
-    return { symbols: extractSymbols(ast, filePath), hints: [] };
+  const query = getCompiledQuery(lang, queryString, language);
+  if (query === null) {
+    // Fallback: build the eager ASTNode lazily, only on this rare path.
+    return { symbols: extractSymbols(fromSyntaxNode(tree.rootNode), filePath), hints: [] };
   }
 
-  const tree = parser.parse(ast.text);
   const matches = query.matches(tree.rootNode);
 
   const symbols: Symbol[] = [];
@@ -154,8 +223,22 @@ export function extractSymbolsWithQueries(
       const kind: SymbolKind = DEFINITION_KIND_MAP[defCapture.name] ?? "variable";
       const defNode = defCapture.node;
 
+      // Anchor the ID to the NAME node, not the definition node. Overlapping
+      // query patterns (e.g. the bare `lexical_declaration` and the
+      // `export_statement`-wrapped variant) match the same symbol twice with
+      // different definition-node start columns but the SAME name node. Keying
+      // on the name position collapses those duplicate emissions via
+      // `deduplicateById`, while still giving genuinely distinct same-line
+      // symbols distinct IDs (their name nodes sit at different columns).
+      const nameNode = nameCapture.node;
+
       symbols.push({
-        id: `${filePath}:${name}:${defNode.startPosition.row}`,
+        id: generateSymbolId(
+          filePath,
+          name,
+          nameNode.startPosition.row,
+          nameNode.startPosition.column,
+        ),
         name,
         kind,
         location: {

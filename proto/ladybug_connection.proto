@@ -130,6 +130,18 @@ message CreateRelationshipRequest {
   string properties_json = 5;
 }
 
+message CreateNodesRequest {
+  RequestMetadata metadata = 1;
+  string label = 2;
+  string nodes_json = 3;
+}
+
+message CreateRelationshipsRequest {
+  RequestMetadata metadata = 1;
+  string type = 2;
+  string relationships_json = 3;
+}
+
 message DeleteNodesByLabelRequest {
   RequestMetadata metadata = 1;
   string label = 2;
@@ -166,6 +178,11 @@ message IndexSymbolRequest {
   string metadata_json = 4;
 }
 
+message IndexSymbolsRequest {
+  RequestMetadata metadata = 1;
+  string entries_json = 2;
+}
+
 message SemanticSearchRequest {
   RequestMetadata metadata = 1;
   Embedding embedding = 2;
@@ -196,6 +213,8 @@ service Graph {
   rpc RunCypherWrite(RunCypherWriteRequest) returns (MutationSuccessResponse);
   rpc CreateNode(CreateNodeRequest) returns (MutationSuccessResponse);
   rpc CreateRelationship(CreateRelationshipRequest) returns (MutationSuccessResponse);
+  rpc CreateNodes(CreateNodesRequest) returns (MutationSuccessResponse);
+  rpc CreateRelationships(CreateRelationshipsRequest) returns (MutationSuccessResponse);
   rpc DeleteNodesByLabel(DeleteNodesByLabelRequest) returns (DeleteCountResponse);
   rpc DeleteRelationshipsByType(DeleteRelationshipsByTypeRequest) returns (DeleteCountResponse);
 }
@@ -203,6 +222,7 @@ service Graph {
 service Vector {
   rpc CreateTables(CreateTablesRequest) returns (MutationSuccessResponse);
   rpc IndexSymbol(IndexSymbolRequest) returns (MutationSuccessResponse);
+  rpc IndexSymbols(IndexSymbolsRequest) returns (MutationSuccessResponse);
   rpc SemanticSearch(SemanticSearchRequest) returns (SemanticSearchResponse);
   rpc DeleteAll(DeleteAllRequest) returns (DeleteCountResponse);
 }

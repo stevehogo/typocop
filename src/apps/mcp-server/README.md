@@ -54,7 +54,7 @@ Get 360° context for a symbol: callers, callees, clusters, and processes.
 **Parameters:**
 - `symbolName` (required): Name of the symbol to analyze
 - `filePath` (optional): File path to narrow down the symbol
-- `maxResults` (optional): Maximum number of results (default: 50)
+- `maxResults` (optional): Maximum number of results (default: 100)
 
 **Example:**
 ```json
@@ -74,7 +74,7 @@ Find all direct and transitive dependents (callers) of a symbol.
 **Parameters:**
 - `symbolName` (required): Name of the symbol to analyze
 - `maxDepth` (optional): Maximum traversal depth
-- `maxResults` (optional): Maximum number of results (default: 50)
+- `maxResults` (optional): Maximum number of results (default: 100)
 
 **Example:**
 ```json
@@ -94,7 +94,7 @@ Trace data flow from API endpoint through services to database models.
 **Parameters:**
 - `entryPoint` (required): Entry point symbol (API endpoint, controller, etc.)
 - `framework` (optional): Framework hint (NestJS, Laravel, Express, etc.)
-- `maxResults` (optional): Maximum number of results (default: 50)
+- `maxResults` (optional): Maximum number of results (default: 100)
 
 **Example:**
 ```json
@@ -114,7 +114,7 @@ Analyze blast radius: affected symbols, flows, and risk level.
 **Parameters:**
 - `symbolName` (required): Name of the symbol to analyze
 - `changeType` (optional): Type of change - "modify", "delete", or "rename" (default: "modify")
-- `maxResults` (optional): Maximum number of results (default: 50)
+- `maxResults` (optional): Maximum number of results (default: 100)
 
 **Example:**
 ```json

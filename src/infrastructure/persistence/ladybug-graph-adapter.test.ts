@@ -14,8 +14,18 @@ function mockQueryResult(rows: Record<string, LbugValue>[]): { getAll: () => Pro
 }
 
 const mockQuery = vi.fn().mockResolvedValue(mockQueryResult([]));
+// The batch / parameterized path uses prepare() + execute() rather than query().
+// prepare() returns a PreparedStatement-like; execute() returns a QueryResult.
+const mockPreparedStatement = {
+  isSuccess: () => true,
+  getErrorMessage: () => "",
+};
+const mockPrepare = vi.fn().mockResolvedValue(mockPreparedStatement);
+const mockExecute = vi.fn().mockResolvedValue(mockQueryResult([]));
 const mockConnection = {
   query: mockQuery,
+  prepare: mockPrepare,
+  execute: mockExecute,
   init: vi.fn().mockResolvedValue(undefined),
   close: vi.fn().mockResolvedValue(undefined),
 };
@@ -35,6 +45,8 @@ describe("LadybugGraphAdapter", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockQuery.mockResolvedValue(mockQueryResult([]));
+    mockPrepare.mockResolvedValue(mockPreparedStatement);
+    mockExecute.mockResolvedValue(mockQueryResult([]));
   });
 
   // ── createNode (Req 2.2, 2.3) ──────────────────────────────────────────
@@ -113,6 +125,123 @@ describe("LadybugGraphAdapter", () => {
       const query = mockQuery.mock.calls[0][0] as string;
       expect(query).toContain("MATCH (a:tpc_Symbol");
       expect(query).toContain("(b:tpc_ExternalDependency");
+    });
+  });
+
+  // ── createNodes (batch fast-path) ──────────────────────────────────────
+
+  describe("createNodes", () => {
+    it("builds one parameterized UNWIND/MERGE query per call with prefixed label and non-id SET columns", async () => {
+      const adapter = createAdapter("tpc_") as LadybugGraphAdapter;
+      await adapter.createNodes("Symbol", [
+        { id: "s1", name: "foo", kind: "function" },
+        { id: "s2", name: "bar", kind: "class" },
+      ]);
+
+      expect(mockPrepare).toHaveBeenCalledOnce();
+      expect(mockExecute).toHaveBeenCalledOnce();
+      const query = mockPrepare.mock.calls[0][0] as string;
+      expect(query).toContain("UNWIND $rows AS row");
+      expect(query).toContain("MERGE (n:tpc_Symbol {id: row.id})");
+      expect(query).toContain("n.name = row.name");
+      expect(query).toContain("n.kind = row.kind");
+      // id must NOT appear in a SET assignment (it is the primary key).
+      expect(query).not.toContain("n.id = row.id");
+
+      const params = mockExecute.mock.calls[0][1] as { rows: unknown[] };
+      expect(params.rows).toHaveLength(2);
+      expect(params.rows[0]).toEqual({ id: "s1", name: "foo", kind: "function" });
+    });
+
+    it("no-ops on an empty array", async () => {
+      const adapter = createAdapter("tpc_") as LadybugGraphAdapter;
+      await adapter.createNodes("Symbol", []);
+      expect(mockPrepare).not.toHaveBeenCalled();
+      expect(mockExecute).not.toHaveBeenCalled();
+    });
+
+    it("omits the SET clause when rows have only an id", async () => {
+      const adapter = createAdapter("tpc_") as LadybugGraphAdapter;
+      await adapter.createNodes("Symbol", [{ id: "s1" }]);
+      const query = mockPrepare.mock.calls[0][0] as string;
+      expect(query).not.toContain("SET");
+      expect(query).toContain("MERGE (n:tpc_Symbol {id: row.id})");
+    });
+
+    it("recreates schema and retries when a table is missing", async () => {
+      const adapter = createAdapter("tpc_") as LadybugGraphAdapter;
+      mockExecute
+        .mockRejectedValueOnce(new Error("Binder exception: Table tpc_Symbol does not exist."))
+        .mockResolvedValue(mockQueryResult([]));
+
+      await adapter.createNodes("Symbol", [{ id: "s1", name: "foo" }]);
+
+      expect(mockQuery.mock.calls.some((call) =>
+        String(call[0]).includes("CREATE NODE TABLE IF NOT EXISTS tpc_Symbol"),
+      )).toBe(true);
+      // Two execute attempts: the failing one, then the post-schema retry.
+      expect(mockExecute).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  // ── createRelationships (batch fast-path) ──────────────────────────────
+
+  describe("createRelationships", () => {
+    it("builds a parameterized UNWIND/MATCH/MERGE query with prefixed labels and type", async () => {
+      const adapter = createAdapter("tpc_") as LadybugGraphAdapter;
+      await adapter.createRelationships("CALLS", [
+        { fromId: "s1", toId: "s2" },
+        { fromId: "s3", toId: "s4" },
+      ]);
+
+      const query = mockPrepare.mock.calls[0][0] as string;
+      expect(query).toContain("UNWIND $rels AS rel");
+      expect(query).toContain("MATCH (a:tpc_Symbol), (b:tpc_Symbol)");
+      expect(query).toContain("WHERE a.id = rel.fromId AND b.id = rel.toId");
+      expect(query).toContain("MERGE (a)-[r:tpc_CALLS]->(b)");
+      // CALLS has no schema props, so no SET clause.
+      expect(query).not.toContain("SET");
+
+      const params = mockExecute.mock.calls[0][1] as { rels: unknown[] };
+      expect(params.rels).toEqual([
+        { fromId: "s1", toId: "s2" },
+        { fromId: "s3", toId: "s4" },
+      ]);
+    });
+
+    it("uses Process -> Symbol labels and sets only step_order for HAS_STEP", async () => {
+      const adapter = createAdapter("tpc_") as LadybugGraphAdapter;
+      await adapter.createRelationships("HAS_STEP", [
+        { fromId: "p1", toId: "s1", properties: { step_order: "0", ignored: "x" } },
+      ]);
+
+      const query = mockPrepare.mock.calls[0][0] as string;
+      expect(query).toContain("MATCH (a:tpc_Process), (b:tpc_Symbol)");
+      expect(query).toContain("WHERE a.id = rel.fromId AND b.id = rel.toId");
+      expect(query).toContain("MERGE (a)-[r:tpc_HAS_STEP]->(b)");
+      expect(query).toContain("ON CREATE SET r.step_order = rel.step_order");
+      expect(query).toContain("ON MATCH SET r.step_order = rel.step_order");
+      expect(query).not.toContain("ignored");
+
+      const params = mockExecute.mock.calls[0][1] as { rels: Array<Record<string, unknown>> };
+      // Only fromId/toId and the allowed prop are flattened in.
+      expect(params.rels[0]).toEqual({ fromId: "p1", toId: "s1", step_order: "0" });
+    });
+
+    it("uses Symbol -> ExternalDependency labels for DEPENDS_ON", async () => {
+      const adapter = createAdapter("tpc_") as LadybugGraphAdapter;
+      await adapter.createRelationships("DEPENDS_ON", [{ fromId: "sym-1", toId: "ext:pkg" }]);
+
+      const query = mockPrepare.mock.calls[0][0] as string;
+      expect(query).toContain("MATCH (a:tpc_Symbol), (b:tpc_ExternalDependency)");
+      expect(query).toContain("WHERE a.id = rel.fromId AND b.id = rel.toId");
+    });
+
+    it("no-ops on an empty array", async () => {
+      const adapter = createAdapter("tpc_") as LadybugGraphAdapter;
+      await adapter.createRelationships("CALLS", []);
+      expect(mockPrepare).not.toHaveBeenCalled();
+      expect(mockExecute).not.toHaveBeenCalled();
     });
   });
 
@@ -308,18 +437,25 @@ describe("LadybugGraphAdapter", () => {
   // ── runCypherWrite (Req 2.5, 2.6) ─────────────────────────────────────
 
   describe("runCypherWrite", () => {
-    it("should execute query via connection.query() (Req 2.5)", async () => {
+    it("should execute a no-param write via connection.query() (Req 2.5)", async () => {
       const adapter = createAdapter();
-      await adapter.runCypherWrite("CREATE (n:Test {id: $id})", { id: "t1" });
+      await adapter.runCypherWrite("MATCH (n:Symbol) DETACH DELETE n");
 
       expect(mockQuery).toHaveBeenCalledOnce();
+      expect(mockPrepare).not.toHaveBeenCalled();
     });
 
-    it("should pass query string to connection.query()", async () => {
+    it("binds params via prepare/execute when params are provided (gap fix)", async () => {
       const adapter = createAdapter();
-      await adapter.runCypherWrite("CREATE (n:Test {id: $id})", { id: "t1" });
+      await adapter.runCypherWrite("CREATE (n:Symbol {id: $id})", { id: "t1" });
 
-      expect(mockQuery).toHaveBeenCalledWith("CREATE (n:Test {id: $id})");
+      // No longer ignored: the parameterized path must be taken.
+      expect(mockPrepare).toHaveBeenCalledOnce();
+      expect(mockExecute).toHaveBeenCalledOnce();
+      // Prefixing is still applied to the query text.
+      expect(mockPrepare.mock.calls[0][0]).toBe("CREATE (n:tpc_Symbol {id: $id})");
+      // Params are actually bound.
+      expect(mockExecute.mock.calls[0][1]).toEqual({ id: "t1" });
     });
   });
 

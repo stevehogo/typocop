@@ -17,8 +17,17 @@ function mockQueryResult(rows: Record<string, LbugValue>[]): { getAll: () => Pro
 }
 
 const mockQuery = vi.fn().mockResolvedValue(mockQueryResult([]));
+// The batch path uses prepare() + execute() instead of query().
+const mockPreparedStatement = {
+  isSuccess: () => true,
+  getErrorMessage: () => "",
+};
+const mockPrepare = vi.fn().mockResolvedValue(mockPreparedStatement);
+const mockExecute = vi.fn().mockResolvedValue(mockQueryResult([]));
 const mockConnection = {
   query: mockQuery,
+  prepare: mockPrepare,
+  execute: mockExecute,
   init: vi.fn().mockResolvedValue(undefined),
   close: vi.fn().mockResolvedValue(undefined),
 };
@@ -42,6 +51,8 @@ describe("LadybugVectorAdapter", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockQuery.mockResolvedValue(mockQueryResult([]));
+    mockPrepare.mockResolvedValue(mockPreparedStatement);
+    mockExecute.mockResolvedValue(mockQueryResult([]));
   });
 
   // ── SEMANTIC_SEARCH_THRESHOLD constant ─────────────────────────────────
@@ -151,6 +162,80 @@ describe("LadybugVectorAdapter", () => {
 
       const query = mockQuery.mock.calls[0][0] as string;
       expect(query).toContain("[1.0,0.0,-2.0]");
+    });
+  });
+
+  // ── indexSymbols (batch fast-path) ─────────────────────────────────────
+
+  describe("indexSymbols", () => {
+    it("builds one parameterized UNWIND/MERGE query with prefixed table", async () => {
+      const adapter = createAdapter("tpc_") as LadybugVectorAdapter;
+      await adapter.indexSymbols([
+        { symbolId: "sym1", embedding: makeEmbedding(3), metadata: { kind: "function" } },
+        { symbolId: "sym2", embedding: makeEmbedding(3), metadata: { kind: "class" } },
+      ]);
+
+      expect(mockPrepare).toHaveBeenCalledOnce();
+      expect(mockExecute).toHaveBeenCalledOnce();
+      const query = mockPrepare.mock.calls[0][0] as string;
+      expect(query).toContain("UNWIND $rows AS row");
+      expect(query).toContain("MERGE (n:tpc_embeddings {symbol_id: row.symbol_id})");
+      expect(query).toContain("n.embedding = row.embedding");
+      expect(query).toContain("n.dimensions = row.dimensions");
+      expect(query).toContain("n.metadata = row.metadata");
+    });
+
+    it("binds embedding as a number[] and dimensions as a number", async () => {
+      const adapter = createAdapter("tpc_") as LadybugVectorAdapter;
+      await adapter.indexSymbols([
+        { symbolId: "sym1", embedding: { vector: [1, 0, -2], dimensions: 3 } },
+      ]);
+
+      const params = mockExecute.mock.calls[0][1] as { rows: Array<Record<string, unknown>> };
+      expect(params.rows[0].symbol_id).toBe("sym1");
+      expect(params.rows[0].embedding).toEqual([1, 0, -2]);
+      expect(params.rows[0].dimensions).toBe(3);
+    });
+
+    it("stores metadata IDENTICALLY to the per-row indexSymbol path", async () => {
+      const metadata = { kind: "function", name: "foo" };
+
+      // Per-row path: capture what value lands in the metadata column.
+      const perRow = createAdapter("tpc_") as LadybugVectorAdapter;
+      await perRow.indexSymbol("sym1", makeEmbedding(3), metadata);
+      const perRowQuery = mockQuery.mock.calls[0][0] as string;
+      // Per-row builds `n.metadata = <literal>` where <literal> is
+      // JSON.stringify(JSON.stringify(metadata)); the STORED string is the inner
+      // JSON.stringify(metadata).
+      const literal = perRowQuery.split("n.metadata = ")[1].trim();
+      const storedPerRow = JSON.parse(literal) as string; // unwrap the Cypher string literal
+
+      vi.clearAllMocks();
+      mockExecute.mockResolvedValue(mockQueryResult([]));
+      mockPrepare.mockResolvedValue(mockPreparedStatement);
+
+      // Batch path: the bound metadata param must equal the per-row stored value.
+      const batch = createAdapter("tpc_") as LadybugVectorAdapter;
+      await batch.indexSymbols([{ symbolId: "sym1", embedding: makeEmbedding(3), metadata }]);
+      const params = mockExecute.mock.calls[0][1] as { rows: Array<Record<string, unknown>> };
+      expect(params.rows[0].metadata).toBe(storedPerRow);
+      expect(params.rows[0].metadata).toBe(JSON.stringify(metadata));
+      // And semanticSearch's JSON.parse(metadata) round-trips it back to the object.
+      expect(JSON.parse(params.rows[0].metadata as string)).toEqual(metadata);
+    });
+
+    it("defaults missing metadata to an empty object string", async () => {
+      const adapter = createAdapter("tpc_") as LadybugVectorAdapter;
+      await adapter.indexSymbols([{ symbolId: "sym1", embedding: makeEmbedding(3) }]);
+      const params = mockExecute.mock.calls[0][1] as { rows: Array<Record<string, unknown>> };
+      expect(params.rows[0].metadata).toBe("{}");
+    });
+
+    it("no-ops on an empty array", async () => {
+      const adapter = createAdapter("tpc_") as LadybugVectorAdapter;
+      await adapter.indexSymbols([]);
+      expect(mockPrepare).not.toHaveBeenCalled();
+      expect(mockExecute).not.toHaveBeenCalled();
     });
   });
 

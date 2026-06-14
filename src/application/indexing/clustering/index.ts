@@ -37,6 +37,11 @@ export {
  *
  * Returns only clusters with >= 2 symbols (Req 6.4).
  *
+ * `semanticClassification` (default true) preserves current behavior: semantic
+ * classification runs whenever an embedding adapter is enabled. Set it to false
+ * to skip Phase 4 cluster embedding (keyword classification only) when that
+ * embedding work dominates indexing time (Phase C).
+ *
  * Requirements: 3.4, 6.1–6.6, 21.5
  */
 export async function clusterSymbols(
@@ -44,6 +49,7 @@ export async function clusterSymbols(
   relationships: Relationship[],
   aiClient?: AIClient,
   embeddingAdapter?: EmbeddingAdapter,
+  semanticClassification: boolean = true,
 ): Promise<Cluster[]> {
   const graph = buildClusterGraph(symbols, relationships);
   const communities = louvainClustering(graph);
@@ -89,6 +95,7 @@ export async function clusterSymbols(
       heuristicLabel,
       aiClient,
       embeddingAdapter,
+      semanticClassification,
     );
 
     clusters.push(enriched);
