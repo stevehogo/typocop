@@ -23,11 +23,36 @@ The clean-shutdown path is well-built. The gap is everything *off* that path: th
 process can die without running it, or get stuck *inside* it. This plan makes the
 unexpected-stop paths safe and self-healing.
 
+## Status (re-verified 2026-06-14, after the gRPC message-size plan landed)
+
+The gRPC message-size plan (`2026-06-14-indexing-grpc-message-size-plan.md`) is now
+**implemented**. It did **not** touch the shutdown / signal / drain / discovery / lock
+paths, so **every failure mode below still holds** (re-confirmed against the current code).
+Two things changed that this plan should build on:
+
+- **A config/env limit pattern now exists.** `LadybugServerConfig.grpcMaxMessageBytes`
+  (`config/types.ts:66`) is fed from `LADYBUG_GRPC_MAX_MESSAGE_BYTES` via
+  `getConfiguredGrpcMaxMessageBytes()` and `deriveRpcPayloadBudgetBytes()`
+  (`platform/utils/limits.ts:78–116`). **Phase B should add `shutdownGraceMs`/
+  `shutdownHardMs` the same way** (config field + `LADYBUG_SERVER_SHUTDOWN_*` env +
+  helper in `limits.ts`) instead of inventing a new mechanism.
+- **The default gRPC message ceiling is now 64 MB** (`DEFAULT_GRPC_MAX_MESSAGE_BYTES`,
+  applied to server `max_receive`/`max_send` at `server.ts:36–37` and to the client at
+  `remote-grpc.ts:34–35`). This is correct for the size error, but it **raises peak
+  per-message memory**, so a few concurrent large messages can now OOM the server — an
+  OOM is exactly an "unexpected stop," which *reinforces* Phases A and B rather than
+  competing with them (see Risk Notes).
+- **A halve-on-`RESOURCE_EXHAUSTED` retry pattern now exists** in the export reader
+  (`getExportGraphReadPageSize` / page-halving). Phase D's adaptive-retry idea should
+  mirror that existing precedent for consistency.
+
 ## Current Lifecycle (evidence)
 
-- Signal handling: only `process.once("SIGTERM"|"SIGINT")` (`server.ts:99–104`).
-- Shutdown sequence (`server.ts:58–73`): `scheduler.drain()` → `grpcServer.tryShutdown()`
-  → await drain → `runtime.close()` → `removeDiscoveryFile()`.
+_(Line references refreshed against the post-message-size-plan code.)_
+
+- Signal handling: only `process.once("SIGTERM"|"SIGINT")` (`server.ts:97–102`).
+- Shutdown sequence (`server.ts:45–74`): `scheduler.drain()` (`:58`) → `grpcServer.tryShutdown()`
+  (`:59–61`) → await drain (`:62`) → `runtime.close()` (`:63`) → `removeDiscoveryFile()` (`:64`).
 - `scheduler.drain()` (`scheduler.ts:94–103`) resolves **only** when `inFlight === 0
   && queue.length === 0`; otherwise it awaits a promise with no timeout.
 - `runtime.close()` (`runtime.ts:61–80`) → `connection.close()` → native
@@ -36,10 +61,10 @@ unexpected-stop paths safe and self-healing.
   released only on graceful `connection.close()` (`connection.ts:71–79`).
 - Discovery file: plain write/rm (`discovery.ts`); the file records a `pid` but nothing
   validates liveness on the server side.
-- Fatal startup/runtime error: `main.ts:37–40` does `process.exit(1)` with **no cleanup**.
-- Clients tolerate stale discovery by treating **health as the source of truth**
-  (`autostart.ts:113`) and will `kill(pid, SIGTERM)` a discovered-but-wrong-prefix
-  server (`autostart.ts:92–95`).
+- Fatal startup/runtime error: `main.ts:38–40` does `process.exit(1)` with **no cleanup**.
+- Clients tolerate stale discovery by treating **health as the source of truth** and will
+  `kill(pid, SIGTERM)` a discovered-but-wrong-prefix server (`autostart.ts:93–95`, default
+  `killPid` at `autostart.ts:68`).
 
 ## Failure Modes When the Process Stops Unexpectedly
 
@@ -86,7 +111,7 @@ Impact: medium–high.
 ### 5. Discovery file is removed *last* and only on success
 
 In `shutdown()` the discovery file is removed *after* `runtime.close()` and inside the
-same `try` (`server.ts:65–66`). If `runtime.close()` throws or hangs, the discovery
+same `try` (`server.ts:63–64`). If `runtime.close()` throws or hangs, the discovery
 file is never removed — clients keep finding a server that is shutting down/dead.
 The "stop advertising" step should happen *first* and run even on failure.
 
@@ -94,7 +119,7 @@ Impact: medium.
 
 ### 6. `main.ts` fatal path skips cleanup
 
-`process.exit(1)` (`main.ts:37–40`) is synchronous and runs no discovery/lock cleanup.
+`process.exit(1)` (`main.ts:38–40`) is synchronous and runs no discovery/lock cleanup.
 A fatal error after the server started (e.g. `waitForShutdown()` rejecting) leaves
 exactly the orphaned state of #1.
 
@@ -111,7 +136,7 @@ Impact: medium. Hurts auto-restart / supervisor scenarios.
 
 ### 8. Discovery `pid` reuse hazard on the client side
 
-`autostart.ts:92–95` sends `SIGTERM` to a discovered `pid` when the prefix mismatches.
+`autostart.ts:93–95` sends `SIGTERM` to a discovered `pid` when the prefix mismatches.
 After a crash the OS may have recycled that pid for an unrelated process, which would
 then be signalled. Low frequency, high blast radius.
 
@@ -157,31 +182,35 @@ Acceptance criteria:
 
 Make `shutdown(reason)` deadline-driven:
 
-- Add `SHUTDOWN_GRACE_MS` (e.g. 5 000) and `SHUTDOWN_HARD_MS` (e.g. 10 000) constants
-  (centralize in `platform/utils/limits.ts` or a server config field).
+- Add `shutdownGraceMs` (e.g. 5 000) and `shutdownHardMs` (e.g. 10 000) following the
+  **exact pattern the message-size plan just established** for `grpcMaxMessageBytes`: a
+  field on `LadybugServerConfig` (`config/types.ts`), an env override
+  (`LADYBUG_SERVER_SHUTDOWN_GRACE_MS` / `..._HARD_MS`) read in `ConfigurationManager`, and
+  a default constant + `getConfigured…()` helper in `platform/utils/limits.ts` (mirror
+  `getConfiguredGrpcMaxMessageBytes`). Thread them through `toLadybugServerConfig` and into
+  `shutdown()`.
 - `scheduler.drain()` gains a bounded variant: `drain(timeoutMs)` that resolves when
   idle **or** when the deadline elapses, after which it rejects/settles the still-pending
   and in-flight requests with a `ServerShuttingDownError` instead of waiting forever
   (`scheduler.ts:94–103`).
-- Race `grpcServer.tryShutdown()` against `SHUTDOWN_GRACE_MS`; on timeout call
+- Race `grpcServer.tryShutdown()` against `shutdownGraceMs`; on timeout call
   `grpcServer.forceShutdown()`.
-- Wrap `runtime.close()` in `withTimeoutOr(..., SHUTDOWN_HARD_MS)` (the helper already
+- Wrap `runtime.close()` in `withTimeoutOr(..., shutdownHardMs)` (the helper already
   exists in `limits.ts`); if it times out, log and proceed to discovery/lock cleanup
   anyway.
-- As an absolute backstop, arm an `unref`'d hard-exit timer for `SHUTDOWN_HARD_MS` that
+- As an absolute backstop, arm an `unref`'d hard-exit timer for `shutdownHardMs` that
   calls `process.exit(1)` if the orderly sequence has not completed — so the process
   always terminates.
 
 Acceptance criteria:
 
-- with a deliberately hung in-flight request, `shutdown()` still completes within
-  ~`SHUTDOWN_HARD_MS` and the process exits;
+- with a deliberately hung in-flight request, `shutdown()` still completes within ~`shutdownHardMs` and the process exits;
 - `forceShutdown` is invoked only after the grace deadline;
 - clean shutdowns (no in-flight work) are unaffected and still fast.
 
 ### Phase C: Stop advertising first; clean up even on failure
 
-Reorder and harden `shutdown()` (`server.ts:58–73`):
+Reorder and harden `shutdown()` (`server.ts:45–74`):
 
 1. set `draining` and **remove the discovery file first** (stop advertising), wrapped so
    its failure never aborts the rest;
@@ -225,10 +254,10 @@ Acceptance criteria:
 
 In `autostart.ts`:
 
-- Before `kill(pid, …)` (`autostart.ts:92–95`), verify the pid is both **alive** and
+- Before `kill(pid, …)` (`autostart.ts:93–95`, default at `:68`), verify the pid is both **alive** and
   actually the typocop server (e.g. compare `startedAt`/`url`, or probe health on the
   advertised url) to avoid signalling a recycled pid (#8).
-- Keep "health is the source of truth" (`autostart.ts:113`) but add a bounded retry so a
+- Keep "health is the source of truth" but add a bounded retry so a
   server mid-restart is awaited rather than immediately re-spawned (avoid spawn storms
   racing on the lock).
 
@@ -264,6 +293,12 @@ Acceptance criteria:
 - Changing shutdown ordering touches the integration tests
   (`connection-server.*.integration.test.ts`); update them alongside, and add explicit
   hung-request and crash simulations.
+- **The message-size plan raised the gRPC ceiling to 64 MB**, which deliberately allows
+  much larger in-flight messages than before. That increases peak memory per request, so
+  `maxConcurrency` × 64 MB is now a real OOM ceiling — and an OOM is an unexpected stop
+  that lands squarely on failure mode 1. Treat this as extra motivation for Phases A/B
+  (safe + bounded exit) and consider documenting/clamping `maxConcurrency` relative to the
+  message limit; do not raise the limit further without accounting for it.
 
 ## Suggested PR Sequence
 

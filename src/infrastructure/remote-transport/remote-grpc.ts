@@ -1,5 +1,6 @@
 import * as grpc from "@grpc/grpc-js";
 
+import { DEFAULT_GRPC_MAX_MESSAGE_BYTES } from "../../platform/utils/limits.js";
 import { loadConnectionProtoPackage } from "./proto-loader.js";
 import type { RpcClientBundle } from "./remote-rpc-client.js";
 
@@ -26,11 +27,24 @@ let cachedClientConstructors:
   }
   | null = null;
 
-export function createRpcClients(target: string): RpcClientBundle {
-  const constructors = loadClientConstructors();
+export function createGrpcClientOptions(
+  maxMessageBytes = DEFAULT_GRPC_MAX_MESSAGE_BYTES,
+): grpc.ClientOptions {
   return {
-    graph: new constructors.Graph(target, grpc.credentials.createInsecure()),
-    vector: new constructors.Vector(target, grpc.credentials.createInsecure()),
+    "grpc.max_receive_message_length": maxMessageBytes,
+    "grpc.max_send_message_length": maxMessageBytes,
+  };
+}
+
+export function createRpcClients(
+  target: string,
+  maxMessageBytes = DEFAULT_GRPC_MAX_MESSAGE_BYTES,
+): RpcClientBundle {
+  const constructors = loadClientConstructors();
+  const options = createGrpcClientOptions(maxMessageBytes);
+  return {
+    graph: new constructors.Graph(target, grpc.credentials.createInsecure(), options),
+    vector: new constructors.Vector(target, grpc.credentials.createInsecure(), options),
   };
 }
 
@@ -91,4 +105,3 @@ function loadClientConstructors(): {
   };
   return cachedClientConstructors;
 }
-

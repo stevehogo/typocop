@@ -21,6 +21,7 @@ vi.mock("@grpc/grpc-js", () => ({
 }));
 
 import type { LadybugClientConfig } from "../../platform/config/types.js";
+import { DEFAULT_GRPC_MAX_MESSAGE_BYTES } from "../../platform/utils/limits.js";
 import { DefaultAutostartManager } from "./autostart.js";
 
 const baseConfig: LadybugClientConfig = {
@@ -29,6 +30,7 @@ const baseConfig: LadybugClientConfig = {
   dbPath: "/tmp/db.ladybug",
   serverUrl: "grpc://127.0.0.1:7617",
   authToken: "",
+  grpcMaxMessageBytes: DEFAULT_GRPC_MAX_MESSAGE_BYTES,
   autostart: true,
   startupTimeoutMs: 1_000,
   lockPath: "/tmp/server.lock",
@@ -53,6 +55,10 @@ describe("DefaultAutostartManager — property tests", () => {
         const spawnServer = vi.fn().mockResolvedValue({ pid: 42 });
         const sleep = vi.fn().mockResolvedValue(undefined);
         const killPid = vi.fn();
+        // Phase E: the discovered wrong-prefix pid is only signalled when it is
+        // alive AND identity-confirmed via a health probe on its advertised url.
+        // Keep the pid "alive" so the legitimate kill path is exercised here.
+        const isPidAlive = vi.fn().mockReturnValue(true);
 
         const healthAnswers =
           scenario === "already-healthy"
@@ -60,10 +66,12 @@ describe("DefaultAutostartManager — property tests", () => {
           : scenario === "healthy-prefix-mismatch"
               // 1) healthy before termination attempt
               // 2) still healthy after acquiring lock
-              // 3) becomes unhealthy after killing the mismatched server
-              // 4) still unhealthy when acquiring the spawn lock
-              // 5) becomes healthy after spawn
-              ? [true, true, false, false, true]
+              // 3) identity probe on the discovered server's url responds
+              //    (Phase E gate) -> kill is performed
+              // 4) becomes unhealthy after killing the mismatched server
+              // 5) still unhealthy when acquiring the spawn lock
+              // 6) becomes healthy after spawn
+              ? [true, true, true, false, false, true]
             : scenario === "success"
               ? [false, false, true]
               : [false, false, false, false, false, false];
@@ -114,6 +122,7 @@ describe("DefaultAutostartManager — property tests", () => {
           sleep,
           now,
           killPid,
+          isPidAlive,
           listDiscoveryFiles: vi.fn().mockResolvedValue([
             "/home/user/.typocop/teravexa_/ladybug-server.json",
           ]),

@@ -11,7 +11,7 @@
  *
  * Requirements: 10.1, 10.2, 10.3, 10.4
  */
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { EmbeddingAdapter } from "../../../core/ports/persistence.js";
 import type { Cluster, ClusterCategory, Embedding, Symbol } from "../../../core/domain.js";
 import {
@@ -153,6 +153,12 @@ describe("buildClusterText", () => {
 // ─── SemanticClusterClassifier ────────────────────────────────────────────────
 
 describe("SemanticClusterClassifier", () => {
+  // Batching is opt-in (default OFF). Clean up the flag after each test so the
+  // batch-path tests below cannot leak the env into the per-item-default tests.
+  afterEach(() => {
+    delete process.env.EMBEDDING_ENABLE_BATCH;
+  });
+
   it("returns correct category when similarity is above threshold", async () => {
     // Set up: authentication reference text → unit vector dim 0
     // Cluster text → same direction (cosine sim = 1.0)
@@ -245,6 +251,76 @@ describe("SemanticClusterClassifier", () => {
 
     // 5 (init) + 2 (classify calls) = 7 total
     expect(embedder.embedText).toHaveBeenCalledTimes(7);
+  });
+
+  it("batches category-reference embeds via embedTexts when available (Phase 1)", async () => {
+    process.env.EMBEDDING_ENABLE_BATCH = "1"; // batching is opt-in (default OFF)
+    const textToVector = new Map<string, number[]>();
+    textToVector.set(CATEGORY_REFERENCE_TEXTS.authentication, makeUnitVector(5, 0));
+    textToVector.set(CATEGORY_REFERENCE_TEXTS.dataAccess, makeUnitVector(5, 1));
+    textToVector.set(CATEGORY_REFERENCE_TEXTS.businessLogic, makeUnitVector(5, 2));
+    textToVector.set(CATEGORY_REFERENCE_TEXTS.uiComponent, makeUnitVector(5, 3));
+    textToVector.set(CATEGORY_REFERENCE_TEXTS.utility, makeUnitVector(5, 4));
+
+    const embedText = vi.fn(async () => makeEmbedding(new Array(5).fill(0)));
+    const embedTexts = vi.fn(async (texts: string[]) =>
+      texts.map((t) => {
+        const vec = textToVector.get(t);
+        return vec ? makeEmbedding(vec) : null;
+      }),
+    );
+    const embedder: EmbeddingAdapter = {
+      isEnabled: () => true,
+      embedText,
+      embedTexts,
+      getDimensions: () => 5,
+    };
+
+    const classifier = new SemanticClusterClassifier();
+    await classifier.initialize(embedder);
+
+    // One batch call covering all 5 categories; per-item embedText untouched.
+    expect(embedTexts).toHaveBeenCalledTimes(1);
+    expect(embedTexts.mock.calls[0][0]).toHaveLength(5);
+    expect(embedText).not.toHaveBeenCalled();
+
+    // Cluster text → authentication direction; classification still works.
+    textToVector.set("c", makeUnitVector(5, 0));
+    embedText.mockResolvedValueOnce(makeEmbedding(makeUnitVector(5, 0)));
+    const result = await classifier.classify("c");
+    expect(result).toBe("authentication");
+  });
+
+  it("falls back to per-item embedText if the batch embedTexts call throws", async () => {
+    process.env.EMBEDDING_ENABLE_BATCH = "1"; // batching is opt-in (default OFF)
+    const textToVector = new Map<string, number[]>();
+    textToVector.set(CATEGORY_REFERENCE_TEXTS.authentication, makeUnitVector(5, 0));
+    textToVector.set(CATEGORY_REFERENCE_TEXTS.dataAccess, makeUnitVector(5, 1));
+    textToVector.set(CATEGORY_REFERENCE_TEXTS.businessLogic, makeUnitVector(5, 2));
+    textToVector.set(CATEGORY_REFERENCE_TEXTS.uiComponent, makeUnitVector(5, 3));
+    textToVector.set(CATEGORY_REFERENCE_TEXTS.utility, makeUnitVector(5, 4));
+
+    const embedText = vi.fn(async (text: string) => {
+      const vec = textToVector.get(text);
+      return vec ? makeEmbedding(vec) : null;
+    });
+    const embedTexts = vi.fn(async () => {
+      throw new Error("batch OOM");
+    });
+    const embedder: EmbeddingAdapter = {
+      isEnabled: () => true,
+      embedText,
+      embedTexts,
+      getDimensions: () => 5,
+    };
+
+    const classifier = new SemanticClusterClassifier();
+    await classifier.initialize(embedder);
+
+    expect(embedTexts).toHaveBeenCalledTimes(1);
+    // Fell back to per-item: 5 category embeds.
+    expect(embedText).toHaveBeenCalledTimes(5);
+    expect(classifier.isInitialized()).toBe(true);
   });
 
   it("isInitialized returns false before initialize, true after", async () => {

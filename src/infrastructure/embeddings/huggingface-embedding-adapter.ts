@@ -18,6 +18,52 @@ import { verifyEmbeddingText } from "../../platform/security/privacy.js";
 import type { EmbeddingAdapter } from "../../core/ports/persistence.js";
 
 /**
+ * Maximum characters accepted for a single batched embedding text. Texts longer
+ * than this are excluded from the batch (marked null) up front, since an
+ * over-long item risks rejecting the whole all-or-nothing forward pass.
+ */
+const MAX_EMBEDDING_TEXT_LENGTH = 100_000;
+
+/**
+ * PRE-INFERENCE per-item validation for the batch path. Runs the same privacy
+ * gate as `embedText` (`verifyEmbeddingText`) plus basic length/encoding checks.
+ *
+ * Returns `true` if the text is safe to send into the batch, `false` otherwise.
+ * Unlike the per-item `embedText` path (where a privacy violation THROWS), batch
+ * validation cannot reject the whole batch for one bad item — so a failing item
+ * is excluded (marked null) instead of throwing.
+ */
+function isValidEmbeddingInput(text: string): boolean {
+  if (typeof text !== "string" || text.length === 0) return false;
+  if (text.length > MAX_EMBEDDING_TEXT_LENGTH) return false;
+  // Reject invalid UTF-16 (lone surrogates) that can break tokenization.
+  if (hasLoneSurrogate(text)) return false;
+  try {
+    verifyEmbeddingText(text, "huggingface-embedding");
+  } catch {
+    return false;
+  }
+  return true;
+}
+
+/** True if `text` contains an unpaired UTF-16 surrogate (invalid encoding). */
+function hasLoneSurrogate(text: string): boolean {
+  for (let i = 0; i < text.length; i++) {
+    const code = text.charCodeAt(i);
+    if (code >= 0xd800 && code <= 0xdbff) {
+      // high surrogate — must be followed by a low surrogate
+      const next = text.charCodeAt(i + 1);
+      if (Number.isNaN(next) || next < 0xdc00 || next > 0xdfff) return true;
+      i++; // valid pair — skip the low surrogate
+    } else if (code >= 0xdc00 && code <= 0xdfff) {
+      // low surrogate without a preceding high surrogate
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
  * Generates embeddings in-process using `@huggingface/transformers`.
  *
  * - Pipeline is lazily initialized on first `embedText()` call (Req 2.1, 2.2)
@@ -77,6 +123,62 @@ export class HuggingFaceEmbeddingAdapter implements EmbeddingAdapter {
       // Req 1.6 — return null on any non-privacy error
       return null;
     }
+  }
+
+  /**
+   * Batch fast-path — embed many texts in a SINGLE forward pass (Phase 1).
+   *
+   * Returns one result per input, index-aligned (`result[i]` ↔ `texts[i]`).
+   *
+   * Control flow:
+   * 1. PRE-INFERENCE per-item validation (privacy via `verifyEmbeddingText` +
+   *    basic length/encoding). A failing item is marked `null` at its index and
+   *    is NOT sent into the batch — this is the only source of per-item `null`.
+   * 2. The remaining valid texts are embedded in one `ext(texts, { pooling })`
+   *    call; `output.tolist()` yields `number[][]` (one row per input), read
+   *    ALL rows. A row whose length ≠ configured dimensions → `null` at that
+   *    index.
+   * 3. Because inference is ALL-OR-NOTHING (no per-item error channel in
+   *    transformers.js), if `ext()` throws/rejects the WHOLE call rejects. We
+   *    let it reject so the caller falls back to per-item `embedText`. We do NOT
+   *    swallow inference errors into per-row nulls — that would silently lose
+   *    per-item failure accounting.
+   */
+  async embedTexts(texts: string[]): Promise<(Embedding | null)[]> {
+    const results: (Embedding | null)[] = new Array(texts.length).fill(null);
+
+    // Step 1 — pre-inference validation. Collect the indices of valid texts so
+    // we can scatter the batch output back to original positions.
+    const validIndices: number[] = [];
+    const validTexts: string[] = [];
+    for (let i = 0; i < texts.length; i++) {
+      if (isValidEmbeddingInput(texts[i])) {
+        validIndices.push(i);
+        validTexts.push(texts[i]);
+      }
+      // else: leave results[i] === null (pre-inference validation failure)
+    }
+
+    if (validTexts.length === 0) {
+      return results;
+    }
+
+    // Step 2/3 — single forward pass over all valid texts. Any throw here
+    // (OOM / malformed tensor) rejects the whole call by design; the caller
+    // falls back to per-item embedText.
+    const ext = await this.ensurePipeline();
+    const output = await ext(validTexts, { pooling: this.config.pooling });
+    const rows: number[][] = output.tolist() as number[][];
+
+    for (let k = 0; k < validIndices.length; k++) {
+      const row = rows[k];
+      if (Array.isArray(row) && row.length === this.config.dimensions) {
+        results[validIndices[k]] = { vector: row, dimensions: row.length };
+      }
+      // else: bad/missing row → leave null at that index
+    }
+
+    return results;
   }
 
   /**

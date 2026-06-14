@@ -20,6 +20,8 @@ vi.mock("@grpc/grpc-js", () => ({
 }));
 
 import type { LadybugClientConfig } from "../../platform/config/types.js";
+import type { DiscoveryFile } from "./types.js";
+import { DEFAULT_GRPC_MAX_MESSAGE_BYTES } from "../../platform/utils/limits.js";
 import { ServerStartupTimeoutError, ServerUnavailableError } from "./errors.js";
 import { DefaultAutostartManager } from "./autostart.js";
 
@@ -29,6 +31,7 @@ const baseConfig: LadybugClientConfig = {
   dbPath: "/tmp/db.ladybug",
   serverUrl: "grpc://127.0.0.1:7617",
   authToken: "",
+  grpcMaxMessageBytes: DEFAULT_GRPC_MAX_MESSAGE_BYTES,
   autostart: true,
   startupTimeoutMs: 1_000,
   lockPath: "/tmp/server.lock",
@@ -70,6 +73,9 @@ describe("DefaultAutostartManager", () => {
       spawnServer,
       writeDiscovery,
       sleep: vi.fn().mockResolvedValue(undefined),
+      // Phase E: keep the prior discovery's pid "dead" so the restart-await
+      // fast-skip applies and this test still exercises the spawn path.
+      isPidAlive: vi.fn().mockReturnValue(false),
       now: vi
         .fn()
         .mockReturnValueOnce(0)
@@ -138,5 +144,152 @@ describe("DefaultAutostartManager", () => {
       ServerStartupTimeoutError,
     );
     expect(release).toHaveBeenCalledOnce();
+  });
+
+  describe("Phase E — liveness/identity gate before killing a wrong-prefix pid", () => {
+    const mismatchDiscovery: DiscoveryFile = {
+      pid: 4242,
+      startedAt: "2026-01-01T00:00:00.000Z",
+      prefix: "other_",
+      dbPath: "/tmp/db.ladybug",
+      url: "grpc://0.0.0.0:7617",
+    };
+
+    function mismatchDeps(overrides: {
+      isPidAlive: (pid: number) => boolean;
+      healthAnswers: boolean[];
+    }) {
+      const release = vi.fn().mockResolvedValue(undefined);
+      const killPid = vi.fn();
+      const spawnServer = vi.fn().mockResolvedValue({ pid: 99 });
+      const writeDiscovery = vi.fn().mockResolvedValue(undefined);
+      const answers = [...overrides.healthAnswers];
+      const checkHealth = vi
+        .fn<(...args: unknown[]) => Promise<boolean>>()
+        .mockImplementation(async () => {
+          const next = answers.shift();
+          return typeof next === "boolean" ? next : false;
+        });
+      const manager = new DefaultAutostartManager({
+        checkHealth,
+        readDiscovery: vi.fn().mockResolvedValue(mismatchDiscovery),
+        listDiscoveryFiles: vi
+          .fn()
+          .mockResolvedValue(["/home/user/.typocop/other_/ladybug-server.json"]),
+        acquireLock: vi.fn().mockResolvedValue(release),
+        spawnServer,
+        writeDiscovery,
+        sleep: vi.fn().mockResolvedValue(undefined),
+        now: vi.fn(() => 0),
+        killPid,
+        isPidAlive: vi.fn(overrides.isPidAlive),
+      });
+      return { manager, killPid, spawnServer, release };
+    }
+
+    it("never signals a pid that is not alive (recycled/dead pid)", async () => {
+      const { manager, killPid, spawnServer } = mismatchDeps({
+        isPidAlive: () => false,
+        // 1) entry healthy, 2) lock-recheck healthy; identity gate fails on
+        //    liveness so no kill; 3) poll loop sees unhealthy -> break,
+        //    4) spawn-path recheck unhealthy, 5) spawn poll becomes healthy.
+        healthAnswers: [true, true, false, false, true],
+      });
+
+      await manager.ensureServer(baseConfig);
+
+      expect(killPid).not.toHaveBeenCalled();
+      expect(spawnServer).toHaveBeenCalled();
+    });
+
+    it("never signals a pid that is alive but fails the identity health probe (foreign pid)", async () => {
+      // pid alive, but the health probe on the advertised url does NOT respond.
+      const { manager, killPid, spawnServer } = mismatchDeps({
+        isPidAlive: () => true,
+        // 1) entry healthy, 2) lock-recheck healthy, 3) identity probe FAILS
+        //    (no kill), 4) poll loop unhealthy -> break, 5) spawn-path recheck
+        //    unhealthy, 6) spawn poll becomes healthy.
+        healthAnswers: [true, true, false, false, false, true],
+      });
+
+      await manager.ensureServer(baseConfig);
+
+      expect(killPid).not.toHaveBeenCalled();
+      expect(spawnServer).toHaveBeenCalled();
+    });
+
+    it("signals a live, identity-confirmed wrong-prefix pid (legitimate kill preserved)", async () => {
+      const { manager, killPid } = mismatchDeps({
+        isPidAlive: () => true,
+        // 1) entry healthy, 2) lock-recheck healthy, 3) identity probe responds
+        //    -> kill, 4) becomes unhealthy after kill -> break out of poll loop,
+        //    5) spawn-path recheck unhealthy, 6) spawn poll becomes healthy.
+        healthAnswers: [true, true, true, false, false, true],
+      });
+
+      await manager.ensureServer(baseConfig);
+
+      expect(killPid).toHaveBeenCalledWith(4242);
+    });
+  });
+
+  describe("Phase E — bounded restart-await avoids spawn storms", () => {
+    it("awaits a live restarting server instead of double-spawning across concurrent callers", async () => {
+      // A single shared server that is briefly down then comes up. The owning
+      // pid (matching prefix) is alive, so callers must await its health rather
+      // than each spawning a new one.
+      const ourDiscovery: DiscoveryFile = {
+        pid: 5555,
+        startedAt: "2026-01-01T00:00:00.000Z",
+        prefix: baseConfig.prefix,
+        dbPath: baseConfig.dbPath,
+        url: baseConfig.serverUrl,
+      };
+
+      const spawnServer = vi.fn().mockResolvedValue({ pid: 777 });
+      // Real cross-process lock would serialize; here a shared in-memory mutex
+      // models the lock so only one caller is in the critical section at a time.
+      let locked = false;
+      const acquireLock = vi.fn(async () => {
+        while (locked) {
+          await new Promise((r) => setTimeout(r, 5));
+        }
+        locked = true;
+        return async () => {
+          locked = false;
+        };
+      });
+
+      // Health: down for the first few probes, then up. The restart-await loop
+      // polls until it observes health, so no caller should reach spawn.
+      let probes = 0;
+      const checkHealth = vi.fn(async () => {
+        probes++;
+        return probes > 3;
+      });
+
+      let nowMs = 0;
+      const makeManager = () =>
+        new DefaultAutostartManager({
+          checkHealth,
+          readDiscovery: vi.fn().mockResolvedValue(ourDiscovery),
+          listDiscoveryFiles: vi
+            .fn()
+            .mockResolvedValue(["/home/user/.typocop/tpc_/ladybug-server.json"]),
+          acquireLock,
+          spawnServer,
+          writeDiscovery: vi.fn().mockResolvedValue(undefined),
+          sleep: vi.fn(async () => {
+            nowMs += 200;
+          }),
+          now: vi.fn(() => nowMs),
+          isPidAlive: vi.fn(() => true),
+        });
+
+      const managers = [makeManager(), makeManager()];
+      await Promise.all(managers.map((m) => m.ensureServer(baseConfig)));
+
+      expect(spawnServer).not.toHaveBeenCalled();
+    });
   });
 });

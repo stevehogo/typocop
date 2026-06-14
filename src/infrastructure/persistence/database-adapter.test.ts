@@ -9,6 +9,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { EmbeddingProvider, FullConfig } from "../../platform/config/types.js";
+import { DEFAULT_GRPC_MAX_MESSAGE_BYTES } from "../../platform/utils/limits.js";
 import type { EmbeddingAdapter } from "../../core/ports/persistence.js";
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
@@ -90,6 +91,7 @@ function makeProviderConfig(provider: EmbeddingProvider): FullConfig {
       serverHost: "127.0.0.1",
       serverPort: 7617,
       serverAuthToken: "",
+      grpcMaxMessageBytes: DEFAULT_GRPC_MAX_MESSAGE_BYTES,
       serverMaxConcurrency: 4,
       serverMaxQueue: 256,
       serverAutostart: false,
@@ -239,6 +241,7 @@ describe("createDatabaseAdapter", () => {
         dbPath: "/tmp/test.ladybug",
         serverUrl: "grpc://127.0.0.1:7617",
         authToken: "secret-token",
+        grpcMaxMessageBytes: DEFAULT_GRPC_MAX_MESSAGE_BYTES,
         autostart: true,
         startupTimeoutMs: 10_000,
         lockPath: "/tmp/ladybug-server.lock",

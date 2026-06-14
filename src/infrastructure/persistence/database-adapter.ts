@@ -124,6 +124,7 @@ export function toLadybugClientConfig(config: FullConfig): LadybugClientConfig {
     dbPath: config.ladybugdb.dbPath,
     serverUrl: config.ladybugdb.serverUrl,
     authToken: config.ladybugdb.serverAuthToken,
+    grpcMaxMessageBytes: config.ladybugdb.grpcMaxMessageBytes,
     autostart: config.ladybugdb.serverAutostart,
     startupTimeoutMs: config.ladybugdb.serverStartupTimeoutMs,
     lockPath: config.ladybugdb.serverLockPath,
@@ -139,6 +140,7 @@ function validateAdapterFactoryConfig(config: FullConfig): void {
   validateIntegerRange(config.ladybugdb.serverPort, "ladybugdb.serverPort", 1, 65_535);
   validateMinimum(config.ladybugdb.serverMaxConcurrency, "ladybugdb.serverMaxConcurrency", 1);
   validateMinimum(config.ladybugdb.serverMaxQueue, "ladybugdb.serverMaxQueue", 1);
+  validateMinimum(config.ladybugdb.grpcMaxMessageBytes, "ladybugdb.grpcMaxMessageBytes", 1);
   validateMinimum(config.ladybugdb.serverStartupTimeoutMs, "ladybugdb.serverStartupTimeoutMs", 1);
   validateMinimum(config.ladybugdb.serverIdleTtlMs, "ladybugdb.serverIdleTtlMs", 0);
   requireNonEmpty(config.ladybugdb.serverLockPath, "ladybugdb.serverLockPath");

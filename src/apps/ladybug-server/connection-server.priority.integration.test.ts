@@ -36,6 +36,8 @@ describe("Ladybug connection server priority scheduling — integration test", (
     vi.restoreAllMocks();
     process.removeAllListeners("SIGTERM");
     process.removeAllListeners("SIGINT");
+    process.removeAllListeners("uncaughtException");
+    process.removeAllListeners("unhandledRejection");
     const grpcModule = await import("@grpc/grpc-js") as unknown as {
       readonly __clearServers: () => void;
     };
@@ -107,6 +109,11 @@ describe("Ladybug connection server priority scheduling — integration test", (
           queued: 2,
         }),
       });
+      // Phase F (additive): identity + liveness on the Admin response.
+      const metricsRecord = metrics as { pid: number; startedAt: string; uptimeMs: number };
+      expect(metricsRecord.pid).toBe(process.pid);
+      expect(Number.isNaN(Date.parse(metricsRecord.startedAt))).toBe(false);
+      expect(metricsRecord.uptimeMs).toBeGreaterThanOrEqual(0);
 
       gate.resolve();
       await Promise.all([blockedWrite, queuedWrite, queuedRead]);

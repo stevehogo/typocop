@@ -1,7 +1,7 @@
 // Tests for Phase 6: Search index — embedding generation and keyword indexing
 // Unit tests (vitest) + Property-based tests (fast-check)
 
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as fc from "fast-check";
 import type { Symbol, Cluster, Embedding } from "../../../core/domain.js";
 import { symbolArbitrary, clusterArbitrary, embeddingArbitrary } from "../../../../tests/support/arbitraries.js";
@@ -406,6 +406,166 @@ describe("buildSearchIndex", () => {
     const symbols = [makeSymbol({ id: "s1", name: "login" })];
     const index = await buildSearchIndex(symbols, [], null);
     expect(index.embeddingStats).toEqual({ attempts: 0, successes: 0, failures: 0 });
+  });
+
+  // ─── Phase 1: batched embedTexts fast-path ──────────────────────────────────
+
+  describe("batched embedTexts fast-path", () => {
+    const DIM = 1536;
+    const vecFor = (seed: number): Embedding => ({
+      vector: new Array(DIM).fill(seed),
+      dimensions: DIM,
+    });
+
+    // Batching is opt-in (default OFF — it is slower on CPU). These tests
+    // exercise the batch fast-path, so they explicitly enable it.
+    beforeEach(() => {
+      process.env.EMBEDDING_ENABLE_BATCH = "1";
+    });
+
+    afterEach(() => {
+      delete process.env.EMBEDDING_ENABLE_BATCH;
+      delete process.env.EMBEDDING_BATCH_SIZE;
+    });
+
+    it("produces output identical to the per-item path for a fixed input (determinism)", async () => {
+      const symbols = [
+        makeSymbol({ id: "s0", name: "alpha" }),
+        makeSymbol({ id: "s1", name: "bravo" }),
+        makeSymbol({ id: "s2", name: "charlie" }),
+      ];
+      const clusters = [
+        makeCluster({ id: "c0", symbols: ["s0", "s1"] }),
+        makeCluster({ id: "c1", symbols: ["s2"] }),
+      ];
+      // Deterministic per-text vector so batch and per-item produce same values.
+      const seedOf = (text: string) => text.length;
+      const perItem = vi.fn(async (text: string) => vecFor(seedOf(text)));
+      const batch = vi.fn(async (texts: string[]) =>
+        texts.map((t) => vecFor(seedOf(t))),
+      );
+
+      const fromPerItem = await buildSearchIndex(symbols, clusters, perItem, 3, null);
+      const fromBatch = await buildSearchIndex(symbols, clusters, perItem, 3, batch);
+
+      expect(batch).toHaveBeenCalled();
+      expect(fromBatch.embeddings).toEqual(fromPerItem.embeddings);
+      expect(fromBatch.embeddingStats).toEqual(fromPerItem.embeddingStats);
+      expect(fromBatch.embeddings.map((e) => e.symbolId)).toEqual([
+        "s0",
+        "s1",
+        "s2",
+        "cluster:c0",
+        "cluster:c1",
+      ]);
+    });
+
+    it("groups jobs into EMBEDDING_BATCH_SIZE-bounded batches", async () => {
+      process.env.EMBEDDING_BATCH_SIZE = "2";
+      const symbols = Array.from({ length: 5 }, (_, i) =>
+        makeSymbol({ id: `s${i}`, name: `fn${i}` }),
+      );
+      const perItem = vi.fn(async () => vecFor(0.1));
+      const batch = vi.fn(async (texts: string[]) => texts.map(() => vecFor(0.1)));
+
+      const index = await buildSearchIndex(symbols, [], perItem, 4, batch);
+
+      // 5 jobs / batch size 2 → 3 batch calls (2,2,1)
+      expect(batch).toHaveBeenCalledTimes(3);
+      expect(batch.mock.calls.map((c) => c[0].length)).toEqual([2, 2, 1]);
+      expect(index.embeddings).toHaveLength(5);
+      expect(perItem).not.toHaveBeenCalled();
+    });
+
+    it("falls back to per-item embedText ONCE on batch throw, with per-item accounting", async () => {
+      process.env.EMBEDDING_BATCH_SIZE = "2";
+      const symbols = [
+        makeSymbol({ id: "s0", name: "ok0" }),
+        makeSymbol({ id: "s1", name: "null1" }),
+      ];
+      // Batch always throws → whole batch suspect → per-item fallback.
+      const batch = vi.fn(async () => {
+        throw new Error("batch OOM");
+      });
+      // Per-item: null for "null1", embedding otherwise.
+      const perItem = vi.fn(async (text: string) =>
+        text.includes("null1") ? null : vecFor(0.2),
+      );
+
+      const index = await buildSearchIndex(symbols, [], perItem, 2, batch);
+
+      expect(batch).toHaveBeenCalledTimes(1);
+      // Each item counted individually (not as one batch-count).
+      expect(index.embeddingStats).toEqual({ attempts: 2, successes: 1, failures: 1 });
+      expect(index.embeddings.map((e) => e.symbolId)).toEqual(["s0"]);
+      // Exactly one fallback pass: 2 per-item calls for the 2 jobs.
+      expect(perItem).toHaveBeenCalledTimes(2);
+    });
+
+    it("falls back to per-item on batch timeout (per-item accounting preserved)", async () => {
+      vi.useFakeTimers();
+      try {
+        const symbols = [makeSymbol({ id: "s0", name: "slow" })];
+        // Batch never resolves — only the per-batch timeout can settle it.
+        const batch = vi.fn(() => new Promise<(Embedding | null)[]>(() => {}));
+        const perItem = vi.fn(async () => vecFor(0.3));
+
+        const promise = buildSearchIndex(symbols, [], perItem, 1, batch);
+        await vi.runAllTimersAsync();
+        const index = await promise;
+
+        expect(batch).toHaveBeenCalledTimes(1);
+        expect(perItem).toHaveBeenCalledTimes(1);
+        expect(index.embeddingStats).toEqual({ attempts: 1, successes: 1, failures: 0 });
+        expect(index.embeddings.map((e) => e.symbolId)).toEqual(["s0"]);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("treats per-row null from the batch as keyword-only fallback", async () => {
+      const symbols = [
+        makeSymbol({ id: "s0", name: "ok0" }),
+        makeSymbol({ id: "s1", name: "bad1" }),
+      ];
+      // Batch nulls the second row (pre-inference validation failure semantics).
+      const batch = vi.fn(async (texts: string[]) =>
+        texts.map((t) => (t.includes("bad1") ? null : vecFor(0.4))),
+      );
+      const perItem = vi.fn(async () => vecFor(0.4));
+
+      const index = await buildSearchIndex(symbols, [], perItem, 2, batch);
+
+      // No fallback — the batch resolved; per-row null is honest accounting.
+      expect(perItem).not.toHaveBeenCalled();
+      expect(index.embeddingStats).toEqual({ attempts: 2, successes: 1, failures: 1 });
+      expect(index.embeddings.map((e) => e.symbolId)).toEqual(["s0"]);
+      expect(index.keywords.size).toBeGreaterThan(0);
+    });
+
+    it("skips the batch path entirely when batching is not enabled (the default)", async () => {
+      delete process.env.EMBEDDING_ENABLE_BATCH;
+      const symbols = [makeSymbol({ id: "s0", name: "alpha" })];
+      const batch = vi.fn(async (texts: string[]) => texts.map(() => vecFor(0.5)));
+      const perItem = vi.fn(async () => vecFor(0.5));
+
+      const index = await buildSearchIndex(symbols, [], perItem, 2, batch);
+
+      expect(batch).not.toHaveBeenCalled();
+      expect(perItem).toHaveBeenCalledTimes(1);
+      expect(index.embeddings).toHaveLength(1);
+    });
+
+    it("uses the per-item path when no embedTextsFn is provided (adapter without embedTexts)", async () => {
+      const symbols = [makeSymbol({ id: "s0", name: "alpha" })];
+      const perItem = vi.fn(async () => vecFor(0.6));
+
+      // 5th arg omitted → null → per-item path.
+      const index = await buildSearchIndex(symbols, [], perItem, 2);
+
+      expect(perItem).toHaveBeenCalledTimes(1);
+      expect(index.embeddings).toHaveLength(1);
+    });
   });
 });
 

@@ -40,4 +40,16 @@ describe("NoOpEmbeddingAdapter", () => {
       expect(result).toBeNull();
     });
   });
+
+  // ── embedTexts batch fast-path (Phase 1) ───────────────────────────────
+
+  describe("embedTexts (batch fast-path)", () => {
+    it("does NOT implement embedTexts so callers fall back to embedText", () => {
+      const adapter = new NoOpEmbeddingAdapter();
+      // The OPTIONAL batch method is intentionally absent on NoOp.
+      expect(
+        (adapter as { embedTexts?: unknown }).embedTexts,
+      ).toBeUndefined();
+    });
+  });
 });

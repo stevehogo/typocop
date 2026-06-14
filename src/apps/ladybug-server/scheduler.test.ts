@@ -200,4 +200,51 @@ describe("PriorityRequestScheduler", () => {
     expect(executed).toEqual(["first", "second"]);
     expect(scheduler.stats().acceptingRequests).toBe(false);
   });
+
+  it("bounded drain resolves by the deadline and settles a never-finishing in-flight request", async () => {
+    const scheduler = new PriorityRequestScheduler(1, 4);
+    const neverGate = deferred<void>();
+
+    // In-flight request whose underlying op never resolves (the documented
+    // native-teardown / hung-query hazard).
+    const inFlight = scheduler.enqueue({
+      id: "hung",
+      priority: "background_write",
+      timeoutMs: 60_000,
+      execute: () => neverGate.promise.then(() => "hung"),
+    });
+    // Observe the eventual rejection up-front so it is never unhandled.
+    const inFlightSettled = expect(inFlight).rejects.toMatchObject({
+      errorCode: "SERVER_SHUTTING_DOWN",
+    });
+
+    await flushMicrotasks();
+    expect(scheduler.stats().inFlight).toBe(1);
+
+    // A queued request behind the hung one must also be settled on deadline.
+    const queued = scheduler.enqueue({
+      id: "queued",
+      priority: "background_write",
+      timeoutMs: 60_000,
+      execute: async () => "queued",
+    }).catch((error: unknown) => error);
+
+    await flushMicrotasks();
+
+    const start = Date.now();
+    await scheduler.drain(30);
+    const elapsed = Date.now() - start;
+
+    // drain() resolved instead of hanging forever, within ~timeoutMs.
+    expect(elapsed).toBeLessThan(2_000);
+
+    await inFlightSettled;
+    const queuedResult = await queued;
+    expect((queuedResult as { errorCode?: string }).errorCode).toBe("SERVER_SHUTTING_DOWN");
+  });
+
+  it("bounded drain returns immediately when already idle", async () => {
+    const scheduler = new PriorityRequestScheduler(1, 4);
+    await expect(scheduler.drain(1_000)).resolves.toBeUndefined();
+  });
 });

@@ -119,4 +119,70 @@ describe("fetchAllGraphData", () => {
     expect(result.externalDependencies).toEqual([]);
     expect(result.dependsOnEdges).toEqual([]);
   });
+
+  it("pages full-graph reads with stable SKIP and LIMIT windows", async () => {
+    const symbolRows = [
+      { id: "sym-1", name: "one" },
+      { id: "sym-2", name: "two" },
+    ];
+    const runCypher = vi.fn().mockImplementation(async (query: string) => {
+      if (query.includes("RETURN s.id AS id")) {
+        const { skip, limit } = parseWindow(query);
+        return symbolRows.slice(skip, skip + limit);
+      }
+      return [];
+    });
+    const adapter = createMockGraphAdapter(new Map());
+    adapter.runCypher = runCypher;
+
+    const result = await fetchAllGraphData(adapter, "tpc_", { pageSize: 1 });
+
+    expect(result.symbols.map((symbol) => symbol.id)).toEqual(["sym-1", "sym-2"]);
+    const symbolQueries = runCypher.mock.calls
+      .map(([query]) => String(query))
+      .filter((query) => query.includes("RETURN s.id AS id"));
+    expect(symbolQueries).toEqual([
+      expect.stringContaining("ORDER BY s.id\nSKIP 0 LIMIT 1"),
+      expect.stringContaining("ORDER BY s.id\nSKIP 1 LIMIT 1"),
+      expect.stringContaining("ORDER BY s.id\nSKIP 2 LIMIT 1"),
+    ]);
+  });
+
+  it("halves page size and retries when a read page is RESOURCE_EXHAUSTED", async () => {
+    const symbolRows = [
+      { id: "sym-1", name: "one" },
+      { id: "sym-2", name: "two" },
+      { id: "sym-3", name: "three" },
+    ];
+    const runCypher = vi.fn().mockImplementation(async (query: string) => {
+      if (!query.includes("RETURN s.id AS id")) {
+        return [];
+      }
+      const { skip, limit } = parseWindow(query);
+      if (limit === 4) {
+        throw Object.assign(new Error("page too large"), { code: 8 });
+      }
+      return symbolRows.slice(skip, skip + limit);
+    });
+    const adapter = createMockGraphAdapter(new Map());
+    adapter.runCypher = runCypher;
+
+    const result = await fetchAllGraphData(adapter, "tpc_", { pageSize: 4 });
+
+    expect(result.symbols.map((symbol) => symbol.id)).toEqual(["sym-1", "sym-2", "sym-3"]);
+    const symbolQueries = runCypher.mock.calls
+      .map(([query]) => String(query))
+      .filter((query) => query.includes("RETURN s.id AS id"));
+    expect(symbolQueries[0]).toContain("SKIP 0 LIMIT 4");
+    expect(symbolQueries[1]).toContain("SKIP 0 LIMIT 2");
+    expect(symbolQueries[2]).toContain("SKIP 2 LIMIT 2");
+  });
 });
+
+function parseWindow(query: string): { readonly skip: number; readonly limit: number } {
+  const match = query.match(/SKIP\s+(\d+)\s+LIMIT\s+(\d+)/);
+  if (!match) {
+    throw new Error(`Missing SKIP/LIMIT in query: ${query}`);
+  }
+  return { skip: Number(match[1]), limit: Number(match[2]) };
+}

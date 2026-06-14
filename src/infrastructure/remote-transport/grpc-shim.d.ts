@@ -34,6 +34,7 @@ declare module "@grpc/grpc-js" {
     ): void;
     start(): void;
     tryShutdown(callback: () => void): void;
+    forceShutdown(): void;
   }
 
   export const ServerCredentials: {

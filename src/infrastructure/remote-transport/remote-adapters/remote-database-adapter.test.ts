@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { LadybugClientConfig } from "../../../platform/config/types.js";
+import { DEFAULT_GRPC_MAX_MESSAGE_BYTES } from "../../../platform/utils/limits.js";
 import { RemoteDatabaseAdapter } from "./remote-database-adapter.js";
 import type { RpcClientBundle, UnaryRpcMethod } from "../remote-rpc-client.js";
 
@@ -61,6 +62,7 @@ const baseConfig: LadybugClientConfig = {
   dbPath: "/tmp/db.ladybug",
   serverUrl: "grpc://127.0.0.1:7617",
   authToken: "token-123",
+  grpcMaxMessageBytes: DEFAULT_GRPC_MAX_MESSAGE_BYTES,
   autostart: false,
   startupTimeoutMs: 5_000,
   lockPath: "/tmp/server.lock",
@@ -100,6 +102,21 @@ describe("RemoteDatabaseAdapter", () => {
     await adapter.close();
     expect(graphClient.close).toHaveBeenCalledOnce();
     expect(vectorClient.close).toHaveBeenCalledOnce();
+  });
+
+  it("passes configured gRPC message limit to client construction", async () => {
+    const createClients = vi.fn(() => ({
+      graph: createNoopClient(),
+      vector: createNoopClient(),
+    }) as unknown as RpcClientBundle);
+    const adapter = new RemoteDatabaseAdapter(
+      { ...baseConfig, grpcMaxMessageBytes: 8_388_608 },
+      { createClients },
+    );
+
+    await adapter.initialize();
+
+    expect(createClients).toHaveBeenCalledWith("127.0.0.1:7617", 8_388_608);
   });
 
   it("includes prefix, timeout, and auth metadata in requests", async () => {

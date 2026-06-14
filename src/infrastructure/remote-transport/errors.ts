@@ -72,6 +72,17 @@ export class ServerDrainingError extends Error {
   }
 }
 
+export class ServerShuttingDownError extends Error {
+  readonly grpcStatus = GRPC_STATUS.UNAVAILABLE;
+  readonly errorCode = "SERVER_SHUTTING_DOWN";
+  readonly retryable = true;
+
+  constructor() {
+    super("Connection server is shutting down; in-flight request was cancelled");
+    this.name = "ServerShuttingDownError";
+  }
+}
+
 export function toErrorDetail(error: unknown): ErrorDetail {
   const message = error instanceof Error ? error.message : String(error);
   const grpcError = error as GrpcMappableError;

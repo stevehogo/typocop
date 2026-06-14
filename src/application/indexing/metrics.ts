@@ -63,8 +63,21 @@ export interface IndexingMetrics {
   readonly embeddingFailures: number;
   readonly embeddingElapsedMs: number;
 
-  /** Total lines of source scanned, if known (0/undefined = unknown). */
-  readonly totalLines: number;
+  // ── Batch-level persistence counters (Phase B) ──
+  // These count BATCH CALLS (and split/oversized events), distinct from the
+  // per-ROW counts above. They make a "many tiny retries" run legible from
+  // metrics alone instead of only via console.warn. Counts/timings only — never
+  // source code or embedding text.
+  /** Vector batch CALLS made on the batch fast-path (not rows). */
+  readonly vectorBatchCount: number;
+  /** Node batch CALLS made on the batch fast-path (not rows). */
+  readonly nodeBatchCount: number;
+  /** Relationship batch CALLS made on the batch fast-path (not rows). */
+  readonly relationshipBatchCount: number;
+  /** Adaptive-split events (each RESOURCE_EXHAUSTED halving in writeWithAdaptiveSplit). */
+  readonly adaptiveSplitCount: number;
+  /** Oversized rows routed alone by chunkByBudget's onOversizedItem hook. */
+  readonly oversizedRowCount: number;
 }
 
 /**
@@ -113,7 +126,11 @@ type CountField =
   | "embeddingCount"
   | "embeddingAttempts"
   | "embeddingFailures"
-  | "totalLines";
+  | "vectorBatchCount"
+  | "nodeBatchCount"
+  | "relationshipBatchCount"
+  | "adaptiveSplitCount"
+  | "oversizedRowCount";
 
 /** Accumulating elapsed-millisecond fields. */
 type ElapsedField = "embeddingElapsedMs";
@@ -160,7 +177,11 @@ export function createMetricsCollector(): MetricsCollector {
     embeddingCount: 0,
     embeddingAttempts: 0,
     embeddingFailures: 0,
-    totalLines: 0,
+    vectorBatchCount: 0,
+    nodeBatchCount: 0,
+    relationshipBatchCount: 0,
+    adaptiveSplitCount: 0,
+    oversizedRowCount: 0,
   };
 
   const elapsed: Record<ElapsedField, number> = {
@@ -229,7 +250,11 @@ export function createMetricsCollector(): MetricsCollector {
         embeddingAttempts: counts.embeddingAttempts,
         embeddingFailures: counts.embeddingFailures,
         embeddingElapsedMs: elapsed.embeddingElapsedMs,
-        totalLines: counts.totalLines,
+        vectorBatchCount: counts.vectorBatchCount,
+        nodeBatchCount: counts.nodeBatchCount,
+        relationshipBatchCount: counts.relationshipBatchCount,
+        adaptiveSplitCount: counts.adaptiveSplitCount,
+        oversizedRowCount: counts.oversizedRowCount,
       };
     },
   };
@@ -238,8 +263,9 @@ export function createMetricsCollector(): MetricsCollector {
 /**
  * Render a concise, multi-line throughput summary suitable for stderr.
  *
- * Approximate LOC/s is included only when `totalLines` and `totalMs` are both
- * positive; otherwise it is omitted (no divide-by-zero, no misleading "0 LOC/s").
+ * The batch/split summary line is VERBOSE-ONLY (it is rendered by the verbose
+ * pipeline path); the rest of the summary is unchanged from prior behavior so
+ * existing non-verbose output stays byte-identical.
  */
 export function formatMetrics(metrics: IndexingMetrics): string {
   const ms = (n: number): string => `${n.toFixed(1)}ms`;
@@ -269,11 +295,11 @@ export function formatMetrics(metrics: IndexingMetrics): string {
     `  embeddings:   ${metrics.embeddingCount} in ${ms(metrics.embeddingElapsedMs)}` +
       ` (${metrics.embeddingAttempts} attempted, ${metrics.embeddingFailures} failed)`,
   );
-
-  if (metrics.totalLines > 0 && metrics.totalMs > 0) {
-    const locPerSec = (metrics.totalLines / metrics.totalMs) * 1000;
-    lines.push(`  throughput:   ${Math.round(locPerSec)} LOC/s (${metrics.totalLines} lines)`);
-  }
+  lines.push(
+    `  batches:      ${metrics.nodeBatchCount} node, ${metrics.relationshipBatchCount} rel,` +
+      ` ${metrics.vectorBatchCount} vector` +
+      ` (${metrics.adaptiveSplitCount} splits, ${metrics.oversizedRowCount} oversized)`,
+  );
 
   return lines.join("\n");
 }

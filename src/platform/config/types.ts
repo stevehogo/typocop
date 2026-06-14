@@ -32,7 +32,7 @@ export type EmbeddingProvider = "huggingface" | "ollama" | "none";
 export interface HuggingFaceConfig {
   /** Model identifier on HuggingFace Hub. Default: "mixedbread-ai/mxbai-embed-large-v1". */
   readonly model: string;
-  /** Quantization/precision. Default: "fp32". */
+  /** Quantization/precision. Default: "q8" (~2x faster than fp32 on CPU, ~0.99 cosine alignment). */
   readonly dtype: "fp32" | "fp16" | "q8";
   /** Expected embedding dimensions. Default: 1024. */
   readonly dimensions: number;
@@ -63,10 +63,15 @@ export interface LadybugServerConfig {
   readonly host: string;
   readonly port: number;
   readonly authToken: string;
+  readonly grpcMaxMessageBytes: number;
   readonly maxConcurrency: number;
   readonly maxQueue: number;
   readonly idleTtlMs: number;
   readonly discoveryPath: string;
+  /** Grace period (ms) to drain in-flight work before escalating shutdown. */
+  readonly shutdownGraceMs: number;
+  /** Hard deadline (ms) for the whole shutdown sequence before force-exit. */
+  readonly shutdownHardMs: number;
 }
 
 export interface LadybugClientConfig {
@@ -75,6 +80,7 @@ export interface LadybugClientConfig {
   readonly dbPath: string;
   readonly serverUrl: string;
   readonly authToken: string;
+  readonly grpcMaxMessageBytes: number;
   readonly autostart: boolean;
   readonly startupTimeoutMs: number;
   readonly lockPath: string;
@@ -92,6 +98,7 @@ export interface FullConfig {
     readonly serverHost: string;
     readonly serverPort: number;
     readonly serverAuthToken: string;
+    readonly grpcMaxMessageBytes: number;
     readonly serverMaxConcurrency: number;
     readonly serverMaxQueue: number;
     readonly serverAutostart: boolean;
@@ -99,6 +106,8 @@ export interface FullConfig {
     readonly serverLockPath: string;
     readonly serverDiscoveryPath: string;
     readonly serverIdleTtlMs: number;
+    readonly serverShutdownGraceMs: number;
+    readonly serverShutdownHardMs: number;
   };
   readonly loadedAt: Date;
   readonly source: "environment" | "env-file" | "default";

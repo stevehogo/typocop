@@ -359,16 +359,25 @@ describe("LadybugGraphAdapter", () => {
       const adapter = createAdapter("tpc_");
       await adapter.deleteNodesByLabel("Symbol");
 
-      const query = mockQuery.mock.calls[0][0] as string;
-      expect(query).toContain("MATCH (n:tpc_Symbol)");
-      expect(query).toContain("DETACH DELETE n");
+      // First query counts, second deletes — assert against the DELETE query.
+      const deleteQuery = mockQuery.mock.calls[1][0] as string;
+      expect(deleteQuery).toContain("MATCH (n:tpc_Symbol)");
+      expect(deleteQuery).toContain("DETACH DELETE n");
     });
 
-    it("should execute via connection.query()", async () => {
+    it("should count then delete via connection.query()", async () => {
       const adapter = createAdapter();
       await adapter.deleteNodesByLabel("Symbol");
 
-      expect(mockQuery).toHaveBeenCalledOnce();
+      expect(mockQuery).toHaveBeenCalledTimes(2);
+      expect(mockQuery.mock.calls[0][0]).toContain("count(n)");
+    });
+
+    it("returns the pre-delete node count (not a hardcoded 0)", async () => {
+      const adapter = createAdapter("tpc_");
+      mockQuery.mockResolvedValueOnce(mockQueryResult([{ count: 42 }]));
+
+      await expect(adapter.deleteNodesByLabel("Symbol")).resolves.toBe(42);
     });
   });
 
@@ -379,16 +388,25 @@ describe("LadybugGraphAdapter", () => {
       const adapter = createAdapter("tpc_");
       await adapter.deleteRelationshipsByType("CALLS");
 
-      const query = mockQuery.mock.calls[0][0] as string;
-      expect(query).toContain("tpc_CALLS");
-      expect(query).toContain("DELETE r");
+      // First query counts, second deletes — assert against the DELETE query.
+      const deleteQuery = mockQuery.mock.calls[1][0] as string;
+      expect(deleteQuery).toContain("tpc_CALLS");
+      expect(deleteQuery).toContain("DELETE r");
     });
 
-    it("should execute via connection.query()", async () => {
+    it("should count then delete via connection.query()", async () => {
       const adapter = createAdapter();
       await adapter.deleteRelationshipsByType("CALLS");
 
-      expect(mockQuery).toHaveBeenCalledOnce();
+      expect(mockQuery).toHaveBeenCalledTimes(2);
+      expect(mockQuery.mock.calls[0][0]).toContain("count(r)");
+    });
+
+    it("returns the pre-delete relationship count (not a hardcoded 0)", async () => {
+      const adapter = createAdapter("tpc_");
+      mockQuery.mockResolvedValueOnce(mockQueryResult([{ count: 7 }]));
+
+      await expect(adapter.deleteRelationshipsByType("CALLS")).resolves.toBe(7);
     });
   });
 

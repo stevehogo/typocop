@@ -61,6 +61,73 @@ export const EMBEDDING_CONCURRENCY = 3;
 export const EMBEDDING_TIMEOUT_MS = 30_000;
 
 /**
+ * Default batch size for the OPTIONAL `EmbeddingAdapter.embedTexts` fast-path
+ * (embeddings performance plan, Phase 1).
+ *
+ * When an adapter exposes `embedTexts`, {@link buildSearchIndex} groups jobs
+ * into chunks of at most this many texts and feeds the BATCHES (not individual
+ * items) through {@link mapWithConcurrency} at {@link EMBEDDING_CONCURRENCY}.
+ * Conservative default — very large texts can OOM at higher sizes; callers on
+ * tight memory should lower it. MUST be ≥ 1.
+ */
+export const EMBEDDING_BATCH_SIZE = 16;
+
+/**
+ * Hard upper bound (ms) for a single batched `embedTexts` call (Phase 1).
+ *
+ * The per-batch timeout is `min(EMBEDDING_TIMEOUT_MS × batch.length, this cap)`,
+ * so a large batch cannot wait an unbounded multiple of the per-item budget.
+ * On timeout/throw the whole batch is suspect (all-or-nothing inference) and the
+ * caller falls back to the per-item `embedText` + per-item timeout path exactly
+ * once.
+ */
+export const EMBEDDING_BATCH_TIMEOUT_CAP_MS = 120_000;
+
+/** Environment override for {@link EMBEDDING_BATCH_SIZE}. */
+export const EMBEDDING_BATCH_SIZE_ENV = "EMBEDDING_BATCH_SIZE";
+
+/**
+ * Opt-in flag (env-gated): batched `embedTexts` is OFF BY DEFAULT. When set
+ * truthy, callers USE `embedTexts` on adapters that support it; otherwise they
+ * use the per-item `embedText` path.
+ *
+ * Default-off is deliberate and evidence-based: on CPU with the default model
+ * (`mxbai-embed-large-v1`, fp32), batched feature-extraction pads every text in
+ * a batch to the longest sequence, so variable-length code symbols make a batch
+ * SLOWER than summed per-item calls (measured ~50% slower on `search`). Batching
+ * is retained as opt-in for hardware/models where it helps (GPU, uniform-length
+ * corpora). Recognized truthy values: "1", "true", "yes", "on" (case-insensitive).
+ */
+export const EMBEDDING_ENABLE_BATCH_ENV = "EMBEDDING_ENABLE_BATCH";
+
+/**
+ * Resolve the configured embedding batch size from the environment, clamped to
+ * ≥ 1. Falls back to {@link EMBEDDING_BATCH_SIZE} when unset/invalid.
+ */
+export function getConfiguredEmbeddingBatchSize(): number {
+  const raw = process.env[EMBEDDING_BATCH_SIZE_ENV];
+  if (raw === undefined || raw === "") {
+    return EMBEDDING_BATCH_SIZE;
+  }
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed < 1) {
+    return EMBEDDING_BATCH_SIZE;
+  }
+  return parsed;
+}
+
+/**
+ * Whether the batched `embedTexts` path is enabled via
+ * {@link EMBEDDING_ENABLE_BATCH_ENV}. Defaults to FALSE (per-item `embedText`);
+ * batching is opt-in because it is slower on CPU for the default model.
+ */
+export function isEmbeddingBatchEnabled(): boolean {
+  const raw = process.env[EMBEDDING_ENABLE_BATCH_ENV];
+  if (raw === undefined) return false;
+  return ["1", "true", "yes", "on"].includes(raw.trim().toLowerCase());
+}
+
+/**
  * Bounded chunk size for batch database writes (Phase D).
  *
  * When an adapter implements the OPTIONAL batch methods
@@ -73,6 +140,150 @@ export const EMBEDDING_TIMEOUT_MS = 30_000;
  * not the number of batch calls.
  */
 export const DB_WRITE_BATCH_SIZE = 500;
+
+/** Default gRPC message limit for the Ladybug connection server and clients. */
+export const DEFAULT_GRPC_MAX_MESSAGE_BYTES = 64 * 1024 * 1024;
+
+/**
+ * Environment variable used by both client and server configuration to keep
+ * gRPC message limits aligned.
+ */
+export const GRPC_MAX_MESSAGE_BYTES_ENV = "LADYBUG_GRPC_MAX_MESSAGE_BYTES";
+
+/**
+ * Safety factor for application payloads inside a protobuf message. The batch
+ * JSON field should stay below the transport ceiling to leave framing overhead.
+ */
+export const RPC_PAYLOAD_BUDGET_RATIO = 0.75;
+
+export function deriveRpcPayloadBudgetBytes(maxMessageBytes: number): number {
+  return Math.max(1, Math.floor(maxMessageBytes * RPC_PAYLOAD_BUDGET_RATIO));
+}
+
+export const RPC_PAYLOAD_BUDGET_BYTES = deriveRpcPayloadBudgetBytes(
+  DEFAULT_GRPC_MAX_MESSAGE_BYTES,
+);
+
+export function getConfiguredGrpcMaxMessageBytes(): number {
+  const raw = process.env[GRPC_MAX_MESSAGE_BYTES_ENV];
+  if (raw === undefined || raw === "") {
+    return DEFAULT_GRPC_MAX_MESSAGE_BYTES;
+  }
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed < 1) {
+    throw new Error(`${GRPC_MAX_MESSAGE_BYTES_ENV} must be an integer >= 1, received ${raw}`);
+  }
+  return parsed;
+}
+
+export function getRpcPayloadBudgetBytes(
+  maxMessageBytes = getConfiguredGrpcMaxMessageBytes(),
+): number {
+  return deriveRpcPayloadBudgetBytes(maxMessageBytes);
+}
+
+/**
+ * Default grace period (ms) the connection server waits for in-flight gRPC work
+ * to finish during shutdown before escalating to `forceShutdown` and rejecting
+ * still-pending requests. Bounds the "drain forever" hang (resilience Phase B).
+ */
+export const DEFAULT_SHUTDOWN_GRACE_MS = 5_000;
+
+/**
+ * Default hard deadline (ms) for the whole shutdown sequence. After this the
+ * native DB close is abandoned and an unref'd backstop timer force-exits the
+ * process, so shutdown can never wedge indefinitely (resilience Phase B).
+ */
+export const DEFAULT_SHUTDOWN_HARD_MS = 10_000;
+
+/** Environment override for {@link DEFAULT_SHUTDOWN_GRACE_MS}. */
+export const SHUTDOWN_GRACE_MS_ENV = "LADYBUG_SERVER_SHUTDOWN_GRACE_MS";
+
+/** Environment override for {@link DEFAULT_SHUTDOWN_HARD_MS}. */
+export const SHUTDOWN_HARD_MS_ENV = "LADYBUG_SERVER_SHUTDOWN_HARD_MS";
+
+function getConfiguredPositiveIntEnv(envName: string, fallback: number): number {
+  const raw = process.env[envName];
+  if (raw === undefined || raw === "") {
+    return fallback;
+  }
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed < 1) {
+    throw new Error(`${envName} must be an integer >= 1, received ${raw}`);
+  }
+  return parsed;
+}
+
+export function getConfiguredShutdownGraceMs(): number {
+  return getConfiguredPositiveIntEnv(SHUTDOWN_GRACE_MS_ENV, DEFAULT_SHUTDOWN_GRACE_MS);
+}
+
+export function getConfiguredShutdownHardMs(): number {
+  return getConfiguredPositiveIntEnv(SHUTDOWN_HARD_MS_ENV, DEFAULT_SHUTDOWN_HARD_MS);
+}
+
+/**
+ * Default `stale` window (ms) for the database file lock (`proper-lockfile`).
+ * After a process holding the lock dies without releasing it, the lock is
+ * considered stale and self-clears after this window, so a restart after a
+ * crash is not blocked indefinitely (resilience Phase D). Lowering this trades
+ * faster crash-recovery for a higher chance of two processes briefly believing
+ * they hold the DB — keep a safety margin.
+ */
+export const DEFAULT_DB_LOCK_STALE_MS = 30_000;
+
+/**
+ * Default number of retries `proper-lockfile` performs (with exponential
+ * backoff) while waiting to acquire the database file lock (resilience Phase D).
+ */
+export const DEFAULT_DB_LOCK_RETRIES = 10;
+
+/** Environment override for {@link DEFAULT_DB_LOCK_STALE_MS}. */
+export const DB_LOCK_STALE_MS_ENV = "LADYBUG_DB_LOCK_STALE_MS";
+
+/** Environment override for {@link DEFAULT_DB_LOCK_RETRIES}. */
+export const DB_LOCK_RETRIES_ENV = "LADYBUG_DB_LOCK_RETRIES";
+
+export function getConfiguredDbLockStaleMs(): number {
+  return getConfiguredPositiveIntEnv(DB_LOCK_STALE_MS_ENV, DEFAULT_DB_LOCK_STALE_MS);
+}
+
+export function getConfiguredDbLockRetries(): number {
+  // proper-lockfile accepts retries >= 0; 0 means "try once".
+  const raw = process.env[DB_LOCK_RETRIES_ENV];
+  if (raw === undefined || raw === "") {
+    return DEFAULT_DB_LOCK_RETRIES;
+  }
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed < 0) {
+    throw new Error(`${DB_LOCK_RETRIES_ENV} must be an integer >= 0, received ${raw}`);
+  }
+  return parsed;
+}
+
+/**
+ * A conservative initial page size for full-graph export reads. The reader can
+ * halve this on RESOURCE_EXHAUSTED, so this is a throughput default rather than
+ * a correctness boundary.
+ */
+export function deriveExportGraphReadPageSize(maxMessageBytes: number): number {
+  return Math.max(1, Math.floor(deriveRpcPayloadBudgetBytes(maxMessageBytes) / 64_000));
+}
+
+export const EXPORT_GRAPH_READ_PAGE_SIZE = deriveExportGraphReadPageSize(
+  DEFAULT_GRPC_MAX_MESSAGE_BYTES,
+);
+
+export function getExportGraphReadPageSize(
+  maxMessageBytes = getConfiguredGrpcMaxMessageBytes(),
+): number {
+  return deriveExportGraphReadPageSize(maxMessageBytes);
+}
+
+/** Per-entity secondary row-count caps for batch persistence. */
+export const DB_NODE_WRITE_BATCH_SIZE = 250;
+export const DB_RELATIONSHIP_WRITE_BATCH_SIZE = DB_WRITE_BATCH_SIZE;
+export const DB_VECTOR_WRITE_BATCH_SIZE = 200;
 
 /**
  * Maximum number of traced entry points for Phase 5 process tracing (Phase F).

@@ -1,7 +1,7 @@
 [mcp_servers.typocop-mcp]
 args = ["-e",".env-typocop"]
 command = "typocop-mcp"
-enabled = true
+enabled = false
 
 [mcp_servers.typocop-mcp.tools.get_symbol_context]
 approval_mode = "approve"

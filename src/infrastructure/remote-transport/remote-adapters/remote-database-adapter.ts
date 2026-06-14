@@ -30,7 +30,7 @@ import type {
 } from "../../../core/ports/persistence.js";
 
 interface RemoteDatabaseAdapterOptions {
-  readonly createClients?: (target: string) => RpcClientBundle;
+  readonly createClients?: (target: string, maxMessageBytes: number) => RpcClientBundle;
   readonly defaultTimeoutMs?: number;
   /**
    * Injected embedding adapter (§14). Selected at the composition root via
@@ -40,7 +40,7 @@ interface RemoteDatabaseAdapterOptions {
 }
 
 export class RemoteDatabaseAdapter implements DatabaseAdapter, RemoteRpcClient {
-  private readonly createClients: (target: string) => RpcClientBundle;
+  private readonly createClients: (target: string, maxMessageBytes: number) => RpcClientBundle;
   private readonly defaultTimeoutMs: number;
   private clients: RpcClientBundle | null = null;
   private graphAdapter: GraphAdapter | null = null;
@@ -61,7 +61,10 @@ export class RemoteDatabaseAdapter implements DatabaseAdapter, RemoteRpcClient {
       return;
     }
 
-    const clients = this.createClients(toGrpcTarget(this.config.serverUrl));
+    const clients = this.createClients(
+      toGrpcTarget(this.config.serverUrl),
+      this.config.grpcMaxMessageBytes,
+    );
     await Promise.all([
       waitForReady(clients.graph, CONNECT_READY_TIMEOUT_MS),
       waitForReady(clients.vector, CONNECT_READY_TIMEOUT_MS),
@@ -158,7 +161,10 @@ export class RemoteDatabaseAdapter implements DatabaseAdapter, RemoteRpcClient {
 
     this.reconnecting = (async () => {
       const previous = this.requireClients();
-      const next = this.createClients(toGrpcTarget(this.config.serverUrl));
+      const next = this.createClients(
+        toGrpcTarget(this.config.serverUrl),
+        this.config.grpcMaxMessageBytes,
+      );
       try {
         await Promise.all([
           waitForReady(next.graph, CONNECT_READY_TIMEOUT_MS),

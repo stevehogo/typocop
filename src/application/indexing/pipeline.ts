@@ -23,6 +23,7 @@ import { resolveReferences } from "./resolution/index.js";
 import { clusterSymbols, type AIClient } from "./clustering/index.js";
 import { traceProcesses } from "./processes/index.js";
 import { buildSearchIndex } from "./search/index.js";
+import { EMBEDDING_CONCURRENCY } from "../../platform/utils/limits.js";
 import { createMetricsCollector, formatMetrics, type IndexingMetrics } from "./metrics.js";
 import { createProgressRenderer } from "../../platform/logging/progress.js";
 import {
@@ -171,9 +172,18 @@ export async function runIndexingPipeline(config: PipelineConfig): Promise<Pipel
 
   // Phase 6: Build search index and generate embeddings (Req 3.6, 8.2–8.5)
   let embedFn: ((text: string) => Promise<Embedding | null>) | null = null;
+  // OPTIONAL batch fast-path (Phase 1). Wired only when the adapter exposes
+  // `embedTexts`; otherwise null and buildSearchIndex uses the per-item path.
+  let embedTextsFn:
+    | ((texts: string[]) => Promise<(Embedding | null)[]>)
+    | null = null;
 
   if (embeddingAdapter.isEnabled()) {
     embedFn = (text: string) => embeddingAdapter.embedText(text);
+    if (typeof embeddingAdapter.embedTexts === "function") {
+      const batchFn = embeddingAdapter.embedTexts.bind(embeddingAdapter);
+      embedTextsFn = (texts: string[]) => batchFn(texts);
+    }
   } else {
     console.error("[pipeline] Embeddings disabled — skipping embedding generation");
   }
@@ -183,7 +193,9 @@ export async function runIndexingPipeline(config: PipelineConfig): Promise<Pipel
   // whole phase to embeddingElapsedMs (finer per-call granularity lives in the
   // search module; phase timing is acceptable here per Phase A).
   const searchStart = performance.now();
-  const searchIndex = await metrics.time("search", () => buildSearchIndex(symbols, clusters, embedFn));
+  const searchIndex = await metrics.time("search", () =>
+    buildSearchIndex(symbols, clusters, embedFn, EMBEDDING_CONCURRENCY, embedTextsFn),
+  );
   metrics.addElapsed("embeddingElapsedMs", performance.now() - searchStart);
   metrics.set("embeddingAttempts", searchIndex.embeddingStats.attempts);
   metrics.set("embeddingFailures", searchIndex.embeddingStats.failures);
@@ -203,18 +215,57 @@ export async function runIndexingPipeline(config: PipelineConfig): Promise<Pipel
   // falls back to per-row indexSymbol otherwise — identical data either way.
   // vectorWrites counts ROWS written (by chunk.length on the batch path).
   metrics.startPhase("persist");
-  let embeddingCount = 0;
-  await writeVectorEntries(vectorAdapter, searchIndex.embeddings, (n) => {
-    embeddingCount += n;
-    metrics.incr("vectorWrites", n);
-  });
-  metrics.set("embeddingCount", embeddingCount);
+  const totalPersistRows = countPersistRows(
+    searchIndex.embeddings.length,
+    symbols,
+    relationships,
+    clusters,
+    processes,
+    extNodes,
+  );
+  const persistProgress = createProgressRenderer({ verbose, label: "Indexing into LadybugDB" });
+  let persistedRows = 0;
+  const advancePersistProgress = (count: number): void => {
+    if (totalPersistRows === 0 || count <= 0) return;
+    persistedRows += count;
+    persistProgress.onProgress(Math.min(persistedRows, totalPersistRows), totalPersistRows);
+  };
 
-  // Store graph data through GraphAdapter (Req 8.1)
-  if (verbose) console.error("[pipeline] Storing results in graph database");
-  await storeInDatabases(symbols, relationships, clusters, processes, extNodes, graphAdapter, metrics);
-  metrics.endPhase("persist");
-  if (verbose) console.error("[pipeline] Storage complete");
+  let embeddingCount = 0;
+  try {
+    await writeVectorEntries(
+      vectorAdapter,
+      searchIndex.embeddings,
+      (n) => {
+        embeddingCount += n;
+        metrics.incr("vectorWrites", n);
+        advancePersistProgress(n);
+      },
+      {
+        onBatch: () => metrics.incr("vectorBatchCount"),
+        onSplit: () => metrics.incr("adaptiveSplitCount"),
+        onOversized: () => metrics.incr("oversizedRowCount"),
+      },
+    );
+    metrics.set("embeddingCount", embeddingCount);
+
+    // Store graph data through GraphAdapter (Req 8.1)
+    if (verbose) console.error("[pipeline] Storing results in graph database");
+    await storeInDatabases(
+      symbols,
+      relationships,
+      clusters,
+      processes,
+      extNodes,
+      graphAdapter,
+      metrics,
+      advancePersistProgress,
+    );
+    metrics.endPhase("persist");
+    if (verbose) console.error("[pipeline] Storage complete");
+  } finally {
+    persistProgress.done();
+  }
 
   return finishMetrics(verbose, metrics, {
     symbols,
@@ -242,6 +293,31 @@ function finishMetrics(
 }
 
 /**
+ * Compute the total number of rows the persist phase will write: vector entries
+ * plus graph nodes (symbols + clusters + processes + external deps) plus graph
+ * edges (relationships + CONTAINS cluster-membership + HAS_STEP process-step).
+ *
+ * This MUST stay in lockstep with what {@link storeInDatabases} actually writes
+ * (and with the vector write count). If they drift, the persist progress bar
+ * stops short of / overshoots 100% and metrics desync. The drift-guard test in
+ * pipeline.test.ts asserts `sum(onRows) === countPersistRows(...)`, so any change
+ * to write shape that is not mirrored here fails loudly. Exported for that test.
+ */
+export function countPersistRows(
+  vectorEntries: number,
+  symbols: readonly Symbol[],
+  relationships: readonly Relationship[],
+  clusters: readonly Cluster[],
+  processes: readonly Process[],
+  extNodes: ReadonlyMap<string, ExternalDependencyNode>,
+): number {
+  const nodeRows = symbols.length + clusters.length + processes.length + extNodes.size;
+  const clusterEdges = clusters.reduce((total, cluster) => total + cluster.symbols.length, 0);
+  const processEdges = processes.reduce((total, process) => total + process.steps.length, 0);
+  return vectorEntries + nodeRows + relationships.length + clusterEdges + processEdges;
+}
+
+/**
  * Store pipeline results through GraphAdapter.
  *
  * Writes are grouped by node label (Symbol/Cluster/Process/ExternalDependency)
@@ -265,10 +341,31 @@ async function storeInDatabases(
   extNodes: Map<string, ExternalDependencyNode>,
   graphAdapter: GraphAdapter,
   metrics: ReturnType<typeof createMetricsCollector>,
+  onRows?: (count: number) => void,
 ): Promise<void> {
   // NOTE: Do NOT prepend prefix here — the GraphAdapter handles prefixing internally.
-  const countNodes = (n: number) => metrics.incr("graphNodeWrites", n);
-  const countEdges = (n: number) => metrics.incr("graphEdgeWrites", n);
+  const countNodes = (n: number): void => {
+    metrics.incr("graphNodeWrites", n);
+    onRows?.(n);
+  };
+  const countEdges = (n: number): void => {
+    metrics.incr("graphEdgeWrites", n);
+    onRows?.(n);
+  };
+
+  // Batch-level events (Phase B). Split/oversized are entity-agnostic; the batch
+  // counter is entity-specific (node vs relationship). These count CALLS/events,
+  // never rows — onRows above stays row-accurate.
+  const nodeEvents = {
+    onBatch: (): void => metrics.incr("nodeBatchCount"),
+    onSplit: (): void => metrics.incr("adaptiveSplitCount"),
+    onOversized: (): void => metrics.incr("oversizedRowCount"),
+  };
+  const relationshipEvents = {
+    onBatch: (): void => metrics.incr("relationshipBatchCount"),
+    onSplit: (): void => metrics.incr("adaptiveSplitCount"),
+    onOversized: (): void => metrics.incr("oversizedRowCount"),
+  };
 
   // ── Node groups (one label each) ──────────────────────────────────────────
   await writeNodeGroup(
@@ -286,6 +383,7 @@ async function storeInDatabases(
       documentation: s.documentation ?? "",
     })),
     countNodes,
+    nodeEvents,
   );
 
   await writeNodeGroup(
@@ -299,6 +397,7 @@ async function storeInDatabases(
       symbolCount: String(c.symbols.length),
     })),
     countNodes,
+    nodeEvents,
   );
 
   await writeNodeGroup(
@@ -311,6 +410,7 @@ async function storeInDatabases(
       stepCount: String(p.steps.length),
     })),
     countNodes,
+    nodeEvents,
   );
 
   await writeNodeGroup(
@@ -323,6 +423,7 @@ async function storeInDatabases(
       ecosystem: extNode.ecosystem,
     })),
     countNodes,
+    nodeEvents,
   );
 
   // ── Relationship groups (one type each) ─────────────────────────────────────
@@ -337,7 +438,7 @@ async function storeInDatabases(
     edgesByType.set(type, rows);
   }
   for (const [type, rows] of edgesByType) {
-    await writeRelationshipGroup(graphAdapter, type, rows, countEdges);
+    await writeRelationshipGroup(graphAdapter, type, rows, countEdges, relationshipEvents);
   }
 
   // Cluster membership edges (cluster → symbol).
@@ -346,6 +447,7 @@ async function storeInDatabases(
     "CONTAINS",
     clusters.flatMap((c) => c.symbols.map((symbolId) => ({ fromId: c.id, toId: symbolId, properties: {} }))),
     countEdges,
+    relationshipEvents,
   );
 
   // Process step edges (process → symbol), with step_order metadata.
@@ -360,5 +462,6 @@ async function storeInDatabases(
       })),
     ),
     countEdges,
+    relationshipEvents,
   );
 }

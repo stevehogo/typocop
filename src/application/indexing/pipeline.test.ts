@@ -10,7 +10,7 @@
  * - VectorAdapter.indexSymbol is called for each embedding (Req 8.4)
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import type { Symbol, Cluster, Process, Relationship, Embedding } from "../../core/domain.js";
+import type { Symbol, Cluster, Process, Relationship, Embedding, ExternalDependencyNode } from "../../core/domain.js";
 import type { DatabaseAdapter, GraphAdapter, VectorAdapter, EmbeddingAdapter } from "../../core/ports/persistence.js";
 
 // ─── Stub data ────────────────────────────────────────────────────────────────
@@ -59,7 +59,7 @@ vi.mock("../../platform/config/index.js", () => ({
 
 // ─── Import under test ───────────────────────────────────────────────────────
 
-import { runIndexingPipeline } from "./pipeline.js";
+import { runIndexingPipeline, countPersistRows } from "./pipeline.js";
 
 // ─── Adapter factories ────────────────────────────────────────────────────────
 
@@ -327,6 +327,21 @@ describe("storeInDatabases — batch fast-path (Phase D / PR7)", () => {
     expect(result.metrics.graphEdgeWrites).toBe(5);
     expect(result.metrics.vectorWrites).toBe(2);
     expect(result.embeddingCount).toBe(2);
+
+    // Phase B batch-level counters: count CALLS, not rows. These small fixtures
+    // fit a single chunk per group, so each non-empty group is one batch call.
+    // Node groups: Symbol, Cluster, Process (ExternalDependency is empty here).
+    expect(result.metrics.nodeBatchCount).toBe(createNodes.mock.calls.length);
+    expect(result.metrics.nodeBatchCount).toBe(3);
+    // Relationship groups: CALLS, CONTAINS, HAS_STEP.
+    expect(result.metrics.relationshipBatchCount).toBe(createRelationships.mock.calls.length);
+    expect(result.metrics.relationshipBatchCount).toBe(3);
+    // One vector batch call.
+    expect(result.metrics.vectorBatchCount).toBe(indexSymbols.mock.calls.length);
+    expect(result.metrics.vectorBatchCount).toBe(1);
+    // No splits or oversized rows on this happy path.
+    expect(result.metrics.adaptiveSplitCount).toBe(0);
+    expect(result.metrics.oversizedRowCount).toBe(0);
   });
 });
 
@@ -516,6 +531,169 @@ describe("runIndexingPipeline — Phase 2 progress (B6)", () => {
         typeof c === "string" && c.includes("Phase 2: parsing"),
       );
       expect(progressWrites).toHaveLength(0);
+    } finally {
+      stderrSpy.mockRestore();
+      Object.defineProperty(process.stderr, "isTTY", { value: originalIsTTY, configurable: true });
+    }
+  });
+});
+
+describe("runIndexingPipeline — LadybugDB persistence progress", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    setupDefaultMocks();
+  });
+
+  it("reports persisted vector and graph rows through the progress renderer", async () => {
+    const { adapter } = makeMockAdapter(true);
+    const originalIsTTY = process.stderr.isTTY;
+    Object.defineProperty(process.stderr, "isTTY", { value: false, configurable: true });
+    const stderrSpy = vi.spyOn(process.stderr, "write").mockReturnValue(true);
+
+    mockBuildSearchIndex.mockResolvedValue({
+      keywords: new Map(),
+      symbolCount: 1,
+      embeddings: [
+        { symbolId: "stub", embedding: STUB_EMBEDDING, metadata: {} },
+      ],
+      embeddingStats: { attempts: 1, successes: 1, failures: 0 },
+    });
+
+    try {
+      await runIndexingPipeline({ sourcePath: ".", language: "typescript", verbose: true, adapter });
+
+      const progressWrites = stderrSpy.mock.calls
+        .map(([chunk]) => String(chunk))
+        .filter((chunk) => chunk.includes("Indexing into LadybugDB"));
+
+      expect(progressWrites.length).toBeGreaterThan(0);
+      expect(progressWrites.some((chunk) => chunk.includes("1/2"))).toBe(true);
+      expect(progressWrites.some((chunk) => chunk.includes("2/2") && chunk.includes("(100%)"))).toBe(true);
+      for (const chunk of progressWrites) {
+        expect(chunk).not.toContain("\x1b");
+        expect(chunk).not.toContain("\r");
+      }
+    } finally {
+      stderrSpy.mockRestore();
+      Object.defineProperty(process.stderr, "isTTY", { value: originalIsTTY, configurable: true });
+    }
+  });
+});
+
+// ─── Persist progress drift guard (Phase A) ─────────────────────────────────────
+//
+// The persist progress total is computed by countPersistRows(...), which
+// independently re-derives node/edge/vector counts. If storeInDatabases ever
+// changes WHAT it writes without updating countPersistRows in lockstep, the bar
+// stops short of / overshoots 100% and metrics desync. This guard makes that
+// impossible to do silently: it sums every row reported via the persist onRows
+// path and asserts the sum equals countPersistRows for a representative fixture,
+// and that the progress renderer's final reported value reaches the total (100%).
+
+describe("runIndexingPipeline — persist progress drift guard (Phase A)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    setupDefaultMocks();
+  });
+
+  it("sum(persist onRows) === countPersistRows(...) and the bar reaches 100%", async () => {
+    const { adapter } = makeMockAdapter(true);
+    const originalIsTTY = process.stderr.isTTY;
+    Object.defineProperty(process.stderr, "isTTY", { value: false, configurable: true });
+    const stderrSpy = vi.spyOn(process.stderr, "write").mockReturnValue(true);
+
+    // Representative fixture: symbols + clusters (with members → CONTAINS edges)
+    // + processes (with steps → HAS_STEP edges) + external deps + relationships
+    // (a normal CALLS edge AND a DEPENDS_ON edge). This exercises every branch
+    // that storeInDatabases and countPersistRows must agree on.
+    const symbols: Symbol[] = [
+      STUB_SYMBOL,
+      { ...STUB_SYMBOL, id: "stub2", name: "stub2" },
+      { ...STUB_SYMBOL, id: "stub3", name: "stub3" },
+    ];
+    const clusters: Cluster[] = [
+      { id: "cluster-1", name: "Auth", symbols: ["stub", "stub2"], confidence: 0.9, category: "authentication" },
+      { id: "cluster-2", name: "Data", symbols: ["stub2", "stub3", "stub"], confidence: 0.8, category: "dataAccess" },
+    ];
+    const processes: Process[] = [
+      {
+        id: "proc-1", name: "Login", entryPoint: "stub",
+        steps: [
+          { order: 0, symbolId: "stub", description: "entry" },
+          { order: 1, symbolId: "stub2", description: "next" },
+        ],
+        dataFlow: [],
+      },
+      {
+        id: "proc-2", name: "Sync", entryPoint: "stub3",
+        steps: [
+          { order: 0, symbolId: "stub3", description: "start" },
+          { order: 1, symbolId: "stub", description: "mid" },
+          { order: 2, symbolId: "stub2", description: "end" },
+        ],
+        dataFlow: [],
+      },
+    ];
+    const relationships: Relationship[] = [
+      { id: "rel-1", source: "stub", target: "stub2", relType: "calls", metadata: {} },
+      { id: "rel-2", source: "stub2", target: "stub3", relType: "calls", metadata: {} },
+      {
+        id: "dep-1", source: "stub", target: "ext:lodash", relType: "dependsOn",
+        metadata: { packageName: "lodash", ecosystem: "npm" },
+      },
+    ];
+    const extNodes = new Map<string, ExternalDependencyNode>([
+      ["ext:lodash", { id: "ext:lodash", name: "lodash", aliases: ["lodash"], ecosystem: "npm" }],
+    ]);
+    const embeddings = symbols.map((s) => ({ symbolId: s.id, embedding: STUB_EMBEDDING, metadata: {} }));
+
+    mockExtractAllSymbols.mockResolvedValue({ symbols, hints: [], skippedFiles: 0 });
+    mockResolveReferences.mockReturnValue({ relationships, extNodes });
+    mockClusterSymbols.mockResolvedValue(clusters);
+    mockTraceProcesses.mockReturnValue(processes);
+    mockBuildSearchIndex.mockResolvedValue({
+      keywords: new Map(),
+      symbolCount: symbols.length,
+      embeddings,
+      embeddingStats: { attempts: embeddings.length, successes: embeddings.length, failures: 0 },
+    });
+
+    try {
+      const result = await runIndexingPipeline({
+        sourcePath: ".", language: "typescript", verbose: true, adapter,
+      });
+
+      const expectedTotal = countPersistRows(
+        embeddings.length, symbols, relationships, clusters, processes, extNodes,
+      );
+
+      // The sum of every row reported via the persist onRows path (vectors +
+      // nodes + edges) equals the metrics totals, which the pipeline drives off
+      // those same callbacks. If storeInDatabases and countPersistRows drift,
+      // this assertion fails.
+      const summedFromOnRows =
+        result.metrics.vectorWrites +
+        result.metrics.graphNodeWrites +
+        result.metrics.graphEdgeWrites;
+      expect(summedFromOnRows).toBe(expectedTotal);
+
+      // Sanity: the fixture truly exercises CONTAINS (2 + 3 = 5) and HAS_STEP
+      // (2 + 3 = 5) edges plus the 3 relationship edges → 13 edges total.
+      expect(result.metrics.graphEdgeWrites).toBe(13);
+      expect(result.metrics.graphNodeWrites).toBe(
+        symbols.length + clusters.length + processes.length + extNodes.size,
+      );
+      expect(result.metrics.vectorWrites).toBe(embeddings.length);
+
+      // The progress renderer's final reported value reaches the total (100%).
+      const progressWrites = stderrSpy.mock.calls
+        .map(([chunk]) => String(chunk))
+        .filter((chunk) => chunk.includes("Indexing into LadybugDB"));
+      expect(progressWrites.length).toBeGreaterThan(0);
+      const reached100 = progressWrites.some(
+        (chunk) => chunk.includes(`${expectedTotal}/${expectedTotal}`) && chunk.includes("(100%)"),
+      );
+      expect(reached100).toBe(true);
     } finally {
       stderrSpy.mockRestore();
       Object.defineProperty(process.stderr, "isTTY", { value: originalIsTTY, configurable: true });

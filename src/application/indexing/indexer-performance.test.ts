@@ -146,21 +146,30 @@ describe("indexer performance harness — metrics collector", () => {
     expect(summary).toContain("parsing");
   });
 
-  it("includes LOC/s only when totalLines is known", () => {
-    const known = createMetricsCollector();
-    known.set("totalLines", 1000);
-    // Drive totalMs > 0 by timing something.
-    known.startPhase("structure");
-    known.endPhase("structure");
-    const withLines = formatMetrics(known.finalize());
+  it("defaults batch/split/oversized counters to zero and renders the summary line", () => {
+    const m = createMetricsCollector();
+    const snapshot = m.finalize();
+    expect(snapshot.nodeBatchCount).toBe(0);
+    expect(snapshot.relationshipBatchCount).toBe(0);
+    expect(snapshot.vectorBatchCount).toBe(0);
+    expect(snapshot.adaptiveSplitCount).toBe(0);
+    expect(snapshot.oversizedRowCount).toBe(0);
 
-    const unknown = createMetricsCollector();
-    unknown.startPhase("structure");
-    unknown.endPhase("structure");
-    const withoutLines = formatMetrics(unknown.finalize());
+    const summary = formatMetrics(snapshot);
+    expect(summary).toContain("batches:");
+    expect(summary).toContain("0 node, 0 rel, 0 vector (0 splits, 0 oversized)");
+  });
 
-    expect(withLines).toContain("LOC/s");
-    expect(withoutLines).not.toContain("LOC/s");
+  it("renders accumulated batch/split/oversized counts in the summary line", () => {
+    const m = createMetricsCollector();
+    m.incr("nodeBatchCount", 3);
+    m.incr("relationshipBatchCount", 2);
+    m.incr("vectorBatchCount");
+    m.incr("adaptiveSplitCount", 4);
+    m.incr("oversizedRowCount", 1);
+
+    const summary = formatMetrics(m.finalize());
+    expect(summary).toContain("3 node, 2 rel, 1 vector (4 splits, 1 oversized)");
   });
 });
 

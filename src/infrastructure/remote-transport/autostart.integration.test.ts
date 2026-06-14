@@ -35,6 +35,7 @@ vi.mock("@grpc/grpc-js", () => ({
 
 import type { LadybugClientConfig } from "../../platform/config/types.js";
 import { DefaultAutostartManager } from "./autostart.js";
+import { DEFAULT_GRPC_MAX_MESSAGE_BYTES } from "../../platform/utils/limits.js";
 import { acquireCrossProcessLock } from "./autostart-runtime.js";
 
 function sleep(ms: number): Promise<void> {
@@ -60,6 +61,7 @@ describe("AutostartManager — integration tests", () => {
       dbPath: join(root, "db.ladybug"),
       serverUrl: "grpc://127.0.0.1:7617",
       authToken: "",
+      grpcMaxMessageBytes: DEFAULT_GRPC_MAX_MESSAGE_BYTES,
       autostart: true,
       startupTimeoutMs: 2_000,
       lockPath: join(root, "ladybug-server.lock"),

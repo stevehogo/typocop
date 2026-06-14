@@ -18,6 +18,13 @@ import {
 
 const HEALTH_TIMEOUT_MS = 2_000;
 const POLL_INTERVAL_MS = 200;
+/**
+ * Upper bound for awaiting a server that appears to be mid-restart (a fresh,
+ * healthy-looking discovery record or a live owning pid). Keeps a brief outage
+ * from triggering an immediate re-spawn that would race other clients on the
+ * lock (resilience Phase E).
+ */
+const RESTART_AWAIT_DEADLINE_MS = 3_000;
 
 interface AutostartDependencies {
   readonly checkHealth?: (
@@ -32,6 +39,12 @@ interface AutostartDependencies {
   readonly now?: () => number;
   readonly listDiscoveryFiles?: () => Promise<readonly string[]>;
   readonly killPid?: (pid: number) => void;
+  /**
+   * Liveness probe for a discovered pid. Default uses `process.kill(pid, 0)`,
+   * which is a no-op signal that throws `ESRCH` when the pid is gone. Injectable
+   * so tests never poke real pids (resilience Phase E, failure mode #8).
+   */
+  readonly isPidAlive?: (pid: number) => boolean;
 }
 
 interface EnsureServerAndConnectOptions {
@@ -55,6 +68,7 @@ export class DefaultAutostartManager implements AutostartManager {
   private readonly nowFn: () => number;
   private readonly listDiscoveryFilesFn: () => Promise<readonly string[]>;
   private readonly killPidFn: (pid: number) => void;
+  private readonly isPidAliveFn: (pid: number) => boolean;
 
   constructor(deps: AutostartDependencies = {}) {
     this.checkHealthFn = deps.checkHealth || checkServerHealth;
@@ -66,6 +80,7 @@ export class DefaultAutostartManager implements AutostartManager {
     this.nowFn = deps.now || Date.now;
     this.listDiscoveryFilesFn = deps.listDiscoveryFiles || listDefaultDiscoveryFiles;
     this.killPidFn = deps.killPid || ((pid) => process.kill(pid, "SIGTERM"));
+    this.isPidAliveFn = deps.isPidAlive || defaultIsPidAlive;
   }
 
   async ensureServer(config: LadybugClientConfig): Promise<void> {
@@ -90,7 +105,15 @@ export class DefaultAutostartManager implements AutostartManager {
         }
 
         const pid = typeof latest.pid === "number" ? latest.pid : -1;
-        if (pid > 0) {
+        const shouldKill = pid > 0 && (await this.isOurLiveServer(config, latest, pid));
+        if (!shouldKill) {
+          // The discovery record points at a dead or recycled/foreign pid: do
+          // NOT signal it. Treat the advertisement as stale, skip the kill, and
+          // fall through to the normal spawn path (resilience Phase E, #8).
+          console.error(
+            `[typocop] Skipping termination of stale/foreign discovery pid ${pid} for ${latest.url}; proceeding to normal startup`,
+          );
+        } else {
           try {
             this.killPidFn(pid);
           } catch {
@@ -120,6 +143,15 @@ export class DefaultAutostartManager implements AutostartManager {
     const release = await this.acquireLockFn(config.lockPath, config.startupTimeoutMs);
     try {
       if (await this.checkHealthFn(config, HEALTH_TIMEOUT_MS)) {
+        return;
+      }
+
+      // Health is briefly down. Before re-spawning (which would race other
+      // clients on the lock), check whether a server appears to be mid-restart:
+      // a live owning pid in the latest discovery record. If so, await it with
+      // backoff up to a bounded deadline rather than immediately spawning
+      // (resilience Phase E — avoid spawn storms).
+      if (await this.awaitRestartingServer(config)) {
         return;
       }
 
@@ -156,6 +188,92 @@ export class DefaultAutostartManager implements AutostartManager {
 
   async readDiscovery(discoveryPath: string): Promise<DiscoveryFile | null> {
     return this.readDiscoveryFn(discoveryPath);
+  }
+
+  /**
+   * Identity + liveness gate before terminating a discovered wrong-prefix
+   * server. The pid must be alive (so we never SIGTERM a recycled/foreign pid)
+   * AND a health probe on the *advertised* url must respond (confirming a real
+   * typocop server is listening there, consistent with the discovery record).
+   * Only then is the kill considered safe (resilience Phase E, failure mode #8).
+   */
+  private async isOurLiveServer(
+    config: LadybugClientConfig,
+    discovery: DiscoveryFile,
+    pid: number,
+  ): Promise<boolean> {
+    let alive: boolean;
+    try {
+      alive = this.isPidAliveFn(pid);
+    } catch {
+      alive = false;
+    }
+    if (!alive) {
+      return false;
+    }
+
+    // Probe health on the server's own advertised url to confirm identity:
+    // a live process plus a responding gRPC health endpoint at the discovered
+    // address is our server, not a recycled pid that merely reuses the number.
+    const probeConfig: LadybugClientConfig = { ...config, serverUrl: discovery.url };
+    try {
+      return await this.checkHealthFn(probeConfig, HEALTH_TIMEOUT_MS);
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * When health is briefly down, decide whether a server is coming up (so we
+   * should wait rather than spawn). If the latest discovery record names a live
+   * owning pid, poll health with backoff up to `RESTART_AWAIT_DEADLINE_MS`.
+   * Returns true if the server became healthy within the deadline (caller
+   * should NOT spawn); false to proceed to the normal spawn path.
+   */
+  private async awaitRestartingServer(config: LadybugClientConfig): Promise<boolean> {
+    const discovery = await this.findDiscoveryForServerUrl(config.serverUrl);
+    // Only await a server that is genuinely ours coming back up: a wrong-prefix
+    // record is a foreign/old server, not our restart. Spawn normally in that
+    // case (e.g. right after terminating a mismatched server).
+    if (!discovery || discovery.prefix !== config.prefix) {
+      return false;
+    }
+    const pid = typeof discovery.pid === "number" ? discovery.pid : -1;
+    let ownerAlive = false;
+    if (pid > 0) {
+      try {
+        ownerAlive = this.isPidAliveFn(pid);
+      } catch {
+        ownerAlive = false;
+      }
+    }
+    if (!ownerAlive) {
+      // No live owning process suggests a restart in progress; spawn normally.
+      return false;
+    }
+
+    console.error(
+      `[typocop] Live server pid ${pid} appears to be restarting; awaiting health up to ${RESTART_AWAIT_DEADLINE_MS}ms before spawning`,
+    );
+
+    const deadline = this.nowFn() + RESTART_AWAIT_DEADLINE_MS;
+    let backoff = POLL_INTERVAL_MS;
+    while (this.nowFn() < deadline) {
+      await this.sleepFn(backoff);
+      if (await this.checkHealthFn(config, 1_000)) {
+        return true;
+      }
+      // If the owning process died while we waited, stop awaiting and spawn.
+      try {
+        if (!this.isPidAliveFn(pid)) {
+          return false;
+        }
+      } catch {
+        return false;
+      }
+      backoff = Math.min(backoff * 2, HEALTH_TIMEOUT_MS);
+    }
+    return false;
   }
 
   private async findDiscoveryForServerUrl(serverUrl: string): Promise<DiscoveryFile | null> {
@@ -201,6 +319,25 @@ async function listDefaultDiscoveryFiles(): Promise<readonly string[]> {
   return entries
     .filter((entry) => entry.isDirectory() && entry.name !== "locks")
     .map((entry) => join(root, entry.name, "ladybug-server.json"));
+}
+
+/**
+ * Default pid-liveness probe. `process.kill(pid, 0)` sends no signal but
+ * performs the permission/existence check: it returns normally when the pid
+ * exists and throws `ESRCH` when it does not. `EPERM` means the process exists
+ * but is owned by another user — still "alive" for our purposes.
+ */
+function defaultIsPidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "EPERM") {
+      return true;
+    }
+    return false;
+  }
 }
 
 function parseGrpcUrl(value: string): { readonly port: string } | null {

@@ -10,6 +10,7 @@
 import type { ClusterCategory, Embedding, Symbol } from "../../../core/domain.js";
 import type { EmbeddingAdapter } from "../../../core/ports/persistence.js";
 import { verifyEmbeddingText } from "../../../platform/security/privacy.js";
+import { isEmbeddingBatchEnabled } from "../../../platform/utils/limits.js";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -127,16 +128,45 @@ export class SemanticClusterClassifier {
   private categoryEmbeddings: Map<ClusterCategory, number[]> | null = null;
   private embedder: EmbeddingAdapter | null = null;
 
-  /** Generate and cache category reference embeddings. (Req 10.5) */
+  /**
+   * Generate and cache category reference embeddings. (Req 10.5)
+   *
+   * When the adapter exposes the OPTIONAL batch fast-path (`embedTexts`), all 5
+   * category references are embedded in ONE call (Phase 1). On batch failure
+   * (the all-or-nothing call throws), fall back to per-item `embedText`. Adapters
+   * without `embedTexts` use the per-item path unchanged. Per-cluster
+   * `classify()` batching is Phase 2 (out of scope here).
+   */
   async initialize(embedder: EmbeddingAdapter): Promise<void> {
     this.embedder = embedder;
     this.categoryEmbeddings = new Map();
 
-    for (const category of CLASSIFIABLE_CATEGORIES) {
-      const text = CATEGORY_REFERENCE_TEXTS[category as Exclude<ClusterCategory, "unknown">];
-      const embedding = await embedder.embedText(text);
+    const texts = CLASSIFIABLE_CATEGORIES.map(
+      (category) =>
+        CATEGORY_REFERENCE_TEXTS[category as Exclude<ClusterCategory, "unknown">],
+    );
+
+    let vectors: (Embedding | null)[] | null = null;
+    if (typeof embedder.embedTexts === "function" && isEmbeddingBatchEnabled()) {
+      try {
+        vectors = await embedder.embedTexts(texts);
+      } catch {
+        // Batch is all-or-nothing — fall back to per-item below.
+        vectors = null;
+      }
+    }
+
+    if (vectors === null) {
+      vectors = [];
+      for (const text of texts) {
+        vectors.push(await embedder.embedText(text));
+      }
+    }
+
+    for (let i = 0; i < CLASSIFIABLE_CATEGORIES.length; i++) {
+      const embedding = vectors[i] ?? null;
       if (embedding) {
-        this.categoryEmbeddings.set(category, embedding.vector);
+        this.categoryEmbeddings.set(CLASSIFIABLE_CATEGORIES[i], embedding.vector);
       }
     }
   }

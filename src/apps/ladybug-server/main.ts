@@ -11,6 +11,7 @@ const ARG_TO_ENV: Record<string, string> = {
   "--host": "LADYBUG_SERVER_HOST",
   "--port": "LADYBUG_SERVER_PORT",
   "--auth-token": "LADYBUG_SERVER_AUTH_TOKEN",
+  "--grpc-max-message-bytes": "LADYBUG_GRPC_MAX_MESSAGE_BYTES",
   "--max-concurrency": "LADYBUG_SERVER_MAX_CONCURRENCY",
   "--max-queue": "LADYBUG_SERVER_MAX_QUEUE",
   "--idle-ttl-ms": "LADYBUG_SERVER_IDLE_TTL_MS",
@@ -31,10 +32,24 @@ async function main(): Promise<void> {
   }
 
   const server = await startConnectionServer(serverConfig);
-  await server.waitForShutdown();
+  try {
+    await server.waitForShutdown();
+  } catch (error) {
+    // waitForShutdown rejected (shutdown failed): run best-effort cleanup so no
+    // orphaned discovery/lock is left behind before exiting non-zero.
+    await server.shutdown("fatal").catch(() => undefined);
+    throw error;
+  }
 }
 
 main().catch((error) => {
-  logServerEvent("error", "fatal", { error });
+  // Phase F: structured fatal record on the main() rejection path (a startup or
+  // waitForShutdown failure that does NOT surface as an uncaughtException, so it
+  // would otherwise escape the safety net's fatal_exit emission). Diagnostics
+  // (uptime/inFlight/queued) are unavailable here — the server either never
+  // fully started or its scheduler is gone — so only `reason`/`error` are known.
+  logServerEvent("error", "fatal_exit", { reason: "main", error });
+  // Best-effort cleanup runs via the installed process safety net (exit handler
+  // performs the synchronous discovery/lock unlink). Exit non-zero.
   process.exit(1);
 });

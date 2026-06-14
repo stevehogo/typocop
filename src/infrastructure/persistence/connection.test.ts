@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { DatabaseConnectionError } from "./errors.js";
+import { DatabaseConnectionError, DatabaseLockedError } from "./errors.js";
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 
@@ -35,7 +35,10 @@ vi.mock("./file-lock.js", () => ({
 }));
 
 import { Database, Connection } from "@ladybugdb/core";
+import { acquireFileLock } from "./file-lock.js";
 import { createLadybugConnection, resetConnectionCache } from "./connection.js";
+
+const mockAcquireFileLock = vi.mocked(acquireFileLock);
 
 const MockDatabase = vi.mocked(Database);
 const MockConnection = vi.mocked(Connection);
@@ -177,6 +180,25 @@ describe("createLadybugConnection", () => {
       expect(instantSleep).toHaveBeenNthCalledWith(1, 200);
       expect(instantSleep).toHaveBeenNthCalledWith(2, 400);
     });
+  });
+});
+
+describe("lock contention surfaces an actionable error (Phase D)", () => {
+  beforeEach(() => {
+    resetConnectionCache();
+    vi.clearAllMocks();
+  });
+
+  it("propagates DatabaseLockedError from acquireFileLock without wrapping it", async () => {
+    const lockErr = new DatabaseLockedError("/tmp/test.ladybug", 30000, new Error("ELOCKED"), 4242, true);
+    mockAcquireFileLock.mockRejectedValueOnce(lockErr);
+
+    await expect(
+      createLadybugConnection("/tmp/test.ladybug", instantSleep),
+    ).rejects.toBe(lockErr);
+
+    // The DB retry loop must never run when the lock could not be acquired.
+    expect(MockDatabase).not.toHaveBeenCalled();
   });
 });
 

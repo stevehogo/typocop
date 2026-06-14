@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { ConfigurationManager } from "./configuration-manager.js";
 import { PrefixValidationError, OllamaConfigError, EmbeddingConfigError, LadybugConfigError } from "./errors.js";
+import { DEFAULT_GRPC_MAX_MESSAGE_BYTES, GRPC_MAX_MESSAGE_BYTES_ENV } from "../utils/limits.js";
 
 // Mock node:fs/promises to avoid real filesystem operations
 vi.mock("node:fs/promises", () => ({
@@ -242,6 +243,7 @@ describe("ConfigurationManager", () => {
       delete process.env["LADYBUG_SERVER_HOST"];
       delete process.env["LADYBUG_SERVER_PORT"];
       delete process.env["LADYBUG_SERVER_AUTH_TOKEN"];
+      delete process.env[GRPC_MAX_MESSAGE_BYTES_ENV];
       delete process.env["LADYBUG_SERVER_MAX_CONCURRENCY"];
       delete process.env["LADYBUG_SERVER_MAX_QUEUE"];
       delete process.env["LADYBUG_SERVER_AUTOSTART"];
@@ -249,6 +251,8 @@ describe("ConfigurationManager", () => {
       delete process.env["LADYBUG_SERVER_LOCK_PATH"];
       delete process.env["LADYBUG_SERVER_DISCOVERY_PATH"];
       delete process.env["LADYBUG_SERVER_IDLE_TTL_MS"];
+      delete process.env["LADYBUG_SERVER_SHUTDOWN_GRACE_MS"];
+      delete process.env["LADYBUG_SERVER_SHUTDOWN_HARD_MS"];
 
       await manager.initialize();
       const config = manager.getConfiguration().ladybugdb;
@@ -258,11 +262,14 @@ describe("ConfigurationManager", () => {
       expect(config.serverHost).toBe("127.0.0.1");
       expect(config.serverPort).toBe(7617);
       expect(config.serverAuthToken).toBe("");
+      expect(config.grpcMaxMessageBytes).toBe(DEFAULT_GRPC_MAX_MESSAGE_BYTES);
       expect(config.serverMaxConcurrency).toBe(4);
       expect(config.serverMaxQueue).toBe(256);
       expect(config.serverAutostart).toBe(false);
       expect(config.serverStartupTimeoutMs).toBe(10_000);
       expect(config.serverIdleTtlMs).toBe(0);
+      expect(config.serverShutdownGraceMs).toBe(5_000);
+      expect(config.serverShutdownHardMs).toBe(10_000);
       expect(config.serverLockPath).toContain("/mock-home/.typocop/locks/");
       expect(config.serverLockPath).toContain("tpc_-ladybug-server.lock");
       expect(config.serverDiscoveryPath).toContain("/mock-home/.typocop/tpc_/");
@@ -288,8 +295,31 @@ describe("ConfigurationManager", () => {
       await expect(manager.initialize()).rejects.toThrow(LadybugConfigError);
     });
 
+    it("rejects grpcMaxMessageBytes below one", async () => {
+      process.env[GRPC_MAX_MESSAGE_BYTES_ENV] = "0";
+
+      await expect(manager.initialize()).rejects.toThrow(LadybugConfigError);
+    });
+
     it("rejects maxQueue below one", async () => {
       process.env["LADYBUG_SERVER_MAX_QUEUE"] = "0";
+
+      await expect(manager.initialize()).rejects.toThrow(LadybugConfigError);
+    });
+
+    it("parses shutdown grace/hard timeouts from env, mirroring grpcMaxMessageBytes", async () => {
+      process.env["LADYBUG_SERVER_SHUTDOWN_GRACE_MS"] = "1234";
+      process.env["LADYBUG_SERVER_SHUTDOWN_HARD_MS"] = "5678";
+
+      await manager.initialize();
+      const config = manager.getConfiguration().ladybugdb;
+
+      expect(config.serverShutdownGraceMs).toBe(1234);
+      expect(config.serverShutdownHardMs).toBe(5678);
+    });
+
+    it("rejects shutdown grace below one", async () => {
+      process.env["LADYBUG_SERVER_SHUTDOWN_GRACE_MS"] = "0";
 
       await expect(manager.initialize()).rejects.toThrow(LadybugConfigError);
     });
@@ -307,12 +337,12 @@ describe("ConfigurationManager", () => {
       delete process.env["OLLAMA_ENABLED"];
     });
 
-    it("defaults to provider huggingface, model mxbai-embed-large-v1, dtype fp32, dimensions 1024, pooling cls", async () => {
+    it("defaults to provider huggingface, model mxbai-embed-large-v1, dtype q8, dimensions 1024, pooling cls", async () => {
       await manager.initialize();
       const { embedding } = manager.getConfiguration();
       expect(embedding.provider).toBe("huggingface");
       expect(embedding.huggingface.model).toBe("mixedbread-ai/mxbai-embed-large-v1");
-      expect(embedding.huggingface.dtype).toBe("fp32");
+      expect(embedding.huggingface.dtype).toBe("q8");
       expect(embedding.huggingface.dimensions).toBe(1024);
       expect(embedding.huggingface.pooling).toBe("cls");
     });

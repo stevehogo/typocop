@@ -6,6 +6,14 @@ import { join, dirname } from "node:path";
 
 import { PrefixValidator } from "./prefix-validator.js";
 import { PrefixValidationError, OllamaConfigError, EmbeddingConfigError, LadybugConfigError } from "./errors.js";
+import {
+  DEFAULT_GRPC_MAX_MESSAGE_BYTES,
+  DEFAULT_SHUTDOWN_GRACE_MS,
+  DEFAULT_SHUTDOWN_HARD_MS,
+  GRPC_MAX_MESSAGE_BYTES_ENV,
+  SHUTDOWN_GRACE_MS_ENV,
+  SHUTDOWN_HARD_MS_ENV,
+} from "../utils/limits.js";
 import type { ValidationResult } from "./prefix-validator.js";
 import type {
   OllamaConfig,
@@ -45,11 +53,14 @@ const LADYBUG_SERVER_DEFAULTS = {
   serverHost: "127.0.0.1",
   serverPort: 7617,
   serverAuthToken: "",
+  grpcMaxMessageBytes: DEFAULT_GRPC_MAX_MESSAGE_BYTES,
   serverMaxConcurrency: 4,
   serverMaxQueue: 256,
   serverAutostart: false,
   serverStartupTimeoutMs: 10_000,
   serverIdleTtlMs: 0,
+  serverShutdownGraceMs: DEFAULT_SHUTDOWN_GRACE_MS,
+  serverShutdownHardMs: DEFAULT_SHUTDOWN_HARD_MS,
 };
 
 const VALID_PROVIDERS: readonly EmbeddingProvider[] = ["huggingface", "ollama", "none"] as const;
@@ -149,7 +160,11 @@ export class ConfigurationManager implements IConfigurationManager {
 
     const huggingface: HuggingFaceConfig = {
       model: process.env["HF_MODEL"] || "mixedbread-ai/mxbai-embed-large-v1",
-      dtype: this.validateDtype(process.env["HF_DTYPE"] || "fp32"),
+      // Default q8: ~2x faster index + query embedding on CPU vs fp32, with ~0.99
+      // cosine alignment to fp32 (measured). Override with HF_DTYPE=fp32 for
+      // maximum precision. NOTE: index-time and query-time dtype must match — a
+      // DB indexed under one dtype should be reindexed if the dtype changes.
+      dtype: this.validateDtype(process.env["HF_DTYPE"] || "q8"),
       dimensions: this.parseEmbeddingDimensions(process.env["HF_DIMENSIONS"] || "1024"),
       pooling: this.validatePooling(process.env["HF_POOLING"] || "cls"),
     };
@@ -249,6 +264,11 @@ export class ConfigurationManager implements IConfigurationManager {
       process.env["LADYBUG_SERVER_PORT"] || String(LADYBUG_SERVER_DEFAULTS.serverPort),
     );
     const serverAuthToken = process.env["LADYBUG_SERVER_AUTH_TOKEN"] || LADYBUG_SERVER_DEFAULTS.serverAuthToken;
+    const grpcMaxMessageBytes = this.parsePositiveInt(
+      GRPC_MAX_MESSAGE_BYTES_ENV,
+      process.env[GRPC_MAX_MESSAGE_BYTES_ENV] || String(LADYBUG_SERVER_DEFAULTS.grpcMaxMessageBytes),
+      1,
+    );
     const serverMaxConcurrency = this.parsePositiveInt(
       "LADYBUG_SERVER_MAX_CONCURRENCY",
       process.env["LADYBUG_SERVER_MAX_CONCURRENCY"] || String(LADYBUG_SERVER_DEFAULTS.serverMaxConcurrency),
@@ -272,6 +292,16 @@ export class ConfigurationManager implements IConfigurationManager {
       "LADYBUG_SERVER_IDLE_TTL_MS",
       process.env["LADYBUG_SERVER_IDLE_TTL_MS"] || String(LADYBUG_SERVER_DEFAULTS.serverIdleTtlMs),
       0,
+    );
+    const serverShutdownGraceMs = this.parsePositiveInt(
+      SHUTDOWN_GRACE_MS_ENV,
+      process.env[SHUTDOWN_GRACE_MS_ENV] || String(LADYBUG_SERVER_DEFAULTS.serverShutdownGraceMs),
+      1,
+    );
+    const serverShutdownHardMs = this.parsePositiveInt(
+      SHUTDOWN_HARD_MS_ENV,
+      process.env[SHUTDOWN_HARD_MS_ENV] || String(LADYBUG_SERVER_DEFAULTS.serverShutdownHardMs),
+      1,
     );
     const serverLockPath = this.resolveConfiguredPath(
       process.env["LADYBUG_SERVER_LOCK_PATH"],
@@ -297,6 +327,7 @@ export class ConfigurationManager implements IConfigurationManager {
       serverHost,
       serverPort,
       serverAuthToken,
+      grpcMaxMessageBytes,
       serverMaxConcurrency,
       serverMaxQueue,
       serverAutostart,
@@ -304,6 +335,8 @@ export class ConfigurationManager implements IConfigurationManager {
       serverLockPath,
       serverDiscoveryPath,
       serverIdleTtlMs,
+      serverShutdownGraceMs,
+      serverShutdownHardMs,
     };
   }
 

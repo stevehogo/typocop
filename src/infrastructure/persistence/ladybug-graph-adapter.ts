@@ -308,14 +308,25 @@ export class LadybugGraphAdapter implements GraphAdapter {
 
   async deleteNodesByLabel(label: string): Promise<number> {
     const prefixedLabel = this.prefixLabel(label);
+    // Count before deleting so the reported clearing stats are accurate (mirrors
+    // the vector adapter's deleteAll). The DETACH DELETE itself always ran; only
+    // the returned count was previously hardcoded to 0.
+    const countRows = await this.execWithSchemaRetry(
+      `MATCH (n:${prefixedLabel}) RETURN count(n) as count`,
+    );
+    const count = Number(countRows[0]?.count ?? 0);
     await this.execWithSchemaRetry(`MATCH (n:${prefixedLabel}) DETACH DELETE n`);
-    return 0;
+    return count;
   }
 
   async deleteRelationshipsByType(type: string): Promise<number> {
     const prefixedType = this.prefixType(type);
+    const countRows = await this.execWithSchemaRetry(
+      `MATCH ()-[r:${prefixedType}]->() RETURN count(r) as count`,
+    );
+    const count = Number(countRows[0]?.count ?? 0);
     await this.execWithSchemaRetry(`MATCH ()-[r:${prefixedType}]->() DELETE r`);
-    return 0;
+    return count;
   }
 
   /**

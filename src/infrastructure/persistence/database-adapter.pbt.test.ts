@@ -54,6 +54,7 @@ vi.mock("../remote-transport/autostart.js", () => ({
 
 import { createDatabaseAdapter, LadybugDatabaseAdapter } from "./database-adapter.js";
 import type { EmbeddingAdapter } from "../../core/ports/persistence.js";
+import { DEFAULT_GRPC_MAX_MESSAGE_BYTES } from "../../platform/utils/limits.js";
 
 // Embedding is injected since §14; this stub stands in for any provider.
 const stubEmbedding = {
@@ -87,6 +88,7 @@ function makeConfig(runtimeMode: "server" | "client") {
       serverHost: "127.0.0.1",
       serverPort: 7617,
       serverAuthToken: "secret-token",
+      grpcMaxMessageBytes: DEFAULT_GRPC_MAX_MESSAGE_BYTES,
       serverMaxConcurrency: 4,
       serverMaxQueue: 256,
       serverAutostart: true,

@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { DEFAULT_GRPC_MAX_MESSAGE_BYTES } from "../../platform/utils/limits.js";
 
 vi.mock("@grpc/proto-loader", () => ({
   loadSync: vi.fn(() => ({
@@ -52,6 +53,10 @@ vi.mock("@grpc/grpc-js", () => {
       servers.delete(this.address);
       callback();
     }
+
+    forceShutdown(): void {
+      servers.delete(this.address);
+    }
   }
 
   return {
@@ -100,6 +105,10 @@ describe("startConnectionServer", () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    process.removeAllListeners("SIGTERM");
+    process.removeAllListeners("SIGINT");
+    process.removeAllListeners("uncaughtException");
+    process.removeAllListeners("unhandledRejection");
   });
 
   it("registers Health.Check and cleans up the discovery file on shutdown", async () => {
@@ -115,10 +124,13 @@ describe("startConnectionServer", () => {
       host: "127.0.0.1",
       port: 7617,
       authToken: "",
+      grpcMaxMessageBytes: DEFAULT_GRPC_MAX_MESSAGE_BYTES,
       maxConcurrency: 2,
       maxQueue: 8,
       idleTtlMs: 0,
       discoveryPath,
+      shutdownGraceMs: 5_000,
+      shutdownHardMs: 10_000,
     });
 
     const grpcModule = await import("@grpc/grpc-js") as unknown as {
@@ -132,17 +144,27 @@ describe("startConnectionServer", () => {
     try {
       expect(boundServer).toBeDefined();
       expect(grpcModule.__getLastServerOptions()).toMatchObject({
-        "grpc.max_receive_message_length": 4 * 1024 * 1024,
-        "grpc.max_send_message_length": 4 * 1024 * 1024,
+        "grpc.max_receive_message_length": DEFAULT_GRPC_MAX_MESSAGE_BYTES,
+        "grpc.max_send_message_length": DEFAULT_GRPC_MAX_MESSAGE_BYTES,
       });
       await expect(access(discoveryPath)).resolves.toBeUndefined();
 
       const healthService = boundServer?.implementations.get("Health");
       expect(healthService?.Check).toBeTypeOf("function");
-      await expect(invokeUnary(healthService!.Check, {})).resolves.toEqual({
-        status: 1,
-        message: "SERVING",
-      });
+      const healthResponse = (await invokeUnary(healthService!.Check, {})) as {
+        status: number;
+        message: string;
+        pid: number;
+        startedAt: string;
+        uptimeMs: number;
+      };
+      // Existing fields unchanged ...
+      expect(healthResponse).toMatchObject({ status: 1, message: "SERVING" });
+      // ... plus Phase F identity/liveness additions.
+      expect(healthResponse.pid).toBe(process.pid);
+      expect(typeof healthResponse.startedAt).toBe("string");
+      expect(Number.isNaN(Date.parse(healthResponse.startedAt))).toBe(false);
+      expect(healthResponse.uptimeMs).toBeGreaterThanOrEqual(0);
     } finally {
       await server.shutdown("test");
       await expect(access(discoveryPath)).rejects.toBeDefined();
@@ -163,10 +185,13 @@ describe("startConnectionServer", () => {
       host: "127.0.0.1",
       port: 7618,
       authToken: "secret-token",
+      grpcMaxMessageBytes: DEFAULT_GRPC_MAX_MESSAGE_BYTES,
       maxConcurrency: 2,
       maxQueue: 8,
       idleTtlMs: 0,
       discoveryPath,
+      shutdownGraceMs: 5_000,
+      shutdownHardMs: 10_000,
     });
 
     const grpcModule = await import("@grpc/grpc-js") as unknown as {
@@ -188,7 +213,7 @@ describe("startConnectionServer", () => {
           {},
           { get: (key: string) => (key === "authorization" ? ["Bearer secret-token"] : []) },
         ),
-      ).resolves.toEqual({
+      ).resolves.toMatchObject({
         status: 1,
         message: "SERVING",
       });
@@ -196,5 +221,52 @@ describe("startConnectionServer", () => {
       await server.shutdown("test");
       await rm(tempRoot, { recursive: true, force: true });
     }
+  });
+
+  it("Health flips to NOT_SERVING at the start of shutdown (Phase C)", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "typocop-ladybug-server-health-"));
+    const discoveryPath = join(tempRoot, "ladybug-server.json");
+    const dbPath = join(tempRoot, "db.ladybug");
+    const address = "127.0.0.1:7620";
+
+    const server = await startConnectionServer({
+      runtimeMode: "server",
+      prefix: "tpc_",
+      dbPath,
+      host: "127.0.0.1",
+      port: 7620,
+      authToken: "",
+      grpcMaxMessageBytes: DEFAULT_GRPC_MAX_MESSAGE_BYTES,
+      maxConcurrency: 2,
+      maxQueue: 8,
+      idleTtlMs: 0,
+      discoveryPath,
+      shutdownGraceMs: 5_000,
+      shutdownHardMs: 10_000,
+    });
+
+    const grpcModule = await import("@grpc/grpc-js") as unknown as {
+      readonly __getServer: (serverAddress: string) => {
+        readonly implementations: Map<string, Record<string, any>>;
+      } | undefined;
+    };
+    const boundServer = grpcModule.__getServer(address);
+    const healthService = boundServer?.implementations.get("Health");
+
+    await expect(invokeUnary(healthService!.Check, {})).resolves.toMatchObject({
+      status: 1,
+      message: "SERVING",
+    });
+
+    // Start shutdown but do not await: markDraining() runs synchronously at the
+    // very start, so Health must report NOT_SERVING before the DB even closes.
+    const shutdownPromise = server.shutdown("test");
+    await expect(invokeUnary(healthService!.Check, {})).resolves.toMatchObject({
+      status: 2,
+      message: "NOT_SERVING",
+    });
+
+    await shutdownPromise;
+    await rm(tempRoot, { recursive: true, force: true });
   });
 });

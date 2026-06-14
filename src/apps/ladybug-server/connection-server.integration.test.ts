@@ -39,6 +39,8 @@ describe("Ladybug connection server — integration tests", () => {
     vi.restoreAllMocks();
     process.removeAllListeners("SIGTERM");
     process.removeAllListeners("SIGINT");
+    process.removeAllListeners("uncaughtException");
+    process.removeAllListeners("unhandledRejection");
     const grpcModule = await import("@grpc/grpc-js") as unknown as {
       readonly __clearServers: () => void;
     };

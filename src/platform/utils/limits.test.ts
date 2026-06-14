@@ -13,7 +13,37 @@ import {
   withQueryTimeout,
   withTimeoutOr,
   isTraversalDepthValid,
+  DEFAULT_SHUTDOWN_GRACE_MS,
+  DEFAULT_SHUTDOWN_HARD_MS,
+  SHUTDOWN_GRACE_MS_ENV,
+  SHUTDOWN_HARD_MS_ENV,
+  getConfiguredShutdownGraceMs,
+  getConfiguredShutdownHardMs,
 } from './limits.js';
+
+describe('shutdown timeout config', () => {
+  it('returns documented defaults when env is unset', () => {
+    delete process.env[SHUTDOWN_GRACE_MS_ENV];
+    delete process.env[SHUTDOWN_HARD_MS_ENV];
+    expect(getConfiguredShutdownGraceMs()).toBe(DEFAULT_SHUTDOWN_GRACE_MS);
+    expect(getConfiguredShutdownHardMs()).toBe(DEFAULT_SHUTDOWN_HARD_MS);
+  });
+
+  it('reads integer overrides from env', () => {
+    process.env[SHUTDOWN_GRACE_MS_ENV] = '1500';
+    process.env[SHUTDOWN_HARD_MS_ENV] = '3000';
+    expect(getConfiguredShutdownGraceMs()).toBe(1500);
+    expect(getConfiguredShutdownHardMs()).toBe(3000);
+    delete process.env[SHUTDOWN_GRACE_MS_ENV];
+    delete process.env[SHUTDOWN_HARD_MS_ENV];
+  });
+
+  it('throws on a non-positive override', () => {
+    process.env[SHUTDOWN_GRACE_MS_ENV] = '0';
+    expect(() => getConfiguredShutdownGraceMs()).toThrow();
+    delete process.env[SHUTDOWN_GRACE_MS_ENV];
+  });
+});
 
 describe('PARSE_CONCURRENCY', () => {
   it('is a positive integer in a sane range (B5 conservative default)', () => {

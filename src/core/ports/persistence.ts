@@ -85,11 +85,22 @@ export interface GraphAdapter {
     }>,
   ): Promise<void>;
 
+  /**
+   * Returns all nodes matching `label` and `filter`. Callers that may read large
+   * graphs should prefer paged `runCypher` queries with explicit SKIP/LIMIT
+   * windows; connection-server responses are intentionally bounded by gRPC
+   * limits.
+   */
   queryNodes(
     label: string,
     filter?: Record<string, unknown>,
   ): Promise<GraphNode[]>;
 
+  /**
+   * Returns all relationships of `type`. Callers that may read large graphs
+   * should prefer paged `runCypher` queries with explicit SKIP/LIMIT windows;
+   * connection-server responses are intentionally bounded by gRPC limits.
+   */
   queryRelationships(type: string): Promise<GraphRelationship[]>;
 
   deleteNodesByLabel(label: string): Promise<number>;
@@ -151,6 +162,27 @@ export interface VectorAdapter {
 export interface EmbeddingAdapter {
   isEnabled(): boolean;
   embedText(text: string): Promise<Embedding | null>;
+
+  /**
+   * OPTIONAL batch fast-path: embed many texts in one call so per-item fixed
+   * inference overhead is amortized across a single forward pass. Returns one
+   * result per input, INDEX-ALIGNED to `texts` (result[i] ↔ texts[i]), with
+   * `null` for any item that fails PRE-INFERENCE validation (privacy/length).
+   *
+   * IMPORTANT semantics (see embeddings performance plan, Phase 1):
+   * - Per-item `null` is only produced by pre-inference validation failures.
+   *   The underlying inference call is all-or-nothing — a genuine inference
+   *   error (OOM/malformed tensor/timeout) REJECTS the whole call rather than
+   *   nulling a single index. Callers MUST therefore treat a thrown/timed-out
+   *   `embedTexts` as "the whole batch is suspect" and fall back to per-item
+   *   {@link embedText}.
+   * - When this method is ABSENT, callers MUST fall back to per-item
+   *   {@link embedText}; the stored result is identical either way (modulo tiny
+   *   batched-vs-single float drift). NoOp / Ollama / custom adapters need no
+   *   change.
+   */
+  embedTexts?(texts: string[]): Promise<(Embedding | null)[]>;
+
   getDimensions(): number;
 }
 

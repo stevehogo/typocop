@@ -11,6 +11,7 @@ vi.mock("node:os", () => ({
 
 import { ConfigurationManager } from "./configuration-manager.js";
 import { LadybugConfigError } from "./errors.js";
+import { DEFAULT_GRPC_MAX_MESSAGE_BYTES, GRPC_MAX_MESSAGE_BYTES_ENV } from "../utils/limits.js";
 
 const originalEnv = process.env;
 const customLadybugEnv = {
@@ -19,6 +20,7 @@ const customLadybugEnv = {
   LADYBUG_SERVER_HOST: "10.0.0.9",
   LADYBUG_SERVER_PORT: "8123",
   LADYBUG_SERVER_AUTH_TOKEN: "secret-token",
+  LADYBUG_GRPC_MAX_MESSAGE_BYTES: "8388608",
   LADYBUG_SERVER_MAX_CONCURRENCY: "9",
   LADYBUG_SERVER_MAX_QUEUE: "128",
   LADYBUG_SERVER_AUTOSTART: "true",
@@ -32,6 +34,7 @@ const ladybugDefaults = {
   serverHost: "127.0.0.1",
   serverPort: 7617,
   serverAuthToken: "",
+  grpcMaxMessageBytes: DEFAULT_GRPC_MAX_MESSAGE_BYTES,
   serverMaxConcurrency: 4,
   serverMaxQueue: 256,
   serverAutostart: false,
@@ -45,6 +48,7 @@ const envKeyArb = fc.constantFrom<keyof typeof customLadybugEnv>(
   "LADYBUG_SERVER_HOST",
   "LADYBUG_SERVER_PORT",
   "LADYBUG_SERVER_AUTH_TOKEN",
+  GRPC_MAX_MESSAGE_BYTES_ENV,
   "LADYBUG_SERVER_MAX_CONCURRENCY",
   "LADYBUG_SERVER_MAX_QUEUE",
   "LADYBUG_SERVER_AUTOSTART",
@@ -100,6 +104,15 @@ describe("Ladybug connection-server configuration — property tests", () => {
       }),
       fc.record({
         field: fc.constant("LADYBUG_SERVER_MAX_CONCURRENCY" as const),
+        value: fc.oneof(
+          fc.integer({ max: 0 }).map(String),
+          fc.constant("1.5"),
+          fc.constant("NaN"),
+        ),
+        runtimeMode: fc.constant("server" as const),
+      }),
+      fc.record({
+        field: fc.constant(GRPC_MAX_MESSAGE_BYTES_ENV),
         value: fc.oneof(
           fc.integer({ max: 0 }).map(String),
           fc.constant("1.5"),
@@ -174,6 +187,11 @@ describe("Ladybug connection-server configuration — property tests", () => {
           missingKeys.includes("LADYBUG_SERVER_AUTH_TOKEN")
             ? ladybugDefaults.serverAuthToken
             : customLadybugEnv.LADYBUG_SERVER_AUTH_TOKEN,
+        );
+        expect(config.grpcMaxMessageBytes).toBe(
+          missingKeys.includes(GRPC_MAX_MESSAGE_BYTES_ENV)
+            ? ladybugDefaults.grpcMaxMessageBytes
+            : Number(customLadybugEnv.LADYBUG_GRPC_MAX_MESSAGE_BYTES),
         );
         expect(config.serverMaxConcurrency).toBe(
           missingKeys.includes("LADYBUG_SERVER_MAX_CONCURRENCY")

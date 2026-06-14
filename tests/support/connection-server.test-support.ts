@@ -11,6 +11,7 @@ import "../../src/infrastructure/embeddings/huggingface-embedding-adapter.js";
 import type { FullConfig, LadybugClientConfig, LadybugServerConfig } from "../../src/platform/config/types.js";
 import { createDatabaseAdapter } from "../../src/infrastructure/persistence/database-adapter.js";
 import type { RemoteDatabaseAdapter } from "../../src/infrastructure/remote-transport/remote-adapters/remote-database-adapter.js";
+import { DEFAULT_GRPC_MAX_MESSAGE_BYTES } from "../../src/platform/utils/limits.js";
 
 export function makeServerConfig(root: string, overrides: Partial<LadybugServerConfig> = {}): LadybugServerConfig {
   return {
@@ -20,10 +21,13 @@ export function makeServerConfig(root: string, overrides: Partial<LadybugServerC
     host: "127.0.0.1",
     port: 7617,
     authToken: "",
+    grpcMaxMessageBytes: DEFAULT_GRPC_MAX_MESSAGE_BYTES,
     maxConcurrency: 4,
     maxQueue: 32,
     idleTtlMs: 0,
     discoveryPath: join(root, "ladybug-server.json"),
+    shutdownGraceMs: 5_000,
+    shutdownHardMs: 10_000,
     ...overrides,
   };
 }
@@ -35,6 +39,7 @@ export function makeClientConfig(server: LadybugServerConfig, overrides: Partial
     dbPath: server.dbPath,
     serverUrl: `grpc://${server.host}:${server.port}`,
     authToken: server.authToken,
+    grpcMaxMessageBytes: server.grpcMaxMessageBytes,
     autostart: false,
     startupTimeoutMs: 2_000,
     lockPath: join(dirnameSafe(server.discoveryPath), "ladybug-server.lock"),
@@ -68,6 +73,7 @@ export function makeFullConfig(dbPath: string): FullConfig {
       serverHost: "127.0.0.1",
       serverPort: 7617,
       serverAuthToken: "",
+      grpcMaxMessageBytes: DEFAULT_GRPC_MAX_MESSAGE_BYTES,
       serverMaxConcurrency: 4,
       serverMaxQueue: 32,
       serverAutostart: false,
@@ -75,6 +81,8 @@ export function makeFullConfig(dbPath: string): FullConfig {
       serverLockPath: `${dbPath}.lock`,
       serverDiscoveryPath: `${dbPath}.discovery.json`,
       serverIdleTtlMs: 0,
+      serverShutdownGraceMs: 5_000,
+      serverShutdownHardMs: 10_000,
     },
     loadedAt: new Date(),
     source: "default",

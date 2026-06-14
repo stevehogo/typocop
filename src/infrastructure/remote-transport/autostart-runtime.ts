@@ -9,7 +9,7 @@ import * as lockfile from "proper-lockfile";
 import type { LadybugClientConfig } from "../../platform/config/types.js";
 import type { DiscoveryFile } from "./types.js";
 import { loadConnectionProtoPackage } from "./proto-loader.js";
-import { toGrpcTarget, waitForReady } from "./remote-grpc.js";
+import { createGrpcClientOptions, toGrpcTarget, waitForReady } from "./remote-grpc.js";
 
 // dist/infrastructure/remote-transport/autostart-runtime.js -> climb three to
 // <root>, then dist/apps/ladybug-server/main.js (the server binary it spawns).
@@ -51,7 +51,7 @@ export async function checkServerHealth(
   config: LadybugClientConfig,
   timeoutMs: number,
 ): Promise<boolean> {
-  const client = createHealthClient(config.serverUrl);
+  const client = createHealthClient(config);
   try {
     await waitForReady(client, timeoutMs);
     const metadata = new grpc.Metadata();
@@ -116,6 +116,8 @@ export async function spawnConnectionServer(
       parsed.port || "7617",
       "--auth-token",
       config.authToken,
+      "--grpc-max-message-bytes",
+      String(config.grpcMaxMessageBytes),
       "--discovery-path",
       config.discoveryPath,
     ],
@@ -150,11 +152,12 @@ export function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function createHealthClient(serverUrl: string): HealthClient {
+function createHealthClient(config: LadybugClientConfig): HealthClient {
   const Ctor = loadHealthClientCtor();
   return new Ctor(
-    toGrpcTarget(serverUrl),
+    toGrpcTarget(config.serverUrl),
     grpc.credentials.createInsecure(),
+    createGrpcClientOptions(config.grpcMaxMessageBytes),
   );
 }
 

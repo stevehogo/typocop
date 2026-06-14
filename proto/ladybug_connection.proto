@@ -21,6 +21,10 @@ message HealthCheckResponse {
 
   ServingStatus status = 1;
   string message = 2;
+  // Resilience Phase F: identity + liveness so a supervisor can detect flapping.
+  int32 pid = 3;
+  string started_at = 4;
+  uint64 uptime_ms = 5;
 }
 
 message ErrorDetail {
@@ -54,6 +58,10 @@ message GetMetricsRequest {}
 message GetMetricsResponse {
   ServerMetrics metrics = 1;
   SchedulerStats scheduler = 2;
+  // Resilience Phase F: identity + liveness so a supervisor can detect flapping.
+  int32 pid = 3;
+  string started_at = 4;
+  uint64 uptime_ms = 5;
 }
 
 message ShutdownRequest {

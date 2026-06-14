@@ -120,6 +120,14 @@ export function createProtoLoaderMock(): { readonly loadSync: ReturnType<typeof 
       this.invoke("Graph", "CreateRelationship", request, metadata, callback);
     }
 
+    CreateNodes(request: unknown, metadata: { get: (key: string) => string[] }, _options: unknown, callback: (error: Error | null, response?: unknown) => void): void {
+      this.invoke("Graph", "CreateNodes", request, metadata, callback);
+    }
+
+    CreateRelationships(request: unknown, metadata: { get: (key: string) => string[] }, _options: unknown, callback: (error: Error | null, response?: unknown) => void): void {
+      this.invoke("Graph", "CreateRelationships", request, metadata, callback);
+    }
+
     DeleteNodesByLabel(request: unknown, metadata: { get: (key: string) => string[] }, _options: unknown, callback: (error: Error | null, response?: unknown) => void): void {
       this.invoke("Graph", "DeleteNodesByLabel", request, metadata, callback);
     }
@@ -138,6 +146,10 @@ export function createProtoLoaderMock(): { readonly loadSync: ReturnType<typeof 
 
     IndexSymbol(request: unknown, metadata: { get: (key: string) => string[] }, _options: unknown, callback: (error: Error | null, response?: unknown) => void): void {
       this.invoke("Vector", "IndexSymbol", request, metadata, callback);
+    }
+
+    IndexSymbols(request: unknown, metadata: { get: (key: string) => string[] }, _options: unknown, callback: (error: Error | null, response?: unknown) => void): void {
+      this.invoke("Vector", "IndexSymbols", request, metadata, callback);
     }
 
     SemanticSearch(request: unknown, metadata: { get: (key: string) => string[] }, _options: unknown, callback: (error: Error | null, response?: unknown) => void): void {
@@ -202,6 +214,10 @@ export function createGrpcJsMock(): Record<string, unknown> {
     tryShutdown(callback: () => void): void {
       servers.delete(this.address);
       callback();
+    }
+
+    forceShutdown(): void {
+      servers.delete(this.address);
     }
   }
 

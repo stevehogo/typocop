@@ -7,7 +7,7 @@
         ".env-typocop"
       ],
       "env": {},
-      "disabled": false,
+      "disabled": true,
       "autoApprove": [
         "mcp_typocop_get_symbol_context",
         "mcp_typocop_find_dependents",
