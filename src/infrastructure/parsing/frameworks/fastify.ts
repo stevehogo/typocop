@@ -45,6 +45,7 @@ export async function parseFastifyRoutes(filePath: string, parser: Parser): Prom
       
       symbols.push({
         id: `fastify:route:${method}:${route}`,
+        logicalKey: `fastify:route:${method}:${route}`,
         name: `${method.toUpperCase()} ${route}`,
         kind: "function",
         location: {

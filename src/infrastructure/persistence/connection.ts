@@ -5,7 +5,7 @@
 
 import { Database, Connection } from "@ladybugdb/core";
 import { DatabaseConnectionError } from "./errors.js";
-import { acquireFileLock, releaseFileLock, type FileLock } from "./file-lock.js";
+import { acquireFileLock, releaseFileLock, type FileLock, type LockTunables } from "./file-lock.js";
 
 /** Retry configuration constants. */
 const MAX_ATTEMPTS = 3;
@@ -52,9 +52,13 @@ const defaultSleep: SleepFn = (ms: number): Promise<void> =>
 export async function createLadybugConnection(
   dbPath: string,
   sleep: SleepFn = defaultSleep,
+  lockOptions: LockTunables = {},
 ): Promise<LadybugConnection> {
-  // Acquire OS-level file lock to prevent concurrent access from multiple processes
-  const lock = await acquireFileLock(dbPath);
+  // Acquire OS-level file lock to prevent concurrent access from multiple processes.
+  // `staleMs`/`retries` are threaded from the server's per-repo config when supplied;
+  // when omitted they fall back to the env-configured defaults (see LockTunables), so
+  // config-less callers (the pool, embedded use, tests) keep the process-global default.
+  const lock = await acquireFileLock(dbPath, lockOptions);
   activeLocks.set(dbPath, lock);
 
   // Cache hit — reuse existing Database, create a fresh Connection

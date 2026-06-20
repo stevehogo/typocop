@@ -16,6 +16,7 @@ import type {
   Relationship,
   Symbol,
 } from "../../core/domain.js";
+import { persistedKey } from "../../core/domain.js";
 import type { DatabaseAdapter, GraphAdapter, VectorAdapter, EmbeddingAdapter } from "../../core/ports/persistence.js";
 import { walkFileTree, type FileNode } from "./structure/index.js";
 import { extractAllSymbols } from "./parsing/index.js";
@@ -215,6 +216,17 @@ export async function runIndexingPipeline(config: PipelineConfig): Promise<Pipel
   // falls back to per-row indexSymbol otherwise — identical data either way.
   // vectorWrites counts ROWS written (by chunk.length on the batch path).
   metrics.startPhase("persist");
+
+  // A1 (KEYSTONE): the PERSISTED graph is keyed on the position-independent
+  // `logicalKey`, while every in-memory phase (resolution/clustering/processes/
+  // search) stays keyed on the intra-run `id`. Translate id → logicalKey at this
+  // single persist boundary. Synthetic endpoints (import-source, `unresolved:*`,
+  // `ext:*`, cluster/process ids) are NOT symbol ids, so they fall through
+  // unchanged via `keyOf`.
+  const idToKey = new Map<string, string>();
+  for (const sym of symbols) idToKey.set(sym.id, persistedKey(sym));
+  const keyOf = (id: string): string => idToKey.get(id) ?? id;
+
   const totalPersistRows = countPersistRows(
     searchIndex.embeddings.length,
     symbols,
@@ -235,7 +247,9 @@ export async function runIndexingPipeline(config: PipelineConfig): Promise<Pipel
   try {
     await writeVectorEntries(
       vectorAdapter,
-      searchIndex.embeddings,
+      // Persisted vector symbolId maps to logicalKey (A1). Cluster vector entries
+      // (`cluster:<id>`) are synthetic and fall through unchanged.
+      searchIndex.embeddings.map((e) => ({ ...e, symbolId: keyOf(e.symbolId) })),
       (n) => {
         embeddingCount += n;
         metrics.incr("vectorWrites", n);
@@ -259,6 +273,7 @@ export async function runIndexingPipeline(config: PipelineConfig): Promise<Pipel
       extNodes,
       graphAdapter,
       metrics,
+      keyOf,
       advancePersistProgress,
     );
     metrics.endPhase("persist");
@@ -341,6 +356,9 @@ async function storeInDatabases(
   extNodes: Map<string, ExternalDependencyNode>,
   graphAdapter: GraphAdapter,
   metrics: ReturnType<typeof createMetricsCollector>,
+  // A1: maps an intra-run `id` endpoint to its persisted `logicalKey`. Non-symbol
+  // (synthetic) endpoints fall through unchanged.
+  keyOf: (id: string) => string,
   onRows?: (count: number) => void,
 ): Promise<void> {
   // NOTE: Do NOT prepend prefix here — the GraphAdapter handles prefixing internally.
@@ -372,7 +390,7 @@ async function storeInDatabases(
     graphAdapter,
     "Symbol",
     symbols.map((s) => ({
-      id: s.id,
+      id: persistedKey(s),
       name: s.name,
       kind: s.kind,
       filePath: s.location.filePath,
@@ -406,7 +424,7 @@ async function storeInDatabases(
     processes.map((p) => ({
       id: p.id,
       name: p.name,
-      entryPoint: p.entryPoint,
+      entryPoint: keyOf(p.entryPoint),
       stepCount: String(p.steps.length),
     })),
     countNodes,
@@ -434,7 +452,7 @@ async function storeInDatabases(
   for (const r of relationships) {
     const type = r.relType === "dependsOn" ? "DEPENDS_ON" : r.relType.toUpperCase();
     const rows = edgesByType.get(type) ?? [];
-    rows.push({ fromId: r.source, toId: r.target, properties: r.metadata });
+    rows.push({ fromId: keyOf(r.source), toId: keyOf(r.target), properties: r.metadata });
     edgesByType.set(type, rows);
   }
   for (const [type, rows] of edgesByType) {
@@ -445,7 +463,7 @@ async function storeInDatabases(
   await writeRelationshipGroup(
     graphAdapter,
     "CONTAINS",
-    clusters.flatMap((c) => c.symbols.map((symbolId) => ({ fromId: c.id, toId: symbolId, properties: {} }))),
+    clusters.flatMap((c) => c.symbols.map((symbolId) => ({ fromId: c.id, toId: keyOf(symbolId), properties: {} }))),
     countEdges,
     relationshipEvents,
   );
@@ -457,7 +475,7 @@ async function storeInDatabases(
     processes.flatMap((p) =>
       p.steps.map((step) => ({
         fromId: p.id,
-        toId: step.symbolId,
+        toId: keyOf(step.symbolId),
         properties: { step_order: String(step.order) },
       })),
     ),

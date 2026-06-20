@@ -1,12 +1,12 @@
 import type { Connection, Database } from "@ladybugdb/core";
 
-import { createEmbeddedConnection, type LadybugConnection } from "../../infrastructure/persistence/index.js";
+import { createEmbeddedConnection, type LadybugConnection, type LockTunables } from "../../infrastructure/persistence/index.js";
 import { LadybugGraphAdapter } from "../../infrastructure/persistence/ladybug-graph-adapter.js";
 import { LadybugVectorAdapter } from "../../infrastructure/persistence/ladybug-vector-adapter.js";
 import { logServerEvent } from "../../platform/logging/logger.js";
 
 export interface EmbeddedDatabaseRuntime {
-  open(dbPath: string, prefix: string): Promise<void>;
+  open(dbPath: string, prefix: string, lockOptions?: LockTunables): Promise<void>;
   getConnection(): Connection;
   getDatabase(): Database;
   close(): Promise<void>;
@@ -19,7 +19,7 @@ export class LadybugEmbeddedDatabaseRuntime implements EmbeddedDatabaseRuntime {
   private openedDbPath: string | null = null;
   private openedPrefix: string | null = null;
 
-  async open(dbPath: string, prefix: string): Promise<void> {
+  async open(dbPath: string, prefix: string, lockOptions: LockTunables = {}): Promise<void> {
     if (this.runtime !== null) {
       if (this.openedDbPath !== dbPath || this.openedPrefix !== prefix) {
         throw new Error(
@@ -30,7 +30,7 @@ export class LadybugEmbeddedDatabaseRuntime implements EmbeddedDatabaseRuntime {
     }
 
     logServerEvent("info", "database_opening", { dbPath, prefix });
-    const connection = await createEmbeddedConnection(dbPath);
+    const connection = await createEmbeddedConnection(dbPath, undefined, lockOptions);
     const graphAdapter = new LadybugGraphAdapter(connection.connection, prefix);
     const vectorAdapter = new LadybugVectorAdapter(connection.connection, prefix);
 

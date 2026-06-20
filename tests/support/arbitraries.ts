@@ -70,6 +70,7 @@ export const locationArbitrary = (): fc.Arbitrary<Location> =>
 export const symbolArbitrary = (): fc.Arbitrary<Symbol> =>
   fc.record({
     id: fc.string({ minLength: 1 }),
+    logicalKey: fc.string({ minLength: 1 }),
     name: fc.string({ minLength: 1 }),
     kind: symbolKindArbitrary(),
     location: locationArbitrary(),

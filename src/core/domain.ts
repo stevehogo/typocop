@@ -12,14 +12,24 @@ export type Modifier = "static" | "abstract" | "async" | "const" | "readonly";
 
 export interface Location {
   readonly filePath: string;
-  readonly startLine: number;
-  readonly startColumn: number;
-  readonly endLine: number;
+  // startLine/startColumn/endLine are MUTABLE (A1): a symbol moving within its
+  // file changes these without changing its persisted identity (`logicalKey`).
+  startLine: number;
+  startColumn: number;
+  endLine: number;
   readonly endColumn: number;
 }
 
 export interface Symbol {
-  readonly id: string;           // unique across all symbols
+  readonly id: string;           // intra-run dedup/lookup key (position-INCLUSIVE)
+  /**
+   * Stable, position-INDEPENDENT persisted identity (A1, KEYSTONE). Derived from
+   * (filePath, qualifiedName, kind, per-file ordinal) — survives a symbol moving
+   * within its file. THE shared identity contract: all PERSISTED node ids, edge
+   * source/target, cluster/process/vector symbol refs map to `logicalKey` (see
+   * {@link persistedKey}), while `id` stays the intra-run dedup/lookup key.
+   */
+  readonly logicalKey: string;
   readonly name: string;         // non-empty
   readonly kind: SymbolKind;
   readonly location: Location;
@@ -27,6 +37,17 @@ export interface Symbol {
   readonly documentation?: string;
   readonly visibility: Visibility;
   readonly modifiers: Modifier[];
+}
+
+/**
+ * The PERSISTED endpoint key for a symbol (A1). Returns the stable
+ * position-independent `logicalKey`, falling back to the intra-run `id` only for
+ * legacy/synthetic symbols that predate the keystone (so callers never emit an
+ * empty endpoint). Use this — never `sym.id` — wherever a node id or an edge
+ * endpoint is EMITTED or PERSISTED.
+ */
+export function persistedKey(sym: Pick<Symbol, "id" | "logicalKey">): string {
+  return sym.logicalKey || sym.id;
 }
 
 // ─── Relationship ─────────────────────────────────────────────────────────────

@@ -73,7 +73,14 @@ describe("Ladybug connection server command surface — integration test", () =>
         message: "SERVING",
       });
 
-      await expect(invokeUnary(admin!.GetMetrics, {})).resolves.toMatchObject({
+      const metricsResponse = await invokeUnary(admin!.GetMetrics, {}) as {
+        readonly metrics: Record<string, unknown>;
+        readonly scheduler: Record<string, unknown>;
+        readonly pid: number;
+        readonly startedAt: string;
+        readonly uptimeMs: number;
+      };
+      expect(metricsResponse).toMatchObject({
         metrics: expect.objectContaining({
           dbOpen: true,
           inFlightRequests: 0,
@@ -82,6 +89,13 @@ describe("Ladybug connection server command surface — integration test", () =>
           acceptingRequests: true,
         }),
       });
+      // Phase F (additive): identity + liveness fields. The server runs
+      // in-process under the gRPC mock, so its pid is this test process's pid.
+      expect(metricsResponse.pid).toBe(process.pid);
+      expect(Number.isNaN(Date.parse(metricsResponse.startedAt))).toBe(false);
+      expect(new Date(metricsResponse.startedAt).toISOString()).toBe(metricsResponse.startedAt);
+      expect(typeof metricsResponse.uptimeMs).toBe("number");
+      expect(metricsResponse.uptimeMs).toBeGreaterThanOrEqual(0);
 
       await expect(
         invokeUnary(graph!.CreateNode, {
@@ -219,14 +233,14 @@ describe("Ladybug connection server command surface — integration test", () =>
           metadata: makeRequestMetadata(serverConfig.prefix),
           type: "CALLS",
         }),
-      ).resolves.toEqual({ deletedCount: 0 });
+      ).resolves.toEqual({ deletedCount: 1 });
 
       await expect(
         invokeUnary(graph!.DeleteNodesByLabel, {
           metadata: makeRequestMetadata(serverConfig.prefix),
           label: "Symbol",
         }),
-      ).resolves.toEqual({ deletedCount: 0 });
+      ).resolves.toEqual({ deletedCount: 3 });
 
       await expect(
         invokeUnary(graph!.QueryNodes, {

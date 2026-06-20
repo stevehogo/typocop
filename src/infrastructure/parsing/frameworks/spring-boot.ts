@@ -41,6 +41,7 @@ export async function parseRestControllers(filePath: string, parser: Parser): Pr
       
       symbols.push({
         id: `spring:mapping:${method}:${path}`,
+        logicalKey: `spring:mapping:${method}:${path}`,
         name: `${method.toUpperCase()} ${path}`,
         kind: "method",
         location: {
@@ -63,6 +64,7 @@ export async function parseRestControllers(filePath: string, parser: Parser): Pr
       
       symbols.push({
         id: `spring:mapping:REQUEST:${path}`,
+        logicalKey: `spring:mapping:REQUEST:${path}`,
         name: `REQUEST ${path}`,
         kind: "method",
         location: {

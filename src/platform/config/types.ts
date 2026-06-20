@@ -72,6 +72,10 @@ export interface LadybugServerConfig {
   readonly shutdownGraceMs: number;
   /** Hard deadline (ms) for the whole shutdown sequence before force-exit. */
   readonly shutdownHardMs: number;
+  /** `proper-lockfile` stale window (ms) for the DB lock — a crashed holder self-clears after this. */
+  readonly lockStaleMs: number;
+  /** `proper-lockfile` acquisition retries for the DB lock. */
+  readonly lockRetries: number;
 }
 
 export interface LadybugClientConfig {
@@ -108,6 +112,8 @@ export interface FullConfig {
     readonly serverIdleTtlMs: number;
     readonly serverShutdownGraceMs: number;
     readonly serverShutdownHardMs: number;
+    readonly serverLockStaleMs: number;
+    readonly serverLockRetries: number;
   };
   readonly loadedAt: Date;
   readonly source: "environment" | "env-file" | "default";

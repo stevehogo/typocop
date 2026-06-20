@@ -37,6 +37,7 @@ export async function parseWebapiXml(xmlPath: string): Promise<Symbol[]> {
       const [, url, method] = match;
       symbols.push({
         id: `magento2:api:${method}:${url}`,
+        logicalKey: `magento2:api:${method}:${url}`,
         name: `${method} ${url}`,
         kind: "function",
         location: {
@@ -159,6 +160,7 @@ export async function parseEventsXml(xmlPath: string): Promise<Symbol[]> {
       const [, eventName] = match;
       symbols.push({
         id: `magento2:event:${eventName}`,
+        logicalKey: `magento2:event:${eventName}`,
         name: eventName,
         kind: "function",
         location: {
@@ -196,6 +198,7 @@ export async function parseDiXml(xmlPath: string): Promise<Symbol[]> {
       const [, forType, implType] = match;
       symbols.push({
         id: `magento2:di:${forType}`,
+        logicalKey: `magento2:di:${forType}`,
         name: `${forType} → ${implType}`,
         kind: "type",
         location: {

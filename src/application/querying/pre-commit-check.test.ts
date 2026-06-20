@@ -11,6 +11,7 @@ import type { Symbol } from "../../core/domain.js";
 function createSymbol(id: string, name: string): Symbol {
   return {
     id,
+    logicalKey: id,
     name,
     kind: "function",
     location: {

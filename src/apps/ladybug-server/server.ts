@@ -38,7 +38,10 @@ export async function startConnectionServer(config: LadybugServerConfig): Promis
   const startedAtIso = new Date(startedAtMs).toISOString();
 
   const runtime = new LadybugEmbeddedDatabaseRuntime();
-  await runtime.open(config.dbPath, config.prefix);
+  await runtime.open(config.dbPath, config.prefix, {
+    staleMs: config.lockStaleMs,
+    retries: config.lockRetries,
+  });
 
   // Hoisted so the startup-failure catch (outer scope) can dispose the safety
   // net and run last-ditch cleanup even when start() throws mid-wiring.
@@ -337,6 +340,8 @@ export function toLadybugServerConfig(config: FullConfig): LadybugServerConfig {
     discoveryPath: config.ladybugdb.serverDiscoveryPath,
     shutdownGraceMs: config.ladybugdb.serverShutdownGraceMs,
     shutdownHardMs: config.ladybugdb.serverShutdownHardMs,
+    lockStaleMs: config.ladybugdb.serverLockStaleMs,
+    lockRetries: config.ladybugdb.serverLockRetries,
   };
 }
 

@@ -10,9 +10,13 @@ import {
   DEFAULT_GRPC_MAX_MESSAGE_BYTES,
   DEFAULT_SHUTDOWN_GRACE_MS,
   DEFAULT_SHUTDOWN_HARD_MS,
+  DEFAULT_DB_LOCK_STALE_MS,
+  DEFAULT_DB_LOCK_RETRIES,
   GRPC_MAX_MESSAGE_BYTES_ENV,
   SHUTDOWN_GRACE_MS_ENV,
   SHUTDOWN_HARD_MS_ENV,
+  DB_LOCK_STALE_MS_ENV,
+  DB_LOCK_RETRIES_ENV,
 } from "../utils/limits.js";
 import type { ValidationResult } from "./prefix-validator.js";
 import type {
@@ -61,6 +65,8 @@ const LADYBUG_SERVER_DEFAULTS = {
   serverIdleTtlMs: 0,
   serverShutdownGraceMs: DEFAULT_SHUTDOWN_GRACE_MS,
   serverShutdownHardMs: DEFAULT_SHUTDOWN_HARD_MS,
+  serverLockStaleMs: DEFAULT_DB_LOCK_STALE_MS,
+  serverLockRetries: DEFAULT_DB_LOCK_RETRIES,
 };
 
 const VALID_PROVIDERS: readonly EmbeddingProvider[] = ["huggingface", "ollama", "none"] as const;
@@ -303,6 +309,16 @@ export class ConfigurationManager implements IConfigurationManager {
       process.env[SHUTDOWN_HARD_MS_ENV] || String(LADYBUG_SERVER_DEFAULTS.serverShutdownHardMs),
       1,
     );
+    const serverLockStaleMs = this.parsePositiveInt(
+      DB_LOCK_STALE_MS_ENV,
+      process.env[DB_LOCK_STALE_MS_ENV] || String(LADYBUG_SERVER_DEFAULTS.serverLockStaleMs),
+      1,
+    );
+    const serverLockRetries = this.parsePositiveInt(
+      DB_LOCK_RETRIES_ENV,
+      process.env[DB_LOCK_RETRIES_ENV] || String(LADYBUG_SERVER_DEFAULTS.serverLockRetries),
+      0,
+    );
     const serverLockPath = this.resolveConfiguredPath(
       process.env["LADYBUG_SERVER_LOCK_PATH"],
       this.defaultLockPath(prefix),
@@ -337,6 +353,8 @@ export class ConfigurationManager implements IConfigurationManager {
       serverIdleTtlMs,
       serverShutdownGraceMs,
       serverShutdownHardMs,
+      serverLockStaleMs,
+      serverLockRetries,
     };
   }
 

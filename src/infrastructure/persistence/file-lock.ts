@@ -23,16 +23,24 @@ export interface FileLock {
 }
 
 /**
- * Tunable options for {@link acquireFileLock}. Defaults preserve the historical
- * behaviour (`stale: 30000`, `retries: 10`) and are sourced from
- * `platform/utils/limits.ts` so the env-override pattern stays consistent with
- * the rest of the server (resilience Phase D).
+ * The portable lock tunables that can be threaded down from a per-repo config
+ * (resilience Phase D follow-up). Defaults preserve the historical behaviour
+ * (`stale: 30000`, `retries: 10`) and are sourced from `platform/utils/limits.ts`
+ * when omitted, so config-less callers (the connection pool, embedded use, tests)
+ * keep the process-global env default.
  */
-export interface AcquireFileLockOptions {
+export interface LockTunables {
   /** `proper-lockfile` stale window in ms — a crashed holder self-clears after this. */
   readonly staleMs?: number;
   /** `proper-lockfile` acquisition retries (with exponential backoff). */
   readonly retries?: number;
+}
+
+/**
+ * Tunable options for {@link acquireFileLock} — the threadable {@link LockTunables}
+ * plus an injectable liveness probe used only to enrich the actionable error.
+ */
+export interface AcquireFileLockOptions extends LockTunables {
   /**
    * Best-effort liveness check for the pid recorded in the lock payload, used to
    * enrich the actionable error. Injectable for tests; defaults to a

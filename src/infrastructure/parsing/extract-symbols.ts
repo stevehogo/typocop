@@ -4,6 +4,7 @@ import type { Language, Symbol, SymbolKind, Visibility, Modifier } from "../../c
 import { type ASTNode, fromSyntaxNode } from "./ast-node.js";
 import { LANGUAGE_QUERIES } from "./queries.js";
 import { generateSymbolId } from "./symbol-id.js";
+import { generateLogicalKey, OrdinalAllocator } from "./logical-key.js";
 
 /** Raw relationship hint extracted from AST — resolved into Relationship in Phase 3 */
 export interface RawRelationshipHint {
@@ -69,21 +70,24 @@ function nodeTypeToKind(nodeType: string): SymbolKind {
  */
 export function extractSymbols(ast: ASTNode, filePath: string): Symbol[] {
   const symbols: Symbol[] = [];
-  visitNode(ast, filePath, symbols);
+  // Assign per-file logicalKey ordinals in original (DFS, pre-order) traversal
+  // order — the same order symbols are emitted — so the mapping is deterministic.
+  const ordinals = new OrdinalAllocator();
+  visitNode(ast, filePath, symbols, ordinals);
   return symbols;
 }
 
-function visitNode(node: ASTNode, filePath: string, out: Symbol[]): void {
+function visitNode(node: ASTNode, filePath: string, out: Symbol[], ordinals: OrdinalAllocator): void {
   if (SYMBOL_NODE_TYPES.has(node.type)) {
-    const sym = buildSymbol(node, filePath);
+    const sym = buildSymbol(node, filePath, ordinals);
     if (sym) out.push(sym);
   }
   for (const child of node.children) {
-    visitNode(child, filePath, out);
+    visitNode(child, filePath, out, ordinals);
   }
 }
 
-function buildSymbol(node: ASTNode, filePath: string): Symbol | null {
+function buildSymbol(node: ASTNode, filePath: string, ordinals: OrdinalAllocator): Symbol | null {
   const nameNode = node.children.find(
     (c) => c.type === "identifier" || c.type === "type_identifier" ||
             c.type === "property_identifier" || c.type === "name",
@@ -91,10 +95,12 @@ function buildSymbol(node: ASTNode, filePath: string): Symbol | null {
   const name = nameNode?.text?.trim() ?? "";
   if (!name) return null;
 
+  const kind = nodeTypeToKind(node.type);
   return {
     id: crypto.randomUUID(),
+    logicalKey: generateLogicalKey(filePath, name, kind, ordinals.next(name, kind)),
     name,
-    kind: nodeTypeToKind(node.type),
+    kind,
     location: {
       filePath,
       startLine: node.startPosition.row,
@@ -239,6 +245,10 @@ export function extractSymbolsWithQueries(
           nameNode.startPosition.row,
           nameNode.startPosition.column,
         ),
+        // logicalKey is assigned in a single ordered pass AFTER intra-file
+        // dedup-by-id (below), so overlapping query patterns that collapse to the
+        // same `id` do not consume an ordinal twice.
+        logicalKey: "",
         name,
         kind,
         location: {
@@ -305,7 +315,35 @@ export function extractSymbolsWithQueries(
     }
   }
 
-  return { symbols, hints };
+  return { symbols: assignLogicalKeys(symbols), hints };
+}
+
+/**
+ * Dedup symbols by their intra-run `id` (collapsing overlapping query matches
+ * that share a name node), then assign each survivor its stable `logicalKey`
+ * with a per-file ordinal allocated in original emission order (A1). Doing this
+ * AFTER dedup guarantees an ordinal is consumed exactly once per distinct symbol,
+ * so the key is deterministic and overlap-robust. Distinct `(name, kind)` symbols
+ * get ordinal 0; only genuine collisions (e.g. two same-named arrow fns) advance.
+ */
+function assignLogicalKeys(symbols: Symbol[]): Symbol[] {
+  const ordinals = new OrdinalAllocator();
+  const seen = new Set<string>();
+  const out: Symbol[] = [];
+  for (const sym of symbols) {
+    if (seen.has(sym.id)) continue;
+    seen.add(sym.id);
+    out.push({
+      ...sym,
+      logicalKey: generateLogicalKey(
+        sym.location.filePath,
+        sym.name,
+        sym.kind,
+        ordinals.next(sym.name, sym.kind),
+      ),
+    });
+  }
+  return out;
 }
 
 function inferVisibility(node: Parser.SyntaxNode, language: Language): Visibility {

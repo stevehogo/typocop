@@ -44,6 +44,7 @@ export async function parseRouteDefinitions(filePath: string): Promise<Symbol[]>
       
       symbols.push({
         id: `laravel:route:${method}:${uri}`,
+        logicalKey: `laravel:route:${method}:${uri}`,
         name: `${method.toUpperCase()} ${uri}`,
         kind: "function",
         location: {

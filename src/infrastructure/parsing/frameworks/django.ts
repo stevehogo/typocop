@@ -42,6 +42,7 @@ export async function parseDjangoURLPatterns(filePath: string): Promise<Symbol[]
       
       symbols.push({
         id: `django:url:${route}`,
+        logicalKey: `django:url:${route}`,
         name: `URL ${route}`,
         kind: "function",
         location: {
@@ -64,6 +65,7 @@ export async function parseDjangoURLPatterns(filePath: string): Promise<Symbol[]
       
       symbols.push({
         id: `django:url:regex:${route}`,
+        logicalKey: `django:url:regex:${route}`,
         name: `URL ${route}`,
         kind: "function",
         location: {

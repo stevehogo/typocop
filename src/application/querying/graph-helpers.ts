@@ -22,6 +22,9 @@ export function rowToNode(row: CypherNodeRow): GraphNode {
 export function graphNodeToSymbol(node: GraphNode): Symbol {
   return {
     id: node.id,
+    // The PERSISTED node id IS the logicalKey (A1); post-persistence the
+    // intra-run id no longer exists, so identity and persisted key coincide here.
+    logicalKey: node.id,
     name: prop(node, "name", node.id),
     kind: prop(node, "kind", "function") as SymbolKind,
     location: {

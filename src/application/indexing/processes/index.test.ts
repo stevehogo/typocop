@@ -34,6 +34,7 @@ function makeSymbol(
 ): Symbol {
   return {
     id,
+    logicalKey: id,
     name,
     kind,
     location: { filePath: "src/foo.ts", startLine: 1, startColumn: 0, endLine: 5, endColumn: 0 },

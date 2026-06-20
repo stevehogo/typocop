@@ -26,6 +26,7 @@ function makeSymbol(
 ): Symbol {
   return {
     id,
+    logicalKey: id,
     name,
     kind,
     location: {

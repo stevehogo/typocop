@@ -45,6 +45,9 @@ export async function parseExpressRoutes(filePath: string, parser: Parser): Prom
       
       symbols.push({
         id: `express:route:${method}:${route}`,
+        // Framework route ids are already position-independent (route-derived),
+        // so the persisted logicalKey is the same stable id (A1).
+        logicalKey: `express:route:${method}:${route}`,
         name: `${method.toUpperCase()} ${route}`,
         kind: "function",
         location: {

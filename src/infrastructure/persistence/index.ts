@@ -20,3 +20,4 @@ export { RemoteVectorAdapter } from "../remote-transport/remote-adapters/remote-
 export { createLadybugConnection, resetConnectionCache } from "./connection.js";
 export { createLadybugConnection as createEmbeddedConnection } from "./connection.js";
 export type { LadybugConnection } from "./connection.js";
+export type { LockTunables } from "./file-lock.js";

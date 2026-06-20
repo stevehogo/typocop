@@ -282,10 +282,21 @@ export function resolveHints(
   for (const [sourceFile, fileHints] of hintsByFile) {
     ctx.enableCache(sourceFile);
 
+    // Per-file ordinal for synthetic import source ids (A1). The old id
+    // `${file}:import:${line}` was position-DEPENDENT — adding a line above an
+    // import dangled its edge. The line is dropped; collisions (the same module
+    // imported twice in one file) are disambiguated by a deterministic ordinal
+    // assigned in hint order.
+    const importOrdinals = new Map<string, number>();
+
     for (const hint of fileHints) {
       switch (hint.kind) {
         case "import": {
-          const sourceId = `${hint.sourceFile}:import:${hint.startLine}`;
+          const importOrd = importOrdinals.get(hint.targetName) ?? 0;
+          importOrdinals.set(hint.targetName, importOrd + 1);
+          const sourceId = importOrd === 0
+            ? `${hint.sourceFile}:import:${hint.targetName}`
+            : `${hint.sourceFile}:import:${hint.targetName}:${importOrd}`;
           if (isExternalPackage(hint.targetName, hint.language)) {
             const extNode = getOrCreateExtNode(hint.targetName, hint.language, extNodes);
             // Fan-out: one dependsOn edge from EVERY symbol in the importing file

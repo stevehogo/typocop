@@ -95,6 +95,7 @@ export async function parsePrismaModels(filePath: string): Promise<Symbol[]> {
       
       symbols.push({
         id: `nestjs:prisma:${modelName}`,
+        logicalKey: `nestjs:prisma:${modelName}`,
         name: modelName,
         kind: "class",
         location: {

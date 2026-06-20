@@ -116,6 +116,8 @@ function baseConfig(dbPath: string, discoveryPath: string, overrides: Record<str
     discoveryPath,
     shutdownGraceMs: 50,
     shutdownHardMs: 200,
+    lockStaleMs: 30_000,
+    lockRetries: 10,
     ...overrides,
   };
 }

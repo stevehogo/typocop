@@ -41,6 +41,7 @@ export async function parseFastAPIRoutes(filePath: string, parser: Parser): Prom
       
       symbols.push({
         id: `fastapi:route:${method}:${route}`,
+        logicalKey: `fastapi:route:${method}:${route}`,
         name: `${method.toUpperCase()} ${route}`,
         kind: "function",
         location: {

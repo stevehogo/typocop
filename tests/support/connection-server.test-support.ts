@@ -28,6 +28,8 @@ export function makeServerConfig(root: string, overrides: Partial<LadybugServerC
     discoveryPath: join(root, "ladybug-server.json"),
     shutdownGraceMs: 5_000,
     shutdownHardMs: 10_000,
+    lockStaleMs: 30_000,
+    lockRetries: 10,
     ...overrides,
   };
 }
@@ -83,6 +85,8 @@ export function makeFullConfig(dbPath: string): FullConfig {
       serverIdleTtlMs: 0,
       serverShutdownGraceMs: 5_000,
       serverShutdownHardMs: 10_000,
+      serverLockStaleMs: 30_000,
+      serverLockRetries: 10,
     },
     loadedAt: new Date(),
     source: "default",

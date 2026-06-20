@@ -270,6 +270,8 @@ describe("ConfigurationManager", () => {
       expect(config.serverIdleTtlMs).toBe(0);
       expect(config.serverShutdownGraceMs).toBe(5_000);
       expect(config.serverShutdownHardMs).toBe(10_000);
+      expect(config.serverLockStaleMs).toBe(30_000);
+      expect(config.serverLockRetries).toBe(10);
       expect(config.serverLockPath).toContain("/mock-home/.typocop/locks/");
       expect(config.serverLockPath).toContain("tpc_-ladybug-server.lock");
       expect(config.serverDiscoveryPath).toContain("/mock-home/.typocop/tpc_/");
@@ -320,6 +322,29 @@ describe("ConfigurationManager", () => {
 
     it("rejects shutdown grace below one", async () => {
       process.env["LADYBUG_SERVER_SHUTDOWN_GRACE_MS"] = "0";
+
+      await expect(manager.initialize()).rejects.toThrow(LadybugConfigError);
+    });
+
+    it("parses DB lock stale/retries from env, mirroring the shutdown timings", async () => {
+      process.env["LADYBUG_DB_LOCK_STALE_MS"] = "4321";
+      process.env["LADYBUG_DB_LOCK_RETRIES"] = "0"; // 0 == try once; must be allowed
+
+      await manager.initialize();
+      const config = manager.getConfiguration().ladybugdb;
+
+      expect(config.serverLockStaleMs).toBe(4321);
+      expect(config.serverLockRetries).toBe(0);
+    });
+
+    it("rejects DB lock stale below one", async () => {
+      process.env["LADYBUG_DB_LOCK_STALE_MS"] = "0";
+
+      await expect(manager.initialize()).rejects.toThrow(LadybugConfigError);
+    });
+
+    it("rejects a negative DB lock retries", async () => {
+      process.env["LADYBUG_DB_LOCK_RETRIES"] = "-1";
 
       await expect(manager.initialize()).rejects.toThrow(LadybugConfigError);
     });

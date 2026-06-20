@@ -214,14 +214,6 @@ function getConfiguredPositiveIntEnv(envName: string, fallback: number): number 
   return parsed;
 }
 
-export function getConfiguredShutdownGraceMs(): number {
-  return getConfiguredPositiveIntEnv(SHUTDOWN_GRACE_MS_ENV, DEFAULT_SHUTDOWN_GRACE_MS);
-}
-
-export function getConfiguredShutdownHardMs(): number {
-  return getConfiguredPositiveIntEnv(SHUTDOWN_HARD_MS_ENV, DEFAULT_SHUTDOWN_HARD_MS);
-}
-
 /**
  * Default `stale` window (ms) for the database file lock (`proper-lockfile`).
  * After a process holding the lock dies without releasing it, the lock is

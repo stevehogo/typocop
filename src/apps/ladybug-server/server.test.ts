@@ -131,6 +131,8 @@ describe("startConnectionServer", () => {
       discoveryPath,
       shutdownGraceMs: 5_000,
       shutdownHardMs: 10_000,
+      lockStaleMs: 30_000,
+      lockRetries: 10,
     });
 
     const grpcModule = await import("@grpc/grpc-js") as unknown as {
@@ -192,6 +194,8 @@ describe("startConnectionServer", () => {
       discoveryPath,
       shutdownGraceMs: 5_000,
       shutdownHardMs: 10_000,
+      lockStaleMs: 30_000,
+      lockRetries: 10,
     });
 
     const grpcModule = await import("@grpc/grpc-js") as unknown as {
@@ -243,6 +247,8 @@ describe("startConnectionServer", () => {
       discoveryPath,
       shutdownGraceMs: 5_000,
       shutdownHardMs: 10_000,
+      lockStaleMs: 30_000,
+      lockRetries: 10,
     });
 
     const grpcModule = await import("@grpc/grpc-js") as unknown as {
