@@ -34,9 +34,12 @@ vi.mock("./file-lock.js", () => ({
   releaseFileLock: vi.fn().mockResolvedValue(undefined),
 }));
 
+import { mkdtemp, writeFile, access, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { Database, Connection } from "@ladybugdb/core";
 import { acquireFileLock } from "./file-lock.js";
-import { createLadybugConnection, resetConnectionCache } from "./connection.js";
+import { createLadybugConnection, resetConnectionCache, isCorruptWalError } from "./connection.js";
 
 const mockAcquireFileLock = vi.mocked(acquireFileLock);
 
@@ -180,6 +183,77 @@ describe("createLadybugConnection", () => {
       expect(instantSleep).toHaveBeenNthCalledWith(1, 200);
       expect(instantSleep).toHaveBeenNthCalledWith(2, 400);
     });
+  });
+});
+
+describe("corrupt WAL self-heal", () => {
+  beforeEach(() => {
+    resetConnectionCache();
+    vi.clearAllMocks();
+    mockDatabaseInit.mockResolvedValue(undefined);
+    mockConnectionInit.mockResolvedValue(undefined);
+  });
+
+  const corruptWalErr = (): Error =>
+    new Error("Runtime exception: Corrupted wal file. Read out invalid WAL record type.");
+
+  it("quarantines the WAL once on a corrupt-WAL error and succeeds on retry", async () => {
+    mockDatabaseInit.mockRejectedValueOnce(corruptWalErr()).mockResolvedValueOnce(undefined);
+    const quarantine = vi.fn().mockResolvedValue(true);
+
+    const conn = await createLadybugConnection("/tmp/test.ladybug", instantSleep, {}, quarantine);
+
+    expect(quarantine).toHaveBeenCalledTimes(1);
+    expect(quarantine).toHaveBeenCalledWith("/tmp/test.ladybug");
+    expect(MockDatabase).toHaveBeenCalledTimes(2);
+    expect(conn.connection).toBe(mockConnectionInstance);
+  });
+
+  it("does NOT quarantine for a non-WAL error (e.g. locked)", async () => {
+    mockDatabaseInit.mockRejectedValueOnce(new Error("locked")).mockResolvedValueOnce(undefined);
+    const quarantine = vi.fn().mockResolvedValue(false);
+
+    await createLadybugConnection("/tmp/test.ladybug", instantSleep, {}, quarantine);
+
+    expect(quarantine).not.toHaveBeenCalled();
+  });
+
+  it("quarantines at most once even when every attempt is corrupt", async () => {
+    mockDatabaseInit.mockRejectedValue(corruptWalErr());
+    const quarantine = vi.fn().mockResolvedValue(true);
+
+    await expect(
+      createLadybugConnection("/tmp/test.ladybug", instantSleep, {}, quarantine),
+    ).rejects.toThrow(DatabaseConnectionError);
+
+    expect(quarantine).toHaveBeenCalledTimes(1);
+  });
+
+  it("default quarantine renames a real WAL file aside (fs-backed)", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "typocop-wal-"));
+    const dbPath = join(dir, "db.ladybug");
+    const walPath = `${dbPath}.wal`;
+    await writeFile(walPath, "corrupt-bytes");
+    // First attempt throws corrupt-WAL, second succeeds; no injected quarantine,
+    // so the real defaultQuarantineWal runs against the temp WAL.
+    mockDatabaseInit.mockRejectedValueOnce(corruptWalErr()).mockResolvedValueOnce(undefined);
+
+    await createLadybugConnection(dbPath, instantSleep);
+
+    await expect(access(walPath)).rejects.toThrow(); // renamed to a corrupt-bak sibling
+    await rm(dir, { recursive: true, force: true });
+  });
+});
+
+describe("isCorruptWalError", () => {
+  it("matches LadybugDB corrupt-WAL messages", () => {
+    expect(isCorruptWalError(new Error("Corrupted wal file. Read out invalid WAL record type."))).toBe(true);
+    expect(isCorruptWalError(new Error("read out invalid WAL record"))).toBe(true);
+  });
+  it("does not match unrelated errors", () => {
+    expect(isCorruptWalError(new Error("locked"))).toBe(false);
+    expect(isCorruptWalError(new Error("connection refused"))).toBe(false);
+    expect(isCorruptWalError("some string")).toBe(false);
   });
 });
 

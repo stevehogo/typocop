@@ -64,6 +64,25 @@ export class LadybugVectorAdapter implements VectorAdapter {
         file_path STRING DEFAULT ''
       )`,
     );
+    // In-place migration: embeddings tables created before A4 lack the
+    // indexable file_path column; add it if missing (idempotent).
+    await this.addColumnIfMissing("file_path", "STRING");
+  }
+
+  /**
+   * Add a column to the embeddings table if absent — in-place schema migration
+   * for DBs created by an older typocop. Idempotent: "already exists" is
+   * swallowed; anything else rethrows.
+   */
+  private async addColumnIfMissing(column: string, type: string): Promise<void> {
+    try {
+      await this.sql(`ALTER TABLE ${this.tableName} ADD ${column} ${type}`);
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      // LadybugDB/Kùzu reports a duplicate column as "<table> table already has
+      // property <col>." (older builds: "... already exists").
+      if (!/already exists|already has property/i.test(msg)) throw error;
+    }
   }
 
   async indexSymbol(

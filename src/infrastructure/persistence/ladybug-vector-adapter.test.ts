@@ -70,10 +70,14 @@ describe("LadybugVectorAdapter", () => {
       const adapter = createAdapter("tpc_");
       await adapter.createTables();
 
-      expect(mockQuery).toHaveBeenCalledOnce();
       const query = mockQuery.mock.calls[0][0] as string;
       expect(query).toContain("tpc_embeddings");
       expect(query).toContain("CREATE");
+      // createTables also runs an in-place column migration (ALTER ... ADD file_path)
+      // for DBs created before A4 — idempotent on fresh tables.
+      expect(
+        mockQuery.mock.calls.some((c) => /ALTER TABLE .* ADD file_path/i.test(String(c[0]))),
+      ).toBe(true);
     });
 
     it("should include symbol_id as PRIMARY KEY", async () => {

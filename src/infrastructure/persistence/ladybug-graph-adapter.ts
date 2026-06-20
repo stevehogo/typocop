@@ -104,6 +104,19 @@ export class LadybugGraphAdapter implements GraphAdapter {
       );
     }
 
+    // ── In-place column migration ──────────────────────────────────────────
+    // DBs created by an older typocop predate these columns; `CREATE ... IF NOT
+    // EXISTS` never alters an existing table, so add any missing columns now
+    // (idempotent — "already exists" is swallowed). Extend this list whenever a
+    // new persisted Symbol column is introduced.
+    const migratedColumns = ["cyclomatic", "cognitive", "maxLoopDepth", "responseKeys", "accessedKeys"];
+    for (const label of nodeLabels) {
+      const tbl = this.prefixLabel(label);
+      for (const col of migratedColumns) {
+        await this.addColumnIfMissing(tbl, col, "STRING");
+      }
+    }
+
     // Rel tables: each connects exactly one FROM table to one TO table (Kùzu requirement)
     const sym = this.prefixLabel("Symbol");
     const cls = this.prefixLabel("Cluster");
@@ -129,6 +142,22 @@ export class LadybugGraphAdapter implements GraphAdapter {
     await this.exec(`CREATE REL TABLE IF NOT EXISTS ${hasStepTbl} (FROM ${proc} TO ${sym}, step_order STRING)`);
 
     this.schemaInitialized = true;
+  }
+
+  /**
+   * Add a column to an existing table if absent — in-place schema migration for
+   * DBs created by an older typocop. Idempotent: the "already exists" error is
+   * swallowed; anything else rethrows.
+   */
+  private async addColumnIfMissing(table: string, column: string, type: string): Promise<void> {
+    try {
+      await this.exec(`ALTER TABLE ${table} ADD ${column} ${type}`);
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      // LadybugDB/Kùzu reports a duplicate column as "<table> table already has
+      // property <col>." (older builds: "... already exists").
+      if (!/already exists|already has property/i.test(msg)) throw error;
+    }
   }
 
   async createNode(

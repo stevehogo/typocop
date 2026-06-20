@@ -4,6 +4,7 @@
  */
 
 import { Database, Connection } from "@ladybugdb/core";
+import { rename, access } from "node:fs/promises";
 import { DatabaseConnectionError } from "./errors.js";
 import { acquireFileLock, releaseFileLock, type FileLock, type LockTunables } from "./file-lock.js";
 
@@ -41,6 +42,48 @@ const defaultSleep: SleepFn = (ms: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
+ * Quarantines a corrupted LadybugDB WAL so a retry can reopen the DB from its
+ * last checkpoint. Injectable for testability; defaults to a real fs rename of
+ * `<dbPath>.wal` → `<dbPath>.wal.corrupt-bak-<ts>` (matching the on-disk
+ * convention). Best-effort — returns false and never throws when there is no
+ * WAL or the rename fails, so the caller falls through to normal retry/exhaustion.
+ */
+export type QuarantineWalFn = (dbPath: string) => Promise<boolean>;
+
+function walBackupStamp(now: Date): string {
+  const p = (n: number): string => String(n).padStart(2, "0");
+  return `${now.getFullYear()}${p(now.getMonth() + 1)}${p(now.getDate())}-${p(now.getHours())}${p(now.getMinutes())}${p(now.getSeconds())}`;
+}
+
+const defaultQuarantineWal: QuarantineWalFn = async (dbPath: string): Promise<boolean> => {
+  const walPath = `${dbPath}.wal`;
+  try {
+    await access(walPath);
+  } catch {
+    return false; // no WAL present — nothing to quarantine
+  }
+  try {
+    const dest = `${walPath}.corrupt-bak-${walBackupStamp(new Date())}`;
+    await rename(walPath, dest);
+    console.error(`[ladybugdb] Quarantined corrupt WAL ${walPath} -> ${dest}; retrying connection`);
+    return true;
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`[ladybugdb] Failed to quarantine corrupt WAL ${walPath}: ${msg}`);
+    return false;
+  }
+};
+
+/**
+ * True when an error looks like a corrupted-WAL failure from LadybugDB
+ * (e.g. "Runtime exception: Corrupted wal file. Read out invalid WAL record type.").
+ */
+export function isCorruptWalError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  return /corrupt(?:ed)?\s+wal|invalid\s+wal\s+record/i.test(msg);
+}
+
+/**
  * Creates a LadybugDB connection with exponential-backoff retry.
  *
  * - Req 6.1: Database created at dbPath, Connection wraps it
@@ -53,6 +96,7 @@ export async function createLadybugConnection(
   dbPath: string,
   sleep: SleepFn = defaultSleep,
   lockOptions: LockTunables = {},
+  quarantineWal: QuarantineWalFn = defaultQuarantineWal,
 ): Promise<LadybugConnection> {
   // Acquire OS-level file lock to prevent concurrent access from multiple processes.
   // `staleMs`/`retries` are threaded from the server's per-repo config when supplied;
@@ -88,8 +132,9 @@ export async function createLadybugConnection(
     };
   }
 
-  // Cache miss — retry loop (unchanged behaviour)
+  // Cache miss — retry loop
   let lastError: unknown;
+  let quarantinedWal = false;
 
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     try {
@@ -124,6 +169,14 @@ export async function createLadybugConnection(
       lastError = err;
       const msg = err instanceof Error ? err.message : String(err);
       console.error(`[ladybugdb] Connection attempt ${attempt}/${MAX_ATTEMPTS} failed: ${msg}`);
+
+      // Self-heal a corrupted WAL exactly once: move it aside so the next
+      // attempt can reopen the DB from its last checkpoint instead of the server
+      // fatal-exiting. A killed-mid-write server is the usual cause; with
+      // `--refresh` the recovered graph is rebuilt anyway.
+      if (!quarantinedWal && isCorruptWalError(err)) {
+        quarantinedWal = await quarantineWal(dbPath);
+      }
 
       if (attempt < MAX_ATTEMPTS) {
         const delayMs = BASE_DELAY_MS * Math.pow(2, attempt - 1);

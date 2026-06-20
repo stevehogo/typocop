@@ -113,6 +113,25 @@ export function getConfiguredParseWorkerThreshold(): number {
   return getConfiguredPositiveIntEnv(PARSE_WORKER_THRESHOLD_ENV, PARSE_WORKER_THRESHOLD);
 }
 
+/** Environment opt-in for multi-core worker_threads parsing ({@link isParseWorkersEnabled}). */
+export const PARSE_WORKERS_ENV = "TYPOCOP_PARSE_WORKERS";
+
+/**
+ * Whether multi-core `worker_threads` parsing (B1) is enabled. **OPT-IN — default
+ * `false`.** The in-process async path is the proven default; the worker path can
+ * hard-abort the whole process on a native tree-sitter (`Napi::Error`) thrown
+ * inside a worker thread in some environments (it escapes JS `try/catch` as an
+ * uncaught C++ exception → `std::terminate`). It must therefore be enabled
+ * explicitly: set `TYPOCOP_PARSE_WORKERS=1` (or `true`/`yes`/`on`). The pool is
+ * still exercised in tests via an injected `poolFactory` seam.
+ */
+export function isParseWorkersEnabled(): boolean {
+  const raw = process.env[PARSE_WORKERS_ENV];
+  if (raw === undefined) return false;
+  const v = raw.trim().toLowerCase();
+  return v === "1" || v === "true" || v === "yes" || v === "on";
+}
+
 /**
  * Bounded concurrency for Phase 6 embedding generation (Phase C).
  *

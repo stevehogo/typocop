@@ -24,6 +24,7 @@ import {
   PARSE_CONCURRENCY,
   getConfiguredParseThreads,
   getConfiguredParseWorkerThreshold,
+  isParseWorkersEnabled,
 } from "../../../platform/utils/limits.js";
 import { WorkerPool, type WorkerPoolRunResult } from "../../../platform/utils/worker-pool.js";
 
@@ -363,11 +364,14 @@ export async function extractAllSymbolsWithPerFile(
   };
 
   // ── Path selection (B1/B2) ──────────────────────────────────────────────────
-  // Use the worker-thread pool ONLY above the threshold and when not disabled.
-  // Below it (or when disabled) the per-worker parser/query compilation cost
-  // outweighs the parallelism win, so the in-process async pool is used.
+  // The worker-thread pool is OPT-IN (default OFF): it can hard-abort the process
+  // on a native tree-sitter error in some environments, so the proven in-process
+  // async path is the default. It engages only above the threshold AND when
+  // explicitly enabled — via `TYPOCOP_PARSE_WORKERS` in production, or an injected
+  // `poolFactory` (test seam). `useWorkerThreads` overrides both when set.
   const threshold = options.workerThreshold ?? getConfiguredParseWorkerThreshold();
-  const useWorkers = (options.useWorkerThreads ?? true) && total >= threshold;
+  const workersDefault = options.poolFactory !== undefined || isParseWorkersEnabled();
+  const useWorkers = (options.useWorkerThreads ?? workersDefault) && total >= threshold;
 
   if (useWorkers) {
     await runViaWorkerPool(fileNodes, relativeBase, slots, reportSettled, options);

@@ -89,7 +89,12 @@ Changed files are **committed as a checkpoint per verified wave** — never left
 4. **Scope each commit to the wave's files** (`git add` the workflow's reported `filesChanged` + their tests), so unrelated pre-existing dirty files and any in-flight wave stay out.
 5. Do not `git push` or open a PR unless explicitly asked.
 
-**Checkpoint status:** Waves 1–5 (A–E concrete, 21 features) are all committed on `feature/refactor-code-base`. Only E5 (PDG + interprocedural taint — an XL product-line RFC) remains.
+**Checkpoint status:** Waves 1–5 (A–E concrete, 21 features) are all committed on `feature/refactor-code-base`. E5 (PDG + interprocedural taint — an XL product-line RFC) is **deferred by decision 2026-06-20** — revisit only if explicitly asked; recommended scope is a TS/JS-only MVP behind opt-in `--pdg` first.
+
+**Post-implementation hardening (2026-06-20)** — real-world `typocop parse --refresh` surfaced three runtime issues, all now fixed + tested:
+1. **Corrupt-WAL self-heal** — `connection.ts` now quarantines a corrupted WAL (`db.ladybug.wal` → `…corrupt-bak-<ts>`) once on a `Corrupted wal` error and retries, instead of the server fatal-exiting (a killed-mid-write server is the usual cause).
+2. **Worker parsing is opt-in** — B1 `worker_threads` parsing can hard-abort the process on a native tree-sitter `Napi::Error` (uncaught C++ exception → `std::terminate`, not catchable in JS). It is now **off by default**; enable with `TYPOCOP_PARSE_WORKERS=1`. The proven in-process path is the default. *(B1's native worker crash is a known follow-up to fix before re-enabling by default.)*
+3. **In-place schema migration** — `initializeSchema`/`createTables` now `ALTER TABLE ADD` any missing columns (A4 `file_path`, E2 `cyclomatic`/`cognitive`/`maxLoopDepth`, E3 `responseKeys`/`accessedKeys`) so DBs created by an older typocop are upgraded on connect (`CREATE TABLE IF NOT EXISTS` never migrates). Duplicate-column errors ("already has property") are swallowed.
 
 ---
 

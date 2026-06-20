@@ -13,6 +13,8 @@ import {
   defaultParseThreads,
   getConfiguredParseThreads,
   getConfiguredParseWorkerThreshold,
+  PARSE_WORKERS_ENV,
+  isParseWorkersEnabled,
   EMBEDDING_CONCURRENCY,
   EMBEDDING_TIMEOUT_MS,
   DB_WRITE_BATCH_SIZE,
@@ -138,6 +140,33 @@ describe('PARSE_WORKER_THRESHOLD (B2)', () => {
     for (const bad of ['0', '-1', 'nope', '1.5']) {
       process.env[PARSE_WORKER_THRESHOLD_ENV] = bad;
       expect(() => getConfiguredParseWorkerThreshold()).toThrow(PARSE_WORKER_THRESHOLD_ENV);
+    }
+  });
+});
+
+describe('isParseWorkersEnabled (opt-in, default off)', () => {
+  beforeEach(() => {
+    delete process.env[PARSE_WORKERS_ENV];
+  });
+  afterEach(() => {
+    delete process.env[PARSE_WORKERS_ENV];
+  });
+
+  it('is false when the env is unset (proven in-process path is the default)', () => {
+    expect(isParseWorkersEnabled()).toBe(false);
+  });
+
+  it('is true for truthy opt-in values', () => {
+    for (const v of ['1', 'true', 'TRUE', 'yes', 'on', ' on ']) {
+      process.env[PARSE_WORKERS_ENV] = v;
+      expect(isParseWorkersEnabled()).toBe(true);
+    }
+  });
+
+  it('is false for empty / falsy / garbage values', () => {
+    for (const v of ['', '0', 'false', 'no', 'off', 'maybe']) {
+      process.env[PARSE_WORKERS_ENV] = v;
+      expect(isParseWorkersEnabled()).toBe(false);
     }
   });
 });
