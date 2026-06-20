@@ -410,6 +410,38 @@ describe("LadybugGraphAdapter", () => {
     });
   });
 
+  // ── deleteSymbolsByFilePaths (A4 diff-based persistence) ────────────────
+
+  describe("deleteSymbolsByFilePaths", () => {
+    it("DETACH DELETEs symbols WHERE filePath IN $paths (parameterized, prefixed)", async () => {
+      const adapter = createAdapter("tpc_");
+      await adapter.deleteSymbolsByFilePaths!(["a.ts", "b.ts"]);
+
+      // Parameterized path → prepare/execute. First call counts, second deletes.
+      expect(mockPrepare).toHaveBeenCalledTimes(2);
+      const deleteQuery = mockPrepare.mock.calls[1][0] as string;
+      expect(deleteQuery).toContain("MATCH (n:tpc_Symbol)");
+      expect(deleteQuery).toContain("WHERE n.filePath IN $paths");
+      expect(deleteQuery).toContain("DETACH DELETE n");
+      // The $paths param is bound (not interpolated).
+      expect(mockExecute.mock.calls[1][1]).toEqual({ paths: ["a.ts", "b.ts"] });
+    });
+
+    it("returns the pre-delete matching count", async () => {
+      const adapter = createAdapter("tpc_");
+      mockExecute.mockResolvedValueOnce(mockQueryResult([{ count: 3 }]));
+
+      await expect(adapter.deleteSymbolsByFilePaths!(["a.ts"])).resolves.toBe(3);
+    });
+
+    it("is a no-op returning 0 for an empty path list (no query issued)", async () => {
+      const adapter = createAdapter("tpc_");
+      await expect(adapter.deleteSymbolsByFilePaths!([])).resolves.toBe(0);
+      expect(mockPrepare).not.toHaveBeenCalled();
+      expect(mockQuery).not.toHaveBeenCalled();
+    });
+  });
+
   // ── runCypher (Req 2.5, 2.6) ──────────────────────────────────────────
 
   describe("runCypher", () => {

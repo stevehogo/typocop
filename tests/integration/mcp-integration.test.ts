@@ -43,6 +43,7 @@ const STUB_QUERY_RESULT = {
   symbols: [
     {
       id: "sym-1",
+      logicalKey: "sym-1",
       name: "RateLimiter",
       kind: "class" as const,
       location: { filePath: "src/rate-limiter.ts", startLine: 1, startColumn: 0, endLine: 20, endColumn: 0 },

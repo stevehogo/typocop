@@ -136,7 +136,12 @@ export const walkFileTree = async (
         const stat = await fs.stat(fullPath);
         if (stat.size > MAX_FILE_SIZE) return { node: "large" as const, relativePath };
 
-        return { node: { path: relativePath, size: stat.size, language } satisfies FileNode, relativePath };
+        // Retain mtimeMs (A2): the cheap first tier of the parse-cache staleness
+        // check. The stat is already being performed here for size — no extra I/O.
+        return {
+          node: { path: relativePath, size: stat.size, language, mtimeMs: stat.mtimeMs } satisfies FileNode,
+          relativePath,
+        };
       })
     );
 

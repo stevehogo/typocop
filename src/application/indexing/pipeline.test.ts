@@ -17,6 +17,7 @@ import type { DatabaseAdapter, GraphAdapter, VectorAdapter, EmbeddingAdapter } f
 
 const STUB_SYMBOL: Symbol = {
   id: "stub",
+  logicalKey: "stub",
   name: "stub",
   kind: "function",
   location: { filePath: "stub.ts", startLine: 0, startColumn: 0, endLine: 0, endColumn: 0 },
@@ -168,7 +169,7 @@ describe("runIndexingPipeline — DatabaseAdapter integration", () => {
     };
 
     mockExtractAllSymbols.mockResolvedValue({
-      symbols: [STUB_SYMBOL, { ...STUB_SYMBOL, id: "stub2", name: "stub2" }],
+      symbols: [STUB_SYMBOL, { ...STUB_SYMBOL, id: "stub2", logicalKey: "stub2", name: "stub2" }],
       hints: [], skippedFiles: 0,
     });
     mockResolveReferences.mockReturnValue({ relationships: [relationship], extNodes: new Map() });
@@ -183,8 +184,9 @@ describe("runIndexingPipeline — DatabaseAdapter integration", () => {
     expect(result.clusters).toHaveLength(1);
     expect(result.processes).toHaveLength(1);
 
-    // 2 symbols + 1 cluster + 1 process = 4 nodes
-    expect(graph.createNode).toHaveBeenCalledTimes(4);
+    // 2 symbols + 1 cluster + 1 process = 4 entity nodes + 1 lastIndexed
+    // Metadata node (A4) = 5 createNode calls.
+    expect(graph.createNode).toHaveBeenCalledTimes(5);
     // 1 relationship + 2 cluster membership + 2 process steps = 5 edges
     expect(graph.createRelationship).toHaveBeenCalledTimes(5);
 
@@ -192,6 +194,11 @@ describe("runIndexingPipeline — DatabaseAdapter integration", () => {
     expect(graph.createNode).toHaveBeenCalledWith("Symbol", expect.objectContaining({ id: "stub" }));
     expect(graph.createNode).toHaveBeenCalledWith("Cluster", expect.objectContaining({ id: "cluster-1" }));
     expect(graph.createNode).toHaveBeenCalledWith("Process", expect.objectContaining({ id: "proc-1" }));
+    // A4 / pre-existing bug 0.4: the lastIndexed Metadata node is written.
+    expect(graph.createNode).toHaveBeenCalledWith(
+      "Metadata",
+      expect.objectContaining({ key: "lastIndexed", timestamp: expect.any(String) }),
+    );
 
     // Verify bare edge types (adapter handles prefix internally)
     expect(graph.createRelationship).toHaveBeenCalledWith("stub", "stub2", "CALLS", {});
@@ -235,6 +242,64 @@ describe("runIndexingPipeline — DatabaseAdapter integration", () => {
       ecosystem: "npm",
     });
   });
+
+  // A1 (KEYSTONE): the PERSISTED graph keys nodes/edges/vectors on `logicalKey`,
+  // not the intra-run `id`. The pipeline maps id → logicalKey at the persist
+  // boundary; synthetic endpoints (ext:/import:/unresolved:) fall through.
+  it("persists nodes, edges, and vectors keyed on logicalKey; synthetic ids pass through (A1)", async () => {
+    const { adapter, graph, vector } = makeMockAdapter(true);
+
+    // Two symbols whose persisted logicalKey DIFFERS from their intra-run id.
+    const symA: Symbol = { ...STUB_SYMBOL, id: "src/a.ts:Foo:1:0", logicalKey: "lk-foo", name: "Foo" };
+    const symB: Symbol = { ...STUB_SYMBOL, id: "src/a.ts:Bar:9:0", logicalKey: "lk-bar", name: "Bar" };
+
+    const cluster: Cluster = {
+      id: "cluster-1", name: "Auth", symbols: [symA.id, symB.id],
+      confidence: 0.9, category: "authentication",
+    };
+    const process: Process = {
+      id: "proc-1", name: "Flow", entryPoint: symA.id,
+      steps: [
+        { order: 0, symbolId: symA.id, description: "entry" },
+        { order: 1, symbolId: symB.id, description: "next" },
+      ],
+      dataFlow: [],
+    };
+    // One symbol→symbol edge (both endpoints map), one synthetic import edge whose
+    // SOURCE is synthetic (passes through) and TARGET is a real symbol (maps).
+    const relationships: Relationship[] = [
+      { id: "r1", source: symA.id, target: symB.id, relType: "calls", metadata: {} },
+      { id: "r2", source: "src/a.ts:import:./b", target: symB.id, relType: "imports", metadata: {} },
+    ];
+
+    mockExtractAllSymbols.mockResolvedValue({ symbols: [symA, symB], hints: [], skippedFiles: 0 });
+    mockResolveReferences.mockReturnValue({ relationships, extNodes: new Map() });
+    mockClusterSymbols.mockResolvedValue([cluster]);
+    mockTraceProcesses.mockReturnValue([process]);
+    mockBuildSearchIndex.mockResolvedValue({
+      keywords: new Map(), symbolCount: 2,
+      embeddings: [{ symbolId: symA.id, embedding: STUB_EMBEDDING, metadata: {} }],
+      embeddingStats: { attempts: 1, successes: 1, failures: 0 },
+    });
+
+    await runIndexingPipeline({ sourcePath: ".", language: "typescript", verbose: false, adapter });
+
+    // Node ids are logicalKeys, not intra-run ids.
+    expect(graph.createNode).toHaveBeenCalledWith("Symbol", expect.objectContaining({ id: "lk-foo" }));
+    expect(graph.createNode).toHaveBeenCalledWith("Symbol", expect.objectContaining({ id: "lk-bar" }));
+    // Process entryPoint maps too.
+    expect(graph.createNode).toHaveBeenCalledWith("Process", expect.objectContaining({ entryPoint: "lk-foo" }));
+
+    // Symbol→symbol edge: both endpoints mapped.
+    expect(graph.createRelationship).toHaveBeenCalledWith("lk-foo", "lk-bar", "CALLS", {});
+    // Synthetic import source passes through unchanged; real target maps.
+    expect(graph.createRelationship).toHaveBeenCalledWith("src/a.ts:import:./b", "lk-bar", "IMPORTS", {});
+    // CONTAINS / HAS_STEP membership edges map their symbol endpoints.
+    expect(graph.createRelationship).toHaveBeenCalledWith("cluster-1", "lk-foo", "CONTAINS", {});
+    expect(graph.createRelationship).toHaveBeenCalledWith("proc-1", "lk-bar", "HAS_STEP", { step_order: "1" });
+    // Vector symbolId maps to logicalKey.
+    expect(vector.indexSymbol).toHaveBeenCalledWith("lk-foo", STUB_EMBEDDING, {});
+  });
 });
 
 describe("storeInDatabases — batch fast-path (Phase D / PR7)", () => {
@@ -273,7 +338,7 @@ describe("storeInDatabases — batch fast-path (Phase D / PR7)", () => {
     };
 
     mockExtractAllSymbols.mockResolvedValue({
-      symbols: [STUB_SYMBOL, { ...STUB_SYMBOL, id: "stub2", name: "stub2" }],
+      symbols: [STUB_SYMBOL, { ...STUB_SYMBOL, id: "stub2", logicalKey: "stub2", name: "stub2" }],
       hints: [], skippedFiles: 0,
     });
     mockResolveReferences.mockReturnValue({ relationships: [relationship], extNodes: new Map() });
@@ -311,6 +376,9 @@ describe("storeInDatabases — batch fast-path (Phase D / PR7)", () => {
     expect(nodeRowsByLabel.get("Symbol")).toHaveLength(2);
     expect(nodeRowsByLabel.get("Cluster")).toHaveLength(1);
     expect(nodeRowsByLabel.get("Process")).toHaveLength(1);
+    // A4: the lastIndexed Metadata node is also routed through the batch path.
+    expect(nodeRowsByLabel.get("Metadata")).toHaveLength(1);
+    expect(nodeRowsByLabel.get("Metadata")![0]).toMatchObject({ key: "lastIndexed" });
 
     // Relationships grouped by type.
     const relTypes = (createRelationships.mock.calls as Array<[string, unknown[]]>).map(([t]) => t);
@@ -321,7 +389,8 @@ describe("storeInDatabases — batch fast-path (Phase D / PR7)", () => {
     expect(vecBatches.flatMap(([part]) => part)).toHaveLength(2);
 
     // Metrics count ROWS, not batch calls.
-    // 2 symbols + 1 cluster + 1 process = 4 node rows.
+    // 2 symbols + 1 cluster + 1 process = 4 node rows. The lastIndexed Metadata
+    // node uses a no-op onRows (A4), so it is intentionally NOT counted here.
     expect(result.metrics.graphNodeWrites).toBe(4);
     // 1 CALLS + 2 CONTAINS + 2 HAS_STEP = 5 edge rows.
     expect(result.metrics.graphEdgeWrites).toBe(5);
@@ -330,8 +399,11 @@ describe("storeInDatabases — batch fast-path (Phase D / PR7)", () => {
 
     // Phase B batch-level counters: count CALLS, not rows. These small fixtures
     // fit a single chunk per group, so each non-empty group is one batch call.
-    // Node groups: Symbol, Cluster, Process (ExternalDependency is empty here).
-    expect(result.metrics.nodeBatchCount).toBe(createNodes.mock.calls.length);
+    // Entity node groups: Symbol, Cluster, Process (ExternalDependency empty).
+    // The lastIndexed Metadata write (A4) ALSO issues a createNodes call but is
+    // deliberately wired WITHOUT batch events, so it adds a createNodes call
+    // without bumping nodeBatchCount.
+    expect(createNodes.mock.calls.length).toBe(4);
     expect(result.metrics.nodeBatchCount).toBe(3);
     // Relationship groups: CALLS, CONTAINS, HAS_STEP.
     expect(result.metrics.relationshipBatchCount).toBe(createRelationships.mock.calls.length);
@@ -608,8 +680,8 @@ describe("runIndexingPipeline — persist progress drift guard (Phase A)", () =>
     // that storeInDatabases and countPersistRows must agree on.
     const symbols: Symbol[] = [
       STUB_SYMBOL,
-      { ...STUB_SYMBOL, id: "stub2", name: "stub2" },
-      { ...STUB_SYMBOL, id: "stub3", name: "stub3" },
+      { ...STUB_SYMBOL, id: "stub2", logicalKey: "stub2", name: "stub2" },
+      { ...STUB_SYMBOL, id: "stub3", logicalKey: "stub3", name: "stub3" },
     ];
     const clusters: Cluster[] = [
       { id: "cluster-1", name: "Auth", symbols: ["stub", "stub2"], confidence: 0.9, category: "authentication" },
@@ -698,5 +770,131 @@ describe("runIndexingPipeline — persist progress drift guard (Phase A)", () =>
       stderrSpy.mockRestore();
       Object.defineProperty(process.stderr, "isTTY", { value: originalIsTTY, configurable: true });
     }
+  });
+});
+
+// ─── A4: diff-based persistence (delta write) ───────────────────────────────────
+//
+// These tests drive the pipeline's DELTA branch with a mock adapter that exposes
+// the optional per-file deletes. They assert: (1) the delete fast-paths are
+// called with the removed+changed file scopes; (2) only the changed+added file
+// symbols/vectors are inserted (unchanged files are skipped); (3) the FULL
+// relationship/cluster/process set is still written wholesale; (4) the lastIndexed
+// Metadata node is written; (5) when the adapter LACKS the deletes, the pipeline
+// silently falls back to a full INSERT (no delete, all symbols inserted).
+
+describe("runIndexingPipeline — A4 diff-based persistence (delta branch)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    setupDefaultMocks();
+  });
+
+  // Two files: a.ts (changed) and b.ts (unchanged). The merged set passed to
+  // persist is global (both files' symbols), mirroring v1's global resolution.
+  const symA: Symbol = {
+    ...STUB_SYMBOL, id: "src/a.ts:Foo", logicalKey: "lk-foo", name: "Foo",
+    location: { filePath: "src/a.ts", startLine: 0, startColumn: 0, endLine: 0, endColumn: 0 },
+  };
+  const symB: Symbol = {
+    ...STUB_SYMBOL, id: "src/b.ts:Bar", logicalKey: "lk-bar", name: "Bar",
+    location: { filePath: "src/b.ts", startLine: 0, startColumn: 0, endLine: 0, endColumn: 0 },
+  };
+
+  function primeTwoFileRun(): void {
+    mockExtractAllSymbols.mockResolvedValue({ symbols: [symA, symB], hints: [], skippedFiles: 0 });
+    // A cross-file edge b.ts → a.ts (an inbound edge to the changed file). The
+    // DETACH DELETE drops it; the wholesale relationship rewrite restores it.
+    mockResolveReferences.mockReturnValue({
+      relationships: [{ id: "rel-1", source: symB.id, target: symA.id, relType: "calls", metadata: {} }],
+      extNodes: new Map(),
+    });
+    mockBuildSearchIndex.mockResolvedValue({
+      keywords: new Map(), symbolCount: 2,
+      embeddings: [
+        { symbolId: symA.id, embedding: STUB_EMBEDDING, metadata: { filePath: "src/a.ts" } },
+        { symbolId: symB.id, embedding: STUB_EMBEDDING, metadata: { filePath: "src/b.ts" } },
+      ],
+      embeddingStats: { attempts: 2, successes: 2, failures: 0 },
+    });
+  }
+
+  function makeDeltaCapableAdapter() {
+    const base = makeMockAdapter(true);
+    const deleteSymbolsByFilePaths = vi.fn().mockResolvedValue(1);
+    const deleteByFilePaths = vi.fn().mockResolvedValue(1);
+    (base.graph as GraphAdapter & { deleteSymbolsByFilePaths: typeof deleteSymbolsByFilePaths })
+      .deleteSymbolsByFilePaths = deleteSymbolsByFilePaths;
+    (base.vector as VectorAdapter & { deleteByFilePaths: typeof deleteByFilePaths })
+      .deleteByFilePaths = deleteByFilePaths;
+    return { ...base, deleteSymbolsByFilePaths, deleteByFilePaths };
+  }
+
+  it("deletes the removed+changed scopes and inserts only changed+added symbols/vectors", async () => {
+    primeTwoFileRun();
+    const { adapter, graph, vector, deleteSymbolsByFilePaths, deleteByFilePaths } =
+      makeDeltaCapableAdapter();
+
+    await runIndexingPipeline({
+      sourcePath: ".", language: "typescript", verbose: false, adapter,
+      delta: { removedAndChangedFiles: ["src/a.ts"], addedAndChangedFiles: ["src/a.ts"] },
+    });
+
+    // (1) per-file deletes called with the removed+changed scope.
+    expect(deleteSymbolsByFilePaths).toHaveBeenCalledWith(["src/a.ts"]);
+    expect(deleteByFilePaths).toHaveBeenCalledWith(["src/a.ts"]);
+
+    // (2) only the changed file's Symbol node is inserted (b.ts skipped).
+    const symbolNodeCalls = (graph.createNode as ReturnType<typeof vi.fn>).mock.calls
+      .filter(([label]) => label === "Symbol");
+    expect(symbolNodeCalls).toHaveLength(1);
+    expect(symbolNodeCalls[0][1]).toMatchObject({ id: "lk-foo" });
+
+    // only the changed file's vector is inserted.
+    const vectorCalls = (vector.indexSymbol as ReturnType<typeof vi.fn>).mock.calls;
+    expect(vectorCalls).toHaveLength(1);
+    expect(vectorCalls[0][0]).toBe("lk-foo");
+
+    // (3) the inbound cross-file edge (b.ts → a.ts) is STILL written wholesale,
+    // restoring what the DETACH DELETE transiently dropped (keyed by logicalKey).
+    expect(graph.createRelationship).toHaveBeenCalledWith("lk-bar", "lk-foo", "CALLS", {});
+
+    // (4) lastIndexed Metadata node written.
+    expect(graph.createNode).toHaveBeenCalledWith(
+      "Metadata",
+      expect.objectContaining({ key: "lastIndexed" }),
+    );
+  });
+
+  it("falls back to a full INSERT (no delete) when the adapter lacks per-file deletes", async () => {
+    primeTwoFileRun();
+    const { adapter, graph, vector } = makeMockAdapter(true); // no delete fast-paths
+
+    await runIndexingPipeline({
+      sourcePath: ".", language: "typescript", verbose: false, adapter,
+      delta: { removedAndChangedFiles: ["src/a.ts"], addedAndChangedFiles: ["src/a.ts"] },
+    });
+
+    // Both files' symbols + vectors inserted (delta inactive → full insert).
+    const symbolNodeCalls = (graph.createNode as ReturnType<typeof vi.fn>).mock.calls
+      .filter(([label]) => label === "Symbol");
+    expect(symbolNodeCalls).toHaveLength(2);
+    expect((vector.indexSymbol as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(2);
+  });
+
+  it("counts only the inserted subset for the persist progress total (delta drift-guard)", async () => {
+    primeTwoFileRun();
+    const { adapter } = makeDeltaCapableAdapter();
+
+    const result = await runIndexingPipeline({
+      sourcePath: ".", language: "typescript", verbose: false, adapter,
+      delta: { removedAndChangedFiles: ["src/a.ts"], addedAndChangedFiles: ["src/a.ts"] },
+    });
+
+    // Inserted: 1 symbol node + 1 vector + 1 relationship edge (wholesale).
+    // countPersistRows is computed on the INSERTED subset for symbols/vectors but
+    // the FULL set for relationships — assert the metric totals match that shape.
+    expect(result.metrics.graphNodeWrites).toBe(1); // only lk-foo (b.ts skipped)
+    expect(result.metrics.vectorWrites).toBe(1);
+    expect(result.metrics.graphEdgeWrites).toBe(1); // the wholesale CALLS edge
   });
 });

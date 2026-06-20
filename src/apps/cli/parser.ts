@@ -16,6 +16,17 @@ export interface CLIConfig {
    * Defaults to false for incremental/update behavior.
    */
   refresh?: boolean;
+  /**
+   * A4 diff-based persistence. When true (the DEFAULT), the indexer does a delta
+   * write — only changed+added files are re-parsed/re-embedded/re-inserted and
+   * removed+changed file scopes are deleted; the resulting graph is identical to
+   * a full index of the same tree. When false (`--full`), every file is
+   * re-parsed and the graph is rewritten wholesale (today's behavior). `--full`
+   * implies a full INSERT and is the safe fall-back if a delta run looks wrong.
+   * Optional in the type (omitted === incremental) so callers/tests that build a
+   * config literal need not set it; `parseArgs` always sets it explicitly.
+   */
+  incremental?: boolean;
 }
 
 export type CLICommand =
@@ -56,6 +67,8 @@ export function parseArgs(rawArgs: string[]): CLICommand {
     .option("-o, --out <path>", "Output database path")
     .option("-v, --verbose", "Enable verbose logging", false)
     .option("-r, --refresh", "Clear and rebuild all graph and embeddings data", false)
+    .option("--incremental", "Diff-based delta write: re-index only changed/added files (default)", true)
+    .option("--full", "Full re-index: re-parse every file and rewrite the graph wholesale")
     .action((options) => {
       if (!fs.existsSync(options.path)) {
         throw new CLIValidationError(`Source path does not exist: ${options.path}`);
@@ -80,6 +93,11 @@ export function parseArgs(rawArgs: string[]): CLICommand {
         lang = detected;
       }
 
+      // `--full` forces a wholesale re-index; otherwise incremental (default).
+      // `--refresh` (clear-then-rebuild) is inherently a full write, so it also
+      // disables the delta path.
+      const incremental = options.full ? false : !options.refresh;
+
       parsedCommand = {
         type: "parse",
         config: {
@@ -87,7 +105,8 @@ export function parseArgs(rawArgs: string[]): CLICommand {
           language: lang,
           outputPath: options.out,
           verbose: options.verbose,
-          refresh: options.refresh
+          refresh: options.refresh,
+          incremental,
         }
       };
     });

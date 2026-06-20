@@ -27,6 +27,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "bench": "RUN_BENCH=1 vitest run src/application/indexing/ingestion.bench.test.ts",
+    "bench:parse": "RUN_BENCH=1 vitest run src/application/indexing/parsing.bench.test.ts",
     "typecheck": "tsc --noEmit",
     "typecheck:tests": "tsc --noEmit -p tsconfig.tests.json",
     "depcruise": "depcruise --ignore-known=.dependency-cruiser-known-violations.json"

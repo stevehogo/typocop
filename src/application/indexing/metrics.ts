@@ -33,6 +33,24 @@ export interface IndexingMetrics {
   /** Total elapsed milliseconds across the whole pipeline. */
   readonly totalMs: number;
 
+  // ── Memory (B3): peak RSS high-water marks ──
+  // Sampled from `process.memoryUsage().rss` at phase boundaries (phase start
+  // and end). Bytes only — never source code or symbol text. These make the
+  // "should we stream graph emit?" question data-driven (B3 plan): true CSV/COPY
+  // streaming is only worth it if a real repo shows node/edge arrays (not the
+  // already-streamed vectors) are the binding constraint.
+  /**
+   * Highest `rss` byte value observed at ANY phase boundary across the whole
+   * run — a monotonic high-water mark, always `>= max(phaseRssBytes)`.
+   */
+  readonly peakRssBytes: number;
+  /**
+   * Per-phase RSS high-water: the largest `rss` byte value sampled at that
+   * phase's boundaries (start and end). A phase that never ran samples nothing
+   * and stays 0.
+   */
+  readonly phaseRssBytes: Readonly<Record<PhaseName, number>>;
+
   // ── Phase 1: structure ──
   readonly filesScanned: number;
 
@@ -105,6 +123,14 @@ export interface MetricsCollector {
   incr(field: CountField, by?: number): void;
   /** Add an already-measured elapsed-millisecond value to a timing field. */
   addElapsed(field: ElapsedField, ms: number): void;
+  /**
+   * Sample `process.memoryUsage().rss` and fold it into both the global
+   * `peakRssBytes` high-water and the named phase's high-water. Called at phase
+   * boundaries (start/end). Sampling outside a phase still advances the global
+   * peak; pass a phase name to also advance that phase's high-water. Cheap and
+   * synchronous; safe to call repeatedly.
+   */
+  sampleMemory(phase?: PhaseName): void;
   /** Produce the immutable snapshot (also fills in totalMs from first start). */
   finalize(): IndexingMetrics;
 }
@@ -161,6 +187,26 @@ export function createMetricsCollector(): MetricsCollector {
   };
   const phaseStarts = new Map<PhaseName, number>();
 
+  // B3: RSS high-water tracking. `peakRssBytes` is a monotonic global maximum;
+  // `phaseRss` holds each phase's own high-water (max rss sampled at its
+  // boundaries). Sampling is `process.memoryUsage().rss` — bytes only.
+  const phaseRss: Record<PhaseName, number> = {
+    structure: 0,
+    parsing: 0,
+    resolution: 0,
+    clustering: 0,
+    processes: 0,
+    search: 0,
+    persist: 0,
+  };
+  let peakRssBytes = 0;
+
+  const sampleMemory = (phase?: PhaseName): void => {
+    const rss = process.memoryUsage().rss;
+    if (rss > peakRssBytes) peakRssBytes = rss;
+    if (phase !== undefined && rss > phaseRss[phase]) phaseRss[phase] = rss;
+  };
+
   const counts: Record<CountField, number> = {
     filesScanned: 0,
     filesParsed: 0,
@@ -199,6 +245,7 @@ export function createMetricsCollector(): MetricsCollector {
   return {
     startPhase(name: PhaseName): void {
       phaseStarts.set(name, markStart());
+      sampleMemory(name);
     },
 
     endPhase(name: PhaseName): void {
@@ -206,14 +253,17 @@ export function createMetricsCollector(): MetricsCollector {
       if (start === undefined) return;
       phases[name] += performance.now() - start;
       phaseStarts.delete(name);
+      sampleMemory(name);
     },
 
     async time<T>(name: PhaseName, fn: () => Promise<T>): Promise<T> {
       const start = markStart();
+      sampleMemory(name);
       try {
         return await fn();
       } finally {
         phases[name] += performance.now() - start;
+        sampleMemory(name);
       }
     },
 
@@ -229,11 +279,18 @@ export function createMetricsCollector(): MetricsCollector {
       elapsed[field] += ms;
     },
 
+    sampleMemory,
+
     finalize(): IndexingMetrics {
       const totalMs = firstStart === null ? 0 : performance.now() - firstStart;
+      // Final sample so the global peak reflects end-of-run memory even if the
+      // last activity happened outside a timed phase.
+      sampleMemory();
       return {
         phases: { ...phases },
         totalMs,
+        peakRssBytes,
+        phaseRssBytes: { ...phaseRss },
         filesScanned: counts.filesScanned,
         filesParsed: counts.filesParsed,
         skippedFiles: counts.skippedFiles,
@@ -269,6 +326,7 @@ export function createMetricsCollector(): MetricsCollector {
  */
 export function formatMetrics(metrics: IndexingMetrics): string {
   const ms = (n: number): string => `${n.toFixed(1)}ms`;
+  const mib = (bytes: number): string => `${(bytes / (1024 * 1024)).toFixed(1)}MiB`;
   const lines: string[] = [];
 
   lines.push("[pipeline] Indexing metrics:");
@@ -299,6 +357,16 @@ export function formatMetrics(metrics: IndexingMetrics): string {
     `  batches:      ${metrics.nodeBatchCount} node, ${metrics.relationshipBatchCount} rel,` +
       ` ${metrics.vectorBatchCount} vector` +
       ` (${metrics.adaptiveSplitCount} splits, ${metrics.oversizedRowCount} oversized)`,
+  );
+  // B3: peak RSS + the phase that held the high-water, so the streaming question
+  // is data-driven. `peakRssBytes` is the monotonic global maximum.
+  const peakPhase = PHASE_NAMES.reduce<PhaseName>(
+    (top, name) => (metrics.phaseRssBytes[name] > metrics.phaseRssBytes[top] ? name : top),
+    PHASE_NAMES[0],
+  );
+  lines.push(
+    `  memory:       peak RSS ${mib(metrics.peakRssBytes)}` +
+      ` (high-water in ${peakPhase}: ${mib(metrics.phaseRssBytes[peakPhase])})`,
   );
 
   return lines.join("\n");

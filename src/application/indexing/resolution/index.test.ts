@@ -32,6 +32,7 @@ import type { Symbol } from "../../../core/domain.js";
 
 function makeSymbol(overrides: Partial<Symbol> & Pick<Symbol, "id" | "name" | "kind">): Symbol {
   return {
+    logicalKey: overrides.id,
     visibility: "public",
     modifiers: [],
     location: {

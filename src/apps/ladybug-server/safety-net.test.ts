@@ -2,7 +2,7 @@ import { EventEmitter } from "node:events";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { installProcessSafetyNet } from "./safety-net.js";
+import { installProcessSafetyNet, type CrashRecord } from "./safety-net.js";
 
 /**
  * A fake process surface: an EventEmitter that also tracks the listeners added
@@ -224,7 +224,7 @@ describe("installProcessSafetyNet", () => {
   it("writes the crash record synchronously and swallows write errors", () => {
     const proc = new FakeProcess();
     vi.spyOn(console, "error").mockImplementation(() => undefined);
-    const writeCrashRecordSync = vi.fn(() => {
+    const writeCrashRecordSync = vi.fn((_record: CrashRecord) => {
       throw new Error("disk full");
     });
 

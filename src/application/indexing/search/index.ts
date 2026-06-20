@@ -2,9 +2,11 @@
 // Combines keyword indexing and embedding generation into a unified SearchIndex
 
 import type { Symbol, Cluster, Embedding } from "../../../core/domain.js";
+import type { EmbeddingCachePort } from "../../../core/ports/embedding-cache.js";
 import { buildKeywordIndex } from "./keywords.js";
 import { formatSymbolForEmbedding, formatClusterForEmbedding } from "./format.js";
 import { mapWithConcurrency } from "../../../platform/utils/async-pool.js";
+import { sha256Hex } from "../../../platform/utils/hash.js";
 import {
   EMBEDDING_CONCURRENCY,
   EMBEDDING_TIMEOUT_MS,
@@ -27,12 +29,23 @@ export interface EmbeddingResult {
  * degrade the affected item to keyword-only search; the pipeline never fails.
  */
 export interface EmbeddingStats {
-  /** Items (symbols + clusters) for which an embedding was attempted. */
+  /**
+   * Items (symbols + clusters) for which an embedding was ATTEMPTED via the
+   * embed function. Cache hits (A3) are NOT counted here — they never call the
+   * embed function — so this stays a faithful measure of inference work done.
+   */
   readonly attempts: number;
   /** Items that produced a usable embedding. */
   readonly successes: number;
   /** Items that yielded no embedding (null result, timeout, or thrown error). */
   readonly failures: number;
+  /**
+   * Items (A3) served from the embedding cache — a stored vector reused with NO
+   * embed call. Omitted (undefined) when no embedding cache is wired, so the
+   * field is additive and does NOT inflate {@link attempts}. A cache hit still
+   * contributes its embedding to {@link SearchIndex.embeddings}.
+   */
+  readonly embeddingCacheHits?: number;
 }
 
 export interface SearchIndex {
@@ -41,6 +54,13 @@ export interface SearchIndex {
   readonly embeddings: EmbeddingResult[];
   /** Embedding success/failure accounting for this run (Phase C). */
   readonly embeddingStats: EmbeddingStats;
+  /**
+   * A3: the set of embed-text hashes this run touched (every job's
+   * `sha256(text)`), surfaced ONLY when an embedding cache was active. The
+   * orchestrator passes it to {@link EmbeddingCachePort.prune} so the cache is
+   * trimmed to the live corpus each run. Undefined when no cache was wired.
+   */
+  readonly liveEmbeddingHashes?: ReadonlySet<string>;
 }
 
 /**
@@ -87,6 +107,22 @@ interface EmbedJob {
  * @param embedTextsFn - OPTIONAL batch embedding function. Used as the fast-path
  *   only when provided AND batching is explicitly enabled (opt-in, default off —
  *   see {@link isEmbeddingBatchEnabled}); `embedFn` remains the per-item path.
+ *
+ * EMBEDDING CACHE (A3): when an {@link EmbeddingCachePort} and the expected
+ * embedding `dimensions` are supplied, each job's embed-text is hashed
+ * (`sha256(text)`) and looked up BEFORE embedding. A hit synthesizes the
+ * {@link EmbeddingResult} from the stored vector with NO embed call (counted in
+ * {@link EmbeddingStats.embeddingCacheHits}, NOT in `attempts`); a
+ * dimension-mismatch is a miss. Only the misses flow through the embed/batch
+ * path; their fresh embeddings are written back to the cache. Determinism is
+ * preserved — results stay aligned to the original job index regardless of which
+ * jobs hit the cache or which embed call settles first.
+ *
+ * @param embeddingCache - OPTIONAL A3 cache. When provided WITH
+ *   `expectedDimensions`, unchanged inputs reuse stored vectors and skip embed.
+ * @param expectedDimensions - The embedding model's dimension count (from
+ *   `EmbeddingAdapter.getDimensions()`); the cache key's dimension tag. Required
+ *   for the cache to engage — a hit whose stored dimension differs is a miss.
  */
 export async function buildSearchIndex(
   symbols: Symbol[],
@@ -96,6 +132,8 @@ export async function buildSearchIndex(
   embedTextsFn:
     | ((texts: string[]) => Promise<(Embedding | null)[]>)
     | null = null,
+  embeddingCache: EmbeddingCachePort | null = null,
+  expectedDimensions: number | null = null,
 ): Promise<SearchIndex> {
   const keywords = buildKeywordIndex(symbols);
 
@@ -165,30 +203,90 @@ export async function buildSearchIndex(
       null,
     ).catch(() => null);
 
-  const useBatch = embedTextsFn !== null && isEmbeddingBatchEnabled();
+  // A3 EMBEDDING CACHE — resolve cache hits up front, then embed only the misses.
+  // The cache engages only when both a port AND the expected dimension are
+  // supplied (the dimension is the cache key's model tag; without it a stored
+  // vector can't be safely matched). `settled` is index-aligned to `jobs`; hits
+  // fill their slot immediately, misses are scattered back to their slot below.
+  const cacheActive = embeddingCache !== null && expectedDimensions !== null;
 
-  let settled: (EmbeddingResult | null)[];
-  if (useBatch && embedTextsFn !== null) {
-    settled = await runBatched(jobs, concurrency, embedTextsFn, embedJobItem);
+  // Per-job embed-text hash (computed once; reused for lookup AND write-back).
+  const hashes: string[] = cacheActive ? jobs.map((j) => sha256Hex(j.text)) : [];
+
+  const settled: (EmbeddingResult | null)[] = new Array(jobs.length).fill(null);
+  // Misses keep their ORIGINAL index so results land in the right slot.
+  const missJobs: EmbedJob[] = [];
+  const missIndices: number[] = [];
+  let cacheHits = 0;
+
+  if (cacheActive && embeddingCache !== null && expectedDimensions !== null) {
+    for (let i = 0; i < jobs.length; i++) {
+      const cached = embeddingCache.get(hashes[i], expectedDimensions);
+      if (cached !== undefined) {
+        // Hit: synthesize the result from the stored vector — NO embed call.
+        settled[i] = jobs[i].toResult(cached);
+        cacheHits++;
+      } else {
+        missJobs.push(jobs[i]);
+        missIndices.push(i);
+      }
+    }
   } else {
-    // Per-item path: bounded concurrency over individual jobs.
-    settled = await mapWithConcurrency(jobs, concurrency, embedJobItem);
+    // No cache: every job is a miss (embedded), preserving prior behavior.
+    for (let i = 0; i < jobs.length; i++) {
+      missJobs.push(jobs[i]);
+      missIndices.push(i);
+    }
   }
 
-  // Flatten in input order (determinism preserved) and tally failures.
+  const useBatch = embedTextsFn !== null && isEmbeddingBatchEnabled();
+
+  let missResults: (EmbeddingResult | null)[];
+  if (useBatch && embedTextsFn !== null) {
+    missResults = await runBatched(missJobs, concurrency, embedTextsFn, embedJobItem);
+  } else {
+    // Per-item path: bounded concurrency over individual (miss) jobs.
+    missResults = await mapWithConcurrency(missJobs, concurrency, embedJobItem);
+  }
+
+  // Scatter miss results back to their original job index (determinism), and
+  // collect freshly-computed embeddings for write-back to the cache.
+  const freshEntries: { textHash: string; embedding: Embedding }[] = [];
+  for (let m = 0; m < missJobs.length; m++) {
+    const originalIndex = missIndices[m];
+    const result = missResults[m];
+    settled[originalIndex] = result;
+    if (cacheActive && result !== null) {
+      freshEntries.push({ textHash: hashes[originalIndex], embedding: result.embedding });
+    }
+  }
+  if (cacheActive && embeddingCache !== null && freshEntries.length > 0) {
+    embeddingCache.setMany(freshEntries);
+  }
+
+  // Flatten in input order (determinism preserved) and tally failures. Cache
+  // hits are NOT attempts (no embed call); only the misses are attempts.
   const collected: EmbeddingResult[] = [];
   for (const result of settled) {
     if (result !== null) collected.push(result);
   }
 
-  const attempts = jobs.length;
-  const successes = collected.length;
+  const attempts = missJobs.length;
+  const successes = collected.length - cacheHits;
+
+  const embeddingStats: EmbeddingStats = {
+    attempts,
+    successes,
+    failures: attempts - successes,
+    ...(cacheActive ? { embeddingCacheHits: cacheHits } : {}),
+  };
 
   return {
     keywords,
     symbolCount: symbols.length,
     embeddings: collected,
-    embeddingStats: { attempts, successes, failures: attempts - successes },
+    embeddingStats,
+    ...(cacheActive ? { liveEmbeddingHashes: new Set(hashes) } : {}),
   };
 }
 

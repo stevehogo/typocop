@@ -54,7 +54,13 @@ vi.mock("../remote-transport/autostart.js", () => ({
 
 import { createDatabaseAdapter, LadybugDatabaseAdapter } from "./database-adapter.js";
 import type { EmbeddingAdapter } from "../../core/ports/persistence.js";
-import { DEFAULT_GRPC_MAX_MESSAGE_BYTES } from "../../platform/utils/limits.js";
+import {
+  DEFAULT_GRPC_MAX_MESSAGE_BYTES,
+  DEFAULT_SHUTDOWN_GRACE_MS,
+  DEFAULT_SHUTDOWN_HARD_MS,
+  DEFAULT_DB_LOCK_STALE_MS,
+  DEFAULT_DB_LOCK_RETRIES,
+} from "../../platform/utils/limits.js";
 
 // Embedding is injected since §14; this stub stands in for any provider.
 const stubEmbedding = {
@@ -96,6 +102,10 @@ function makeConfig(runtimeMode: "server" | "client") {
       serverLockPath: "/tmp/ladybug.lock",
       serverDiscoveryPath: "/tmp/ladybug.json",
       serverIdleTtlMs: 0,
+      serverShutdownGraceMs: DEFAULT_SHUTDOWN_GRACE_MS,
+      serverShutdownHardMs: DEFAULT_SHUTDOWN_HARD_MS,
+      serverLockStaleMs: DEFAULT_DB_LOCK_STALE_MS,
+      serverLockRetries: DEFAULT_DB_LOCK_RETRIES,
     },
     loadedAt: new Date(),
     source: "default" as const,

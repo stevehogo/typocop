@@ -319,6 +319,33 @@ export class LadybugGraphAdapter implements GraphAdapter {
     return count;
   }
 
+  /**
+   * A4 diff-write: DETACH DELETE every Symbol node whose `filePath` is in
+   * `paths`, returning the count deleted. Parameterized (`$paths`) and routed
+   * through {@link execWithParamsSchemaRetry} so a missing-table error recreates
+   * the schema and retries once, mirroring the other write paths. An empty
+   * `paths` is a no-op (nothing matches `IN []`), so we short-circuit to 0.
+   *
+   * `DETACH DELETE` also drops the changed file's inbound cross-file edges; the
+   * pipeline re-emits those from the global resolution each run (keyed by
+   * `logicalKey`), so they restore.
+   */
+  async deleteSymbolsByFilePaths(paths: readonly string[]): Promise<number> {
+    if (paths.length === 0) return 0;
+    const prefixedLabel = this.prefixLabel("Symbol");
+    const pathList = [...paths];
+    const countRows = await this.execWithParamsSchemaRetry(
+      `MATCH (n:${prefixedLabel}) WHERE n.filePath IN $paths RETURN count(n) as count`,
+      { paths: pathList },
+    );
+    const count = Number(countRows[0]?.count ?? 0);
+    await this.execWithParamsSchemaRetry(
+      `MATCH (n:${prefixedLabel}) WHERE n.filePath IN $paths DETACH DELETE n`,
+      { paths: pathList },
+    );
+    return count;
+  }
+
   async deleteRelationshipsByType(type: string): Promise<number> {
     const prefixedType = this.prefixType(type);
     const countRows = await this.execWithSchemaRetry(

@@ -14,6 +14,7 @@ import { resolveHints } from "./index.js";
 
 function makeSymbol(overrides: Partial<Symbol> & Pick<Symbol, "id" | "name">): Symbol {
   return {
+    logicalKey: overrides.id,
     kind: "function",
     visibility: "public",
     modifiers: [],

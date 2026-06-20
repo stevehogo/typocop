@@ -41,6 +41,9 @@ vi.mock("../../application/indexing/pipeline.js", () => ({
     externalDependencyCount: 0,
     skippedFiles: 0,
     embeddingCount: 0,
+    // A5: the executor reads metrics for its reused/parsed reporting; the real
+    // pipeline always populates this. A minimal stub is enough for these tests.
+    metrics: { filesScanned: 0, filesParsed: 0, skippedFiles: 0, embeddingAttempts: 0 },
   }),
 }));
 

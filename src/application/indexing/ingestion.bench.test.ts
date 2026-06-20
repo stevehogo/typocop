@@ -100,6 +100,7 @@ function buildFixture(): Fixture {
     const isLong = i % longEvery === 0;
     symbols.push({
       id: `sym-${i}`,
+      logicalKey: `sym-${i}`,
       name: `symbol_${i}`,
       kind: "function",
       location: {

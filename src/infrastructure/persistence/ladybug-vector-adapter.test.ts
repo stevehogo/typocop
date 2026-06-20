@@ -111,6 +111,14 @@ describe("LadybugVectorAdapter", () => {
       expect(query).toContain("dev_embeddings");
       expect(query).not.toContain("tpc_embeddings");
     });
+
+    it("includes an indexable file_path column (A4)", async () => {
+      const adapter = createAdapter("tpc_");
+      await adapter.createTables();
+
+      const query = mockQuery.mock.calls[0][0] as string;
+      expect(query).toContain("file_path STRING");
+    });
   });
 
   // ── indexSymbol (Req 3.3, 3.5) ───────────────────────────────────────────
@@ -163,6 +171,22 @@ describe("LadybugVectorAdapter", () => {
       const query = mockQuery.mock.calls[0][0] as string;
       expect(query).toContain("[1.0,0.0,-2.0]");
     });
+
+    it("writes file_path from metadata.filePath (A4)", async () => {
+      const adapter = createAdapter("tpc_");
+      await adapter.indexSymbol("sym1", makeEmbedding(3), { filePath: "src/a.ts" });
+
+      const query = mockQuery.mock.calls[0][0] as string;
+      expect(query).toContain(`n.file_path = ${JSON.stringify("src/a.ts")}`);
+    });
+
+    it("writes an empty file_path when metadata has no filePath (A4)", async () => {
+      const adapter = createAdapter("tpc_");
+      await adapter.indexSymbol("sym1", makeEmbedding(3), { kind: "function" });
+
+      const query = mockQuery.mock.calls[0][0] as string;
+      expect(query).toContain(`n.file_path = ${JSON.stringify("")}`);
+    });
   });
 
   // ── indexSymbols (batch fast-path) ─────────────────────────────────────
@@ -207,7 +231,9 @@ describe("LadybugVectorAdapter", () => {
       // Per-row builds `n.metadata = <literal>` where <literal> is
       // JSON.stringify(JSON.stringify(metadata)); the STORED string is the inner
       // JSON.stringify(metadata).
-      const literal = perRowQuery.split("n.metadata = ")[1].trim();
+      // The metadata literal is followed by `, n.file_path = ...` (A4), so slice
+      // it off at that boundary before unwrapping the Cypher string literal.
+      const literal = perRowQuery.split("n.metadata = ")[1].split(", n.file_path = ")[0].trim();
       const storedPerRow = JSON.parse(literal) as string; // unwrap the Cypher string literal
 
       vi.clearAllMocks();
@@ -236,6 +262,20 @@ describe("LadybugVectorAdapter", () => {
       await adapter.indexSymbols([]);
       expect(mockPrepare).not.toHaveBeenCalled();
       expect(mockExecute).not.toHaveBeenCalled();
+    });
+
+    it("binds file_path from metadata.filePath, identical to the per-row path (A4)", async () => {
+      const adapter = createAdapter("tpc_") as LadybugVectorAdapter;
+      await adapter.indexSymbols([
+        { symbolId: "sym1", embedding: makeEmbedding(3), metadata: { filePath: "src/a.ts" } },
+        { symbolId: "sym2", embedding: makeEmbedding(3) },
+      ]);
+
+      const query = mockPrepare.mock.calls[0][0] as string;
+      expect(query).toContain("n.file_path = row.file_path");
+      const params = mockExecute.mock.calls[0][1] as { rows: Array<Record<string, unknown>> };
+      expect(params.rows[0].file_path).toBe("src/a.ts");
+      expect(params.rows[1].file_path).toBe("");
     });
   });
 
@@ -346,13 +386,44 @@ describe("LadybugVectorAdapter", () => {
     it("should use the configured prefix", async () => {
       mockQuery.mockResolvedValueOnce(mockQueryResult([{ count: 3 }])); // count query
       mockQuery.mockResolvedValueOnce(mockQueryResult([])); // delete query
-      
+
       const adapter = createAdapter("dev_");
       await adapter.deleteAll();
 
       const deleteQuery = mockQuery.mock.calls[1][0] as string;
       expect(deleteQuery).toContain("dev_embeddings");
       expect(deleteQuery).not.toContain("tpc_embeddings");
+    });
+  });
+
+  // ── deleteByFilePaths (A4 diff-based persistence) ──────────────────────
+
+  describe("deleteByFilePaths", () => {
+    it("DETACH DELETEs rows WHERE file_path IN $paths (parameterized, prefixed)", async () => {
+      const adapter = createAdapter("tpc_") as LadybugVectorAdapter;
+      await adapter.deleteByFilePaths(["src/a.ts", "src/b.ts"]);
+
+      // Parameterized path → prepare/execute. First call counts, second deletes.
+      expect(mockPrepare).toHaveBeenCalledTimes(2);
+      const deleteQuery = mockPrepare.mock.calls[1][0] as string;
+      expect(deleteQuery).toContain("tpc_embeddings");
+      expect(deleteQuery).toContain("WHERE n.file_path IN $paths");
+      expect(deleteQuery).toContain("DETACH DELETE");
+      expect(mockExecute.mock.calls[1][1]).toEqual({ paths: ["src/a.ts", "src/b.ts"] });
+    });
+
+    it("returns the pre-delete matching count", async () => {
+      const adapter = createAdapter("tpc_") as LadybugVectorAdapter;
+      mockExecute.mockResolvedValueOnce(mockQueryResult([{ count: 4 }]));
+
+      await expect(adapter.deleteByFilePaths(["src/a.ts"])).resolves.toBe(4);
+    });
+
+    it("is a no-op returning 0 for an empty path list (no query issued)", async () => {
+      const adapter = createAdapter("tpc_") as LadybugVectorAdapter;
+      await expect(adapter.deleteByFilePaths([])).resolves.toBe(0);
+      expect(mockPrepare).not.toHaveBeenCalled();
+      expect(mockQuery).not.toHaveBeenCalled();
     });
   });
 

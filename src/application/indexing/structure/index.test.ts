@@ -21,7 +21,8 @@ const makeDirent = (name: string, isDir: boolean) => ({
   path: "",
 });
 
-const makeStat = (size: number) => ({ size } as Awaited<ReturnType<typeof fs.stat>>);
+const makeStat = (size: number, mtimeMs = 1_000) =>
+  ({ size, mtimeMs } as Awaited<ReturnType<typeof fs.stat>>);
 
 // ─── detectLanguageFromPath ───────────────────────────────────────────────────
 
@@ -113,7 +114,7 @@ describe("walkFileTree", () => {
     const result = await walkFileTree("/repo");
 
     expect(result).toHaveLength(1);
-    expect(result[0]).toEqual({ path: "app.ts", size: 2048, language: "typescript" });
+    expect(result[0]).toEqual({ path: "app.ts", size: 2048, language: "typescript", mtimeMs: 1_000 });
   });
 
   it("skips files with unrecognised extensions", async () => {

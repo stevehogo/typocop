@@ -117,6 +117,8 @@ async function fetchSymbols(
 
   return rows.map((r) => ({
     id: r.id,
+    // Post-persistence the node id IS the logicalKey (A1).
+    logicalKey: r.id,
     name: r.name,
     kind: r.kind,
     location: {

@@ -42,6 +42,7 @@ const STUB_QUERY_RESULT = {
   symbols: [
     {
       id: "sym-1",
+      logicalKey: "sym-1",
       name: "UserService",
       kind: "class" as const,
       location: { filePath: "src/user.ts", startLine: 1, startColumn: 0, endLine: 10, endColumn: 0 },

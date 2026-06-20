@@ -25,17 +25,28 @@ Verified accurate against the code on 2026-06-20. Tracked in the session task li
 Update the Status column (`pending` / `wip` / `done`) as work lands; keep it in sync with the tasks
 and the `feature-adoption-plan-progress` memory.
 
+**Wave 1 (incremental core A1–A5) landed & independently verified 2026-06-20** via the
+`incremental-core-wave-A` workflow: full suite 1455 passed / 4 skipped / 0 failed; typecheck,
+typecheck:tests, depcruise all clean.
+
+**Wave 2 (parsing/perf B2,B1,B4,B3) landed & independently verified 2026-06-20** via the
+`parsing-perf-wave-B` workflow: full suite 1490 passed / 5 skipped / 0 failed; typecheck/
+typecheck:tests/depcruise clean (321 modules). worker_threads parallel parsing with a determinism
+gate, peak-RSS metric, and gated parse bench; A1–A5 core not regressed.
+
+All changes from both waves are uncommitted in the working tree (awaiting review / a per-wave checkpoint).
+
 | Task | Feature | Status | Blocked by |
 |---|---|---|---|
-| #1 | A1 — Stable node identity (`logicalKey`) **[KEYSTONE]** | pending | — |
-| #2 | A2 — Persisted parse cache | pending | — |
-| #3 | A3 — Embedding cache | pending | A1 |
-| #4 | A4 — Diff-based persistence | pending | A1 |
-| #5 | A5 — Incremental orchestration (`reindexChangedFiles`) | pending | A1–A4 |
-| #6 | B2 — Adaptive batch/concurrency tuning | pending | — |
-| #7 | B1 — Multi-core parsing via `worker_threads` | pending | B2 |
-| #8 | B4 — Benchmark-driven tuning loop | pending | B1 |
-| #9 | B3 — Streaming-emit eval + peak-RSS metric | pending | B4 |
+| #1 | A1 — Stable node identity (`logicalKey`) **[KEYSTONE]** | ✅ done | — |
+| #2 | A2 — Persisted parse cache | ✅ done | — |
+| #3 | A3 — Embedding cache | ✅ done | A1 |
+| #4 | A4 — Diff-based persistence | ✅ done | A1 |
+| #5 | A5 — Incremental orchestration (`reindexChangedFiles`) | ✅ done | A1–A4 |
+| #6 | B2 — Adaptive batch/concurrency tuning | ✅ done | — |
+| #7 | B1 — Multi-core parsing via `worker_threads` | ✅ done | B2 |
+| #8 | B4 — Benchmark-driven tuning loop | ✅ done | B1 |
+| #9 | B3 — Streaming-emit eval + peak-RSS metric | ✅ done | B4 |
 | #10 | C1 — Git-diff → changed-symbols layer | pending | — |
 | #11 | C2 — `detect_changes` MCP tool | pending | C1 |
 | #12 | C3 — Watch mode + CLI `watch` | pending | A5 |

@@ -107,6 +107,19 @@ export interface GraphAdapter {
 
   deleteRelationshipsByType(type: string): Promise<number>;
 
+  /**
+   * OPTIONAL diff-write fast-path (A4): DETACH DELETE every `Symbol` node whose
+   * `filePath` is in `paths`, returning the number of symbol nodes deleted.
+   * `DETACH DELETE` transiently drops inbound cross-file edges too; the indexing
+   * pipeline re-emits those edges every run from the global resolution (keyed by
+   * `logicalKey`), so they restore — this is why v1 keeps resolution global.
+   *
+   * When this method is ABSENT, callers MUST fall back to a full refresh
+   * (deleteNodesByLabel for every label). The remote/gRPC adapter intentionally
+   * omits it so it degrades to full-refresh.
+   */
+  deleteSymbolsByFilePaths?(paths: readonly string[]): Promise<number>;
+
   runCypher<T>(
     query: string,
     params?: Record<string, unknown>,
@@ -153,6 +166,18 @@ export interface VectorAdapter {
   ): Promise<SearchResult[]>;
 
   deleteAll(): Promise<number>;
+
+  /**
+   * OPTIONAL diff-write fast-path (A4): delete every embedding row whose stored
+   * `file_path` column is in `paths`, returning the number of rows deleted. The
+   * adapter writes that column from `metadata.filePath` on each index call, so
+   * per-file vector deletes are a clean indexed match (no JSON_EXTRACT scan).
+   *
+   * When this method is ABSENT, callers MUST fall back to a full refresh
+   * (deleteAll). The remote/gRPC adapter intentionally omits it so it degrades
+   * to full-refresh.
+   */
+  deleteByFilePaths?(paths: readonly string[]): Promise<number>;
 }
 
 /**

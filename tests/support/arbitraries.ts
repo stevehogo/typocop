@@ -149,4 +149,5 @@ export const fileNodeArbitrary = (): fc.Arbitrary<FileNode> =>
     path: fc.string({ minLength: 1, maxLength: 100 }).map(p => p.replace(/\\/g, "/")),
     size: fc.nat({ max: 1_000_000 }),
     language: languageArbitrary() as fc.Arbitrary<any>,
+    mtimeMs: fc.nat(),
   });

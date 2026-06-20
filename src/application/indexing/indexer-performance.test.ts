@@ -23,9 +23,20 @@ import type {
 } from "../../core/ports/persistence.js";
 import type { Embedding } from "../../core/domain.js";
 import { walkFileTree } from "./structure/index.js";
-import { extractAllSymbols } from "./parsing/index.js";
+import {
+  extractAllSymbols,
+  type ParsePool,
+  type ParsePoolFactory,
+} from "./parsing/index.js";
+import { runParseTask } from "../../infrastructure/parsing/parse-worker.js";
+import type {
+  ParseTask,
+  ParseTaskResult,
+} from "../../infrastructure/parsing/parse-worker-protocol.js";
+import type { WorkerPoolRunResult } from "../../platform/utils/worker-pool.js";
 import { runIndexingPipeline } from "./pipeline.js";
 import { createMetricsCollector, formatMetrics } from "./metrics.js";
+import Parser from "tree-sitter";
 
 // ─── In-memory fixture ────────────────────────────────────────────────────────
 
@@ -171,6 +182,60 @@ describe("indexer performance harness — metrics collector", () => {
     const summary = formatMetrics(m.finalize());
     expect(summary).toContain("3 node, 2 rel, 1 vector (4 splits, 1 oversized)");
   });
+
+  // ── B3: peak-RSS metric ──
+  it("peakRssBytes is a monotonic high-water >= every per-phase RSS, and renders", () => {
+    const m = createMetricsCollector();
+
+    // Drive a few phases through startPhase/endPhase + time so RSS is sampled at
+    // their boundaries. The exact byte values are environment-dependent, so the
+    // assertions are invariants, not magnitudes.
+    m.startPhase("structure");
+    m.endPhase("structure");
+    m.startPhase("parsing");
+    // Allocate something during the parsing phase so any high-water shift is
+    // attributed there, then sample explicitly.
+    const ballast: number[] = new Array(50_000).fill(1);
+    m.sampleMemory("parsing");
+    expect(ballast.length).toBe(50_000); // keep `ballast` live across the sample
+    m.endPhase("parsing");
+    void m.time("persist", async () => undefined);
+
+    const snapshot = m.finalize();
+
+    // Global peak is positive (rss is always > 0) and is the monotonic maximum
+    // across ALL per-phase high-waters.
+    expect(snapshot.peakRssBytes).toBeGreaterThan(0);
+    for (const phase of [
+      "structure", "parsing", "resolution", "clustering", "processes", "search", "persist",
+    ] as const) {
+      expect(snapshot.peakRssBytes).toBeGreaterThanOrEqual(snapshot.phaseRssBytes[phase]);
+    }
+    // At least one phase that ran recorded a non-zero high-water (it was sampled
+    // at a boundary); phases that never ran stay 0.
+    const maxPhaseRss = Math.max(
+      ...(["structure", "parsing", "resolution", "clustering", "processes", "search", "persist"] as const)
+        .map((p) => snapshot.phaseRssBytes[p]),
+    );
+    expect(maxPhaseRss).toBeGreaterThan(0);
+    expect(snapshot.peakRssBytes).toBe(
+      Math.max(snapshot.peakRssBytes, maxPhaseRss),
+    );
+
+    const summary = formatMetrics(snapshot);
+    expect(summary).toContain("memory:");
+    expect(summary).toContain("peak RSS");
+  });
+
+  it("phases that never ran keep a zero RSS high-water", () => {
+    const m = createMetricsCollector();
+    m.startPhase("structure");
+    m.endPhase("structure");
+    const snapshot = m.finalize();
+    // resolution never ran → its high-water stays 0, but the global peak is set.
+    expect(snapshot.phaseRssBytes.resolution).toBe(0);
+    expect(snapshot.peakRssBytes).toBeGreaterThan(0);
+  });
 });
 
 describe("indexer performance harness — Phase 2 fixture", () => {
@@ -243,5 +308,53 @@ describe("indexer performance harness — Phase 2 fixture", () => {
     );
     expect(m.vectorWrites).toBe(m.embeddingCount);
     expect(m.graphEdgeWrites).toBeGreaterThanOrEqual(0);
+
+    // B3: a real run populates a positive peak-RSS high-water that dominates
+    // every per-phase high-water (monotonic invariant), and is rendered.
+    expect(m.peakRssBytes).toBeGreaterThan(0);
+    for (const phase of ["structure", "parsing", "resolution", "clustering", "processes", "search", "persist"] as const) {
+      expect(m.peakRssBytes).toBeGreaterThanOrEqual(m.phaseRssBytes[phase]);
+    }
+    expect(formatMetrics(m)).toContain("peak RSS");
+  });
+
+  // FAST, always-on smoke for the parallel (worker-pool) code path (B4). The
+  // shipped product spawns real `worker_threads` whose entry is the compiled
+  // `parse-worker.js` — unloadable under a plain `vitest run`. So we inject an
+  // IN-PROCESS pool that drives the SAME `runParseTask` logic the real worker
+  // uses, with `workerThreshold: 1` forcing `extractAllSymbols` down its
+  // worker-pool branch. CI thus exercises the parallel dispatch/slot/flatten tail
+  // on every run without the heavy `bench:parse` sweep, and asserts it stays
+  // byte-identical to the serial in-process path.
+  it("exercises the worker-pool branch on a small fixture (byte-identical to serial)", async () => {
+    const fileNodes = await walkFileTree(tmpDir);
+
+    const inProcessPoolFactory: ParsePoolFactory = (_size: number): ParsePool => {
+      const parsers = new Map<string, Parser>();
+      return {
+        async run(
+          tasks: readonly ParseTask[],
+          onSettled?: (index: number) => void,
+        ): Promise<WorkerPoolRunResult<ParseTaskResult>> {
+          const results: (ParseTaskResult | null)[] = new Array(tasks.length).fill(null);
+          // Settle in reverse to prove completion order never leaks into output.
+          for (let pos = tasks.length - 1; pos >= 0; pos--) {
+            results[pos] = await runParseTask(tasks[pos], parsers);
+            onSettled?.(tasks[pos].index);
+          }
+          return { results, breakerTripped: false, failedIndices: [] };
+        },
+        async destroy() {},
+      };
+    };
+
+    const serial = await extractAllSymbols(fileNodes, tmpDir, { useWorkerThreads: false });
+    const pooled = await extractAllSymbols(fileNodes, tmpDir, {
+      workerThreshold: 1,
+      poolFactory: inProcessPoolFactory,
+    });
+
+    expect(pooled.symbols.length).toBeGreaterThan(0);
+    expect(JSON.stringify(pooled)).toBe(JSON.stringify(serial));
   });
 });

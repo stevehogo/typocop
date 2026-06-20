@@ -4,6 +4,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as fc from "fast-check";
 import type { Symbol, Cluster, Embedding } from "../../../core/domain.js";
+import type { EmbeddingCachePort } from "../../../core/ports/embedding-cache.js";
 import { symbolArbitrary, clusterArbitrary, embeddingArbitrary } from "../../../../tests/support/arbitraries.js";
 import {
   formatSymbolForEmbedding,
@@ -18,6 +19,7 @@ import {
 function makeSymbol(overrides: Partial<Symbol> = {}): Symbol {
   return {
     id: "sym-1",
+    logicalKey: "sym-1",
     name: "getUserById",
     kind: "function",
     location: { filePath: "src/user.ts", startLine: 1, startColumn: 0, endLine: 10, endColumn: 1 },
@@ -567,6 +569,160 @@ describe("buildSearchIndex", () => {
       expect(index.embeddings).toHaveLength(1);
     });
   });
+
+  // ─── A3: Embedding cache ──────────────────────────────────────────────────
+
+  describe("embedding cache (A3)", () => {
+    /** Minimal in-memory EmbeddingCachePort with a hit-tracking double. */
+    function makeMemoryCache(): EmbeddingCachePort & {
+      readonly store: Map<string, Embedding>;
+    } {
+      const store = new Map<string, Embedding>();
+      return {
+        store,
+        get(textHash: string, dims: number): Embedding | undefined {
+          const hit = store.get(textHash);
+          if (hit === undefined) return undefined;
+          // Dimension mismatch = miss.
+          return hit.dimensions === dims ? hit : undefined;
+        },
+        setMany(entries) {
+          for (const { textHash, embedding } of entries) store.set(textHash, embedding);
+        },
+        prune(live) {
+          for (const key of [...store.keys()]) if (!live.has(key)) store.delete(key);
+        },
+        async flush() {},
+      };
+    }
+
+    const DIMS = 1536;
+    const makeEmbedding = (): Embedding => ({ vector: new Array(DIMS).fill(0.3), dimensions: DIMS });
+
+    it("warm cache makes ZERO embedFn calls on unchanged input", async () => {
+      const symbols = [
+        makeSymbol({ id: "s1", name: "login" }),
+        makeSymbol({ id: "s2", name: "logout" }),
+      ];
+      const clusters = [makeCluster({ id: "c1", symbols: ["s1", "s2"] })];
+      const cache = makeMemoryCache();
+      const embedding = makeEmbedding();
+
+      // First run (cold cache): every item is embedded and written back.
+      const cold = vi.fn().mockResolvedValue(embedding);
+      const first = await buildSearchIndex(symbols, clusters, cold, 3, null, cache, DIMS);
+      expect(cold).toHaveBeenCalledTimes(3);
+      expect(first.embeddingStats.embeddingCacheHits).toBe(0);
+      expect(first.embeddingStats.attempts).toBe(3);
+
+      // Second run (warm cache): identical input → no embed calls at all.
+      const warm = vi.fn().mockResolvedValue(embedding);
+      const second = await buildSearchIndex(symbols, clusters, warm, 3, null, cache, DIMS);
+      expect(warm).toHaveBeenCalledTimes(0);
+      expect(second.embeddingStats.embeddingCacheHits).toBe(3);
+      expect(second.embeddingStats.attempts).toBe(0);
+      expect(second.embeddingStats.successes).toBe(0);
+      expect(second.embeddingStats.failures).toBe(0);
+      // The embeddings are still present (served from cache).
+      expect(second.embeddings).toHaveLength(3);
+    });
+
+    it("a dimension change forces a cache miss (re-embed)", async () => {
+      const symbols = [makeSymbol({ id: "s1", name: "login" })];
+      const cache = makeMemoryCache();
+      const embedding = makeEmbedding();
+
+      // Warm the cache at DIMS=1536.
+      const first = vi.fn().mockResolvedValue(embedding);
+      await buildSearchIndex(symbols, [], first, 3, null, cache, DIMS);
+      expect(first).toHaveBeenCalledTimes(1);
+
+      // Re-run expecting a DIFFERENT dimension → stored vector cannot be reused.
+      const newEmbedding: Embedding = { vector: new Array(768).fill(0.1), dimensions: 768 };
+      const second = vi.fn().mockResolvedValue(newEmbedding);
+      const result = await buildSearchIndex(symbols, [], second, 3, null, cache, 768);
+      expect(second).toHaveBeenCalledTimes(1); // miss → embedded again
+      expect(result.embeddingStats.embeddingCacheHits).toBe(0);
+      expect(result.embeddingStats.attempts).toBe(1);
+    });
+
+    it("editing one symbol forces exactly one embed call (others cached)", async () => {
+      const symbols = [
+        makeSymbol({ id: "s1", name: "login" }),
+        makeSymbol({ id: "s2", name: "logout" }),
+        makeSymbol({ id: "s3", name: "register" }),
+      ];
+      const cache = makeMemoryCache();
+      const embedding = makeEmbedding();
+
+      const cold = vi.fn().mockResolvedValue(embedding);
+      await buildSearchIndex(symbols, [], cold, 3, null, cache, DIMS);
+      expect(cold).toHaveBeenCalledTimes(3);
+
+      // Edit s2's signature → its embed-text changes → only s2 misses.
+      const edited = [
+        symbols[0],
+        makeSymbol({ id: "s2", name: "logout", signature: "(token: string): void" }),
+        symbols[2],
+      ];
+      const warm = vi.fn().mockResolvedValue(embedding);
+      const result = await buildSearchIndex(edited, [], warm, 3, null, cache, DIMS);
+      expect(warm).toHaveBeenCalledTimes(1);
+      expect(result.embeddingStats.embeddingCacheHits).toBe(2);
+      expect(result.embeddingStats.attempts).toBe(1);
+      expect(result.embeddings).toHaveLength(3);
+    });
+
+    it("embeddings[] order is IDENTICAL with and without the cache (determinism)", async () => {
+      const symbols = [
+        makeSymbol({ id: "s1", name: "alpha" }),
+        makeSymbol({ id: "s2", name: "bravo" }),
+        makeSymbol({ id: "s3", name: "charlie" }),
+      ];
+      const clusters = [makeCluster({ id: "c1", symbols: ["s1", "s2", "s3"] })];
+      const embedding = makeEmbedding();
+
+      // No cache.
+      const noCacheFn = vi.fn().mockResolvedValue(embedding);
+      const noCache = await buildSearchIndex(symbols, clusters, noCacheFn, 3, null);
+
+      // Fully warm cache (every job served from cache).
+      const cache = makeMemoryCache();
+      const warmFn = vi.fn().mockResolvedValue(embedding);
+      await buildSearchIndex(symbols, clusters, warmFn, 3, null, cache, DIMS); // warm
+      const cachedFn = vi.fn().mockResolvedValue(embedding);
+      const cached = await buildSearchIndex(symbols, clusters, cachedFn, 3, null, cache, DIMS);
+      expect(cachedFn).toHaveBeenCalledTimes(0);
+
+      expect(cached.embeddings.map((e) => e.symbolId)).toEqual(
+        noCache.embeddings.map((e) => e.symbolId),
+      );
+    });
+
+    it("does NOT cache a failed (null) embedding — next run retries", async () => {
+      const symbols = [makeSymbol({ id: "s1", name: "login" })];
+      const cache = makeMemoryCache();
+
+      const failFn = vi.fn().mockResolvedValue(null);
+      const first = await buildSearchIndex(symbols, [], failFn, 3, null, cache, DIMS);
+      expect(failFn).toHaveBeenCalledTimes(1);
+      expect(first.embeddings).toHaveLength(0);
+      expect(cache.store.size).toBe(0); // nothing written for a failure
+
+      // Next run still attempts the embed (not served from cache).
+      const retryFn = vi.fn().mockResolvedValue(makeEmbedding());
+      const second = await buildSearchIndex(symbols, [], retryFn, 3, null, cache, DIMS);
+      expect(retryFn).toHaveBeenCalledTimes(1);
+      expect(second.embeddings).toHaveLength(1);
+    });
+
+    it("omits embeddingCacheHits and liveEmbeddingHashes when no cache is wired", async () => {
+      const symbols = [makeSymbol({ id: "s1", name: "login" })];
+      const index = await buildSearchIndex(symbols, [], vi.fn().mockResolvedValue(makeEmbedding()));
+      expect(index.embeddingStats.embeddingCacheHits).toBeUndefined();
+      expect(index.liveEmbeddingHashes).toBeUndefined();
+    });
+  });
 });
 
 // ─── Property-based tests ─────────────────────────────────────────────────────
@@ -682,6 +838,7 @@ describe("Property: extractKeywords always returns lowercase deduplicated string
 
   const symbolArb = fc.record({
     id: fc.string({ minLength: 1 }),
+    logicalKey: fc.string({ minLength: 1 }),
     name: fc.stringMatching(/^[a-zA-Z][a-zA-Z0-9_]*$/),
     kind: symbolKindArb,
     location: fc.record({
@@ -725,6 +882,7 @@ describe("Property: buildKeywordIndex maps each keyword to all symbol IDs contai
 
     const symbolArb = fc.record({
       id: fc.uuid(),
+      logicalKey: fc.uuid(),
       name: fc.stringMatching(/^[a-zA-Z][a-zA-Z0-9_]{1,20}$/),
       kind: symbolKindArb,
       location: fc.record({

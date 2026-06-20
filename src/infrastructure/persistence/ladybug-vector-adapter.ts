@@ -52,12 +52,16 @@ export class LadybugVectorAdapter implements VectorAdapter {
   }
 
   async createTables(): Promise<void> {
+    // `file_path` (A4) is an indexable column written from `metadata.filePath`,
+    // enabling clean per-file vector deletes (deleteByFilePaths) without a slow
+    // JSON_EXTRACT scan over the `metadata` blob.
     await this.sql(
       `CREATE NODE TABLE IF NOT EXISTS ${this.tableName} (
         symbol_id STRING PRIMARY KEY,
         embedding DOUBLE[],
         dimensions INT64,
-        metadata STRING DEFAULT '{}'
+        metadata STRING DEFAULT '{}',
+        file_path STRING DEFAULT ''
       )`,
     );
   }
@@ -69,9 +73,11 @@ export class LadybugVectorAdapter implements VectorAdapter {
   ): Promise<void> {
     const vecStr = toDoubleArrayLiteral(embedding.vector);
     const metaStr = JSON.stringify(JSON.stringify(metadata));
+    // A4: mirror metadata.filePath into the indexable file_path column.
+    const filePathStr = JSON.stringify(metadata.filePath ?? "");
     await this.sql(
       `MERGE (n:${this.tableName} {symbol_id: "${symbolId}"})
-       SET n.embedding = ${vecStr}, n.dimensions = ${embedding.dimensions}, n.metadata = ${metaStr}`,
+       SET n.embedding = ${vecStr}, n.dimensions = ${embedding.dimensions}, n.metadata = ${metaStr}, n.file_path = ${filePathStr}`,
     );
   }
 
@@ -100,10 +106,13 @@ export class LadybugVectorAdapter implements VectorAdapter {
       embedding: [...entry.embedding.vector],
       dimensions: entry.embedding.dimensions,
       metadata: JSON.stringify(entry.metadata ?? {}),
+      // A4: mirror metadata.filePath into the indexable file_path column,
+      // identical to the per-row indexSymbol path.
+      file_path: entry.metadata?.filePath ?? "",
     }));
     await this.sqlWithParams(
       `UNWIND $rows AS row MERGE (n:${this.tableName} {symbol_id: row.symbol_id})
-       SET n.embedding = row.embedding, n.dimensions = row.dimensions, n.metadata = row.metadata`,
+       SET n.embedding = row.embedding, n.dimensions = row.dimensions, n.metadata = row.metadata, n.file_path = row.file_path`,
       { rows },
     );
   }
@@ -140,6 +149,27 @@ export class LadybugVectorAdapter implements VectorAdapter {
     );
     const count = Number(countRows[0]?.count ?? 0);
     await this.sql(`MATCH (n:${this.tableName}) DETACH DELETE n`);
+    return count;
+  }
+
+  /**
+   * A4 diff-write: delete every embedding row whose stored `file_path` is in
+   * `paths`, returning the count deleted. Parameterized (`$paths`) so the
+   * delete matches on the indexable column rather than scanning the metadata
+   * JSON blob. An empty `paths` is a no-op (nothing matches `IN []`).
+   */
+  async deleteByFilePaths(paths: readonly string[]): Promise<number> {
+    if (paths.length === 0) return 0;
+    const pathList = [...paths];
+    const countRows = await this.sqlWithParams(
+      `MATCH (n:${this.tableName}) WHERE n.file_path IN $paths RETURN count(n) as count`,
+      { paths: pathList },
+    );
+    const count = Number(countRows[0]?.count ?? 0);
+    await this.sqlWithParams(
+      `MATCH (n:${this.tableName}) WHERE n.file_path IN $paths DETACH DELETE n`,
+      { paths: pathList },
+    );
     return count;
   }
 }

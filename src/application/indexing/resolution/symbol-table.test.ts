@@ -115,6 +115,7 @@ describe("buildSymbolTable", () => {
   it("builds table from Symbol[] using Symbol.id as nodeId", () => {
     const sym = {
       id: "sym-1",
+      logicalKey: "sym-1",
       name: "MyService",
       kind: "class" as const,
       visibility: "public" as const,

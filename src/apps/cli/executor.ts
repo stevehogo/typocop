@@ -5,12 +5,39 @@
 import { CLICommand } from "./parser.js";
 import chalk from "chalk";
 import ora from "ora";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { createDatabaseAdapter } from "../../infrastructure/persistence/database-adapter.js";
 import { createEmbeddingAdapterFromConfig } from "../../infrastructure/embeddings/embedding-factory.js";
 import { runIndexingPipeline, type PipelineConfig } from "../../application/indexing/pipeline.js";
 import { configurationManager } from "../../platform/config/index.js";
 import type { DatabaseAdapter } from "../../core/ports/persistence.js";
+import type { IndexCachePort } from "../../core/ports/index-cache.js";
+import type { EmbeddingCachePort } from "../../core/ports/embedding-cache.js";
+import { FileIndexCache } from "../../infrastructure/cache/file-index-cache.js";
+import { FileEmbeddingCache } from "../../infrastructure/cache/embedding-cache.js";
 import { executeObsidianExport } from "../../application/export-render/index.js";
+
+/**
+ * A5: build the disk-backed parse + embedding caches for a prefix.
+ *
+ * Both live under `~/.typocop/<prefix>/cache/` (mirroring the default DB path
+ * `~/.typocop/<prefix>/db.ladybug`), so a prefix's cache is co-located with its
+ * graph and survives `--refresh` (which clears the DB, not the cache — the
+ * pipeline only clears the parse cache when explicitly told to). The caches are
+ * self-contained adapters (only `node:` builtins) and are constructed here, in
+ * the composition root, so the application layer never touches the filesystem.
+ */
+function buildIndexCaches(prefix: string): {
+  cache: IndexCachePort;
+  embeddingCache: EmbeddingCachePort;
+} {
+  const cacheDir = join(homedir(), ".typocop", prefix, "cache");
+  return {
+    cache: new FileIndexCache(join(cacheDir, "parse-cache.json")),
+    embeddingCache: new FileEmbeddingCache(join(cacheDir, "embedding-cache.json")),
+  };
+}
 
 export interface ClearingStats {
   nodesDeleted: number;
@@ -26,6 +53,10 @@ export interface IndexingStats {
   externalDependencyCount: number;
   skippedFiles: number;
   embeddingCount: number;
+  /** A5: files served from the parse cache (not re-parsed) this run. */
+  filesReused: number;
+  /** A5: files actually re-parsed this run (changed + added). */
+  filesParsed: number;
   clearingStats?: ClearingStats;
 }
 
@@ -44,6 +75,12 @@ export async function executeIndexingPipeline(
   language: string,
   verbose: boolean,
   refresh?: boolean,
+  // A4: when false (`--full`/`--refresh`), force a wholesale re-index. When true
+  // (default), the pipeline does a delta write IF it is given a `delta` plan and
+  // the adapters support per-file deletes. The delta plan itself is produced by
+  // the A5 classify/cache step; until that is wired, an incremental run with no
+  // delta plan simply does a full INSERT (the MERGE-upsert keeps it correct).
+  incremental = true,
 ): Promise<IndexingStats> {
   const prefix = configurationManager.getPrefix();
   console.error(chalk.dim(`[typocop] Effective prefix: ${prefix}`));
@@ -116,14 +153,54 @@ export async function executeIndexingPipeline(
       }
     }
 
+    // A5: construct the disk caches from the prefix-derived path. The pipeline
+    // classifies the walk against the parse cache and re-parses/re-embeds only
+    // changed+added files (incremental); on `--full`/`--refresh` it is told
+    // `incremental: false` and rewrites wholesale. Both caches are passed on
+    // every run so the embedding cache warms even on a full run.
+    const { cache, embeddingCache } = buildIndexCaches(prefix);
+
+    // `--refresh` clears the DB; clear the parse cache too so the next run is a
+    // genuine cold rebuild (otherwise a warm parse cache would let it skip
+    // re-parsing files whose rows were just deleted). The embedding cache is left
+    // intact — its vectors are content-addressed and only ever help; the pipeline
+    // re-embeds + re-prunes against the fresh corpus regardless.
+    if (refresh) {
+      await cache.clear();
+    }
+
     const pipelineConfig: PipelineConfig = {
       sourcePath,
       language: language as PipelineConfig["language"],
       verbose,
       adapter,
+      // `--full`/`--refresh` → incremental=false (wholesale). Otherwise delta.
+      incremental,
+      cache,
+      embeddingCache,
     };
 
     const result = await runIndexingPipeline(pipelineConfig);
+
+    // A5 reporting: reused / parsed / embedded. `filesParsed` (metrics) counts the
+    // files actually re-parsed this run; `filesScanned - skipped - parsed` is the
+    // count served from the parse cache; `embeddingCacheHits` (when present)
+    // distinguishes vectors reused vs freshly embedded. Read defensively — the
+    // real pipeline always populates metrics, but partial test doubles may not.
+    const m = result.metrics;
+    const filesScanned = m?.filesScanned ?? 0;
+    const filesParsed = m?.filesParsed ?? 0;
+    const metricsSkipped = m?.skippedFiles ?? result.skippedFiles;
+    const embeddingAttempts = m?.embeddingAttempts ?? 0;
+    const reused = Math.max(0, filesScanned - metricsSkipped - filesParsed);
+    if (verbose) {
+      console.error(
+        chalk.dim(
+          `[typocop] Incremental: reused ${reused} file(s) / parsed ${filesParsed} / ` +
+            `embedded ${embeddingAttempts}`,
+        ),
+      );
+    }
 
     return {
       symbolCount: result.symbols.length,
@@ -133,6 +210,8 @@ export async function executeIndexingPipeline(
       externalDependencyCount: result.externalDependencyCount,
       skippedFiles: result.skippedFiles,
       embeddingCount: result.embeddingCount,
+      filesReused: reused,
+      filesParsed,
       clearingStats,
     };
   } finally {
@@ -342,12 +421,14 @@ export async function executeCLI(command: CLICommand): Promise<void> {
       break;
     }
     case "parse": {
-      const { sourcePath, language, verbose, refresh } = command.config;
+      const { sourcePath, language, verbose, refresh, incremental } = command.config;
       console.error(chalk.blue(`Initializing indexing for ${language} codebase at ${sourcePath}`));
 
       const initialMessage = refresh
         ? "Clearing existing data and starting multi-phase indexing pipeline..."
-        : "Starting multi-phase indexing pipeline...";
+        : incremental
+          ? "Starting incremental (delta) indexing pipeline..."
+          : "Starting full multi-phase indexing pipeline...";
 
       const spinner = ora(initialMessage).start();
 
@@ -359,7 +440,7 @@ export async function executeCLI(command: CLICommand): Promise<void> {
           }
         }
 
-        const stats = await executeIndexingPipeline(sourcePath, language, verbose, refresh);
+        const stats = await executeIndexingPipeline(sourcePath, language, verbose, refresh, incremental);
 
         spinner.succeed(chalk.green("Indexing completed successfully."));
 
@@ -377,6 +458,9 @@ export async function executeCLI(command: CLICommand): Promise<void> {
         console.error(`  Processes:     ${chalk.cyan(stats.processCount)}`);
         console.error(`  External deps: ${chalk.cyan(stats.externalDependencyCount)}`);
         console.error(`  Embeddings:    ${chalk.cyan(stats.embeddingCount)}`);
+        // A5: surface incremental reuse on every parse run (full or delta).
+        console.error(`  Files reused:  ${chalk.cyan(stats.filesReused)}`);
+        console.error(`  Files parsed:  ${chalk.cyan(stats.filesParsed)}`);
 
         if (stats.skippedFiles > 0) {
           console.error(chalk.yellow(`  Skipped files: ${stats.skippedFiles} (syntax errors or unreadable)`));

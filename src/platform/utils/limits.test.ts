@@ -1,10 +1,18 @@
-import { describe, it, expect, vi } from 'vitest';
+import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
+import os from 'node:os';
 import {
   MAX_FILE_SIZE_BYTES,
   MAX_GRAPH_SIZE_NODES,
   QUERY_TIMEOUT_MS,
   MAX_TRAVERSAL_DEPTH,
   PARSE_CONCURRENCY,
+  MAX_PARSE_THREADS,
+  PARSE_WORKER_THRESHOLD,
+  PARSE_THREADS_ENV,
+  PARSE_WORKER_THRESHOLD_ENV,
+  defaultParseThreads,
+  getConfiguredParseThreads,
+  getConfiguredParseWorkerThreshold,
   EMBEDDING_CONCURRENCY,
   EMBEDDING_TIMEOUT_MS,
   DB_WRITE_BATCH_SIZE,
@@ -14,6 +22,125 @@ import {
   withTimeoutOr,
   isTraversalDepthValid,
 } from './limits.js';
+
+describe('defaultParseThreads (B2)', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('reserves one core for the main thread (cpus-1)', () => {
+    vi.spyOn(os, 'availableParallelism').mockReturnValue(8);
+    expect(defaultParseThreads()).toBe(7);
+  });
+
+  it('clamps to at least 1 on a single-core machine', () => {
+    vi.spyOn(os, 'availableParallelism').mockReturnValue(1);
+    expect(defaultParseThreads()).toBe(1);
+  });
+
+  it('clamps to MAX_PARSE_THREADS on a many-core machine', () => {
+    vi.spyOn(os, 'availableParallelism').mockReturnValue(128);
+    expect(defaultParseThreads()).toBe(MAX_PARSE_THREADS);
+    expect(MAX_PARSE_THREADS).toBe(16);
+  });
+
+  it('falls back to cpus().length when availableParallelism is unavailable', () => {
+    // Simulate an older/exotic platform lacking availableParallelism.
+    const orig = os.availableParallelism;
+    // @ts-expect-error — deliberately removing to exercise the fallback branch.
+    os.availableParallelism = undefined;
+    const cpusSpy = vi
+      .spyOn(os, 'cpus')
+      .mockReturnValue(new Array(4).fill({}) as ReturnType<typeof os.cpus>);
+    try {
+      expect(defaultParseThreads()).toBe(3);
+      expect(cpusSpy).toHaveBeenCalled();
+    } finally {
+      os.availableParallelism = orig;
+    }
+  });
+
+  it('guards against a 0/NaN parallelism report', () => {
+    vi.spyOn(os, 'availableParallelism').mockReturnValue(0);
+    expect(defaultParseThreads()).toBe(1);
+  });
+});
+
+describe('getConfiguredParseThreads (B2)', () => {
+  beforeEach(() => {
+    delete process.env[PARSE_THREADS_ENV];
+  });
+  afterEach(() => {
+    delete process.env[PARSE_THREADS_ENV];
+    vi.restoreAllMocks();
+  });
+
+  it('falls back to defaultParseThreads when the env is unset', () => {
+    vi.spyOn(os, 'availableParallelism').mockReturnValue(8);
+    expect(getConfiguredParseThreads()).toBe(7);
+  });
+
+  it('falls back to defaultParseThreads when the env is empty', () => {
+    vi.spyOn(os, 'availableParallelism').mockReturnValue(8);
+    process.env[PARSE_THREADS_ENV] = '';
+    expect(getConfiguredParseThreads()).toBe(7);
+  });
+
+  it('honors a positive integer override (not re-clamped to core count)', () => {
+    vi.spyOn(os, 'availableParallelism').mockReturnValue(2);
+    process.env[PARSE_THREADS_ENV] = '32';
+    expect(getConfiguredParseThreads()).toBe(32);
+  });
+
+  it('rejects zero', () => {
+    process.env[PARSE_THREADS_ENV] = '0';
+    expect(() => getConfiguredParseThreads()).toThrow(PARSE_THREADS_ENV);
+  });
+
+  it('rejects negative values', () => {
+    process.env[PARSE_THREADS_ENV] = '-4';
+    expect(() => getConfiguredParseThreads()).toThrow(PARSE_THREADS_ENV);
+  });
+
+  it('rejects non-numeric values', () => {
+    process.env[PARSE_THREADS_ENV] = 'lots';
+    expect(() => getConfiguredParseThreads()).toThrow(PARSE_THREADS_ENV);
+  });
+
+  it('rejects non-integer values', () => {
+    process.env[PARSE_THREADS_ENV] = '2.5';
+    expect(() => getConfiguredParseThreads()).toThrow(PARSE_THREADS_ENV);
+  });
+});
+
+describe('PARSE_WORKER_THRESHOLD (B2)', () => {
+  beforeEach(() => {
+    delete process.env[PARSE_WORKER_THRESHOLD_ENV];
+  });
+  afterEach(() => {
+    delete process.env[PARSE_WORKER_THRESHOLD_ENV];
+  });
+
+  it('defaults to 64', () => {
+    expect(PARSE_WORKER_THRESHOLD).toBe(64);
+  });
+
+  it('falls back to PARSE_WORKER_THRESHOLD when the env is unset', () => {
+    expect(getConfiguredParseWorkerThreshold()).toBe(PARSE_WORKER_THRESHOLD);
+  });
+
+  it('honors a positive integer override', () => {
+    process.env[PARSE_WORKER_THRESHOLD_ENV] = '128';
+    expect(getConfiguredParseWorkerThreshold()).toBe(128);
+  });
+
+  it('rejects zero / negative / non-numeric values', () => {
+    for (const bad of ['0', '-1', 'nope', '1.5']) {
+      process.env[PARSE_WORKER_THRESHOLD_ENV] = bad;
+      expect(() => getConfiguredParseWorkerThreshold()).toThrow(PARSE_WORKER_THRESHOLD_ENV);
+    }
+  });
+});
 
 describe('PARSE_CONCURRENCY', () => {
   it('is a positive integer in a sane range (B5 conservative default)', () => {

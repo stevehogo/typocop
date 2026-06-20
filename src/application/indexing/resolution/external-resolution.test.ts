@@ -5,6 +5,7 @@ import { resolveHints } from "./index.js";
 function makeSymbol(id: string, filePath: string): Symbol {
   return {
     id,
+    logicalKey: id,
     name: id,
     kind: "function",
     location: {

@@ -1,5 +1,7 @@
 // Resource limits — enforced throughout the system (Req 23)
 
+import os from "node:os";
+
 /** Minimum cosine similarity score for semantic search results (Req 17.3) */
 export const SEMANTIC_SEARCH_THRESHOLD = 0.45;
 
@@ -29,7 +31,13 @@ export const getTreeSitterBufferSize = (contentLength: number): number =>
   Math.min(Math.max(contentLength * 2, TREE_SITTER_BUFFER_SIZE), TREE_SITTER_MAX_BUFFER);
 
 /**
- * Bounded concurrency for Phase 2 parsing (B5).
+ * Bounded concurrency for the IN-PROCESS async-pool parsing FALLBACK (B5/B2).
+ *
+ * This is the fallback path used when worker-thread parsing (B1) is disabled,
+ * unavailable, or below {@link PARSE_WORKER_THRESHOLD} — it does NOT parallelise
+ * synchronous tree-sitter `parse()` across CPU cores; it only bounds how many
+ * parses are in flight on the single main-thread event loop. For true
+ * multi-core parsing see {@link defaultParseThreads}/{@link getConfiguredParseThreads}.
  *
  * Conservative default (plan recommends 4–8). Each concurrent slot owns its own
  * per-grammar-variant `Parser` instances, so a tree-sitter parser is never
@@ -38,6 +46,72 @@ export const getTreeSitterBufferSize = (contentLength: number): number =>
  * during synchronous tree-sitter parses.
  */
 export const PARSE_CONCURRENCY = 4;
+
+/**
+ * Upper bound on the number of parse worker threads (B2).
+ *
+ * Caps {@link defaultParseThreads} regardless of core count: beyond this point
+ * the main thread (reads, slot assembly, dedup, DB I/O) becomes the bottleneck
+ * and extra workers only add memory + scheduling overhead.
+ */
+export const MAX_PARSE_THREADS = 16;
+
+/**
+ * Number of parse worker threads to use by default (B2).
+ *
+ * `clamp(availableParallelism() - 1, 1, MAX_PARSE_THREADS)`. We reserve one core
+ * for the main thread, which still does file reads, in-order slot assembly,
+ * dedup and DB I/O while the workers parse. `os.availableParallelism()` (Node
+ * >=19) reflects scheduler/cgroup affinity; we fall back to `os.cpus().length`
+ * on the rare platform where it is unavailable.
+ */
+export function defaultParseThreads(): number {
+  const available =
+    typeof os.availableParallelism === "function"
+      ? os.availableParallelism()
+      : os.cpus().length;
+  // Guard against a 0/NaN report from an exotic platform.
+  const cores = Number.isFinite(available) && available > 0 ? available : 1;
+  return Math.min(Math.max(cores - 1, 1), MAX_PARSE_THREADS);
+}
+
+/** Environment override for the parse worker-thread count ({@link getConfiguredParseThreads}). */
+export const PARSE_THREADS_ENV = "TYPOCOP_PARSE_THREADS";
+
+/**
+ * Resolve the configured parse worker-thread count from the environment (B2).
+ *
+ * Honors {@link PARSE_THREADS_ENV}; when unset/empty falls back to
+ * {@link defaultParseThreads}. An explicit override is NOT re-clamped to the
+ * core count (so a user may oversubscribe deliberately) but must be a positive
+ * integer — `<= 0` / non-numeric values throw (reuses the shared positive-int
+ * env validation).
+ */
+export function getConfiguredParseThreads(): number {
+  return getConfiguredPositiveIntEnv(PARSE_THREADS_ENV, defaultParseThreads());
+}
+
+/**
+ * File-count threshold above which parsing uses the worker-thread pool (B1/B2).
+ *
+ * Below this many files the per-worker parser/query compilation cost outweighs
+ * the parallelism win, so the in-process {@link PARSE_CONCURRENCY} async path is
+ * used instead. Start at 64; finalise via the B4 benchmark sweep.
+ */
+export const PARSE_WORKER_THRESHOLD = 64;
+
+/** Environment override for {@link PARSE_WORKER_THRESHOLD} ({@link getConfiguredParseWorkerThreshold}). */
+export const PARSE_WORKER_THRESHOLD_ENV = "TYPOCOP_PARSE_WORKER_THRESHOLD";
+
+/**
+ * Resolve the configured parse worker-pool file-count threshold from the
+ * environment (B2). Honors {@link PARSE_WORKER_THRESHOLD_ENV}; when unset/empty
+ * falls back to {@link PARSE_WORKER_THRESHOLD}. Must be a positive integer —
+ * `<= 0` / non-numeric values throw.
+ */
+export function getConfiguredParseWorkerThreshold(): number {
+  return getConfiguredPositiveIntEnv(PARSE_WORKER_THRESHOLD_ENV, PARSE_WORKER_THRESHOLD);
+}
 
 /**
  * Bounded concurrency for Phase 6 embedding generation (Phase C).
@@ -123,6 +197,57 @@ export function getConfiguredEmbeddingBatchSize(): number {
  */
 export function isEmbeddingBatchEnabled(): boolean {
   const raw = process.env[EMBEDDING_ENABLE_BATCH_ENV];
+  if (raw === undefined) return false;
+  return ["1", "true", "yes", "on"].includes(raw.trim().toLowerCase());
+}
+
+/**
+ * Default hard ceiling on live entries in the embedding cache (A3).
+ *
+ * The cache (`infrastructure/cache/embedding-cache.ts`) is pruned to the run's
+ * live embed-text hashes each run, so it normally tracks the current corpus.
+ * This cap is the safety bound for the transient window before pruning (and for
+ * pathological corpora): once exceeded, the OLDEST entries are evicted FIFO. A
+ * symbol's embed-text is small; this default comfortably covers very large
+ * repos. MUST be ≥ 1.
+ */
+export const EMBEDDING_CACHE_MAX_ENTRIES = 200_000;
+
+/** Environment override for {@link EMBEDDING_CACHE_MAX_ENTRIES}. */
+export const EMBEDDING_CACHE_MAX_ENTRIES_ENV = "EMBEDDING_CACHE_MAX_ENTRIES";
+
+/**
+ * Opt-out flag (env-gated): the embedding cache is ON BY DEFAULT. When set
+ * truthy, the orchestrator SKIPS wiring the embedding cache, so every run
+ * recomputes embeddings (useful for debugging or to force a clean re-embed
+ * without clearing the manifest). Recognized truthy values: "1", "true", "yes",
+ * "on" (case-insensitive).
+ */
+export const EMBEDDING_CACHE_DISABLE_ENV = "EMBEDDING_CACHE_DISABLE";
+
+/**
+ * Resolve the configured embedding-cache entry cap from the environment, clamped
+ * to ≥ 1. Falls back to {@link EMBEDDING_CACHE_MAX_ENTRIES} when unset/invalid.
+ */
+export function getConfiguredEmbeddingCacheMaxEntries(): number {
+  const raw = process.env[EMBEDDING_CACHE_MAX_ENTRIES_ENV];
+  if (raw === undefined || raw === "") {
+    return EMBEDDING_CACHE_MAX_ENTRIES;
+  }
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed < 1) {
+    return EMBEDDING_CACHE_MAX_ENTRIES;
+  }
+  return parsed;
+}
+
+/**
+ * Whether the embedding cache is DISABLED via {@link EMBEDDING_CACHE_DISABLE_ENV}.
+ * Defaults to FALSE (cache enabled); the cache is opt-OUT, not opt-in, because a
+ * warm cache only ever skips redundant work and never changes output.
+ */
+export function isEmbeddingCacheDisabled(): boolean {
+  const raw = process.env[EMBEDDING_CACHE_DISABLE_ENV];
   if (raw === undefined) return false;
   return ["1", "true", "yes", "on"].includes(raw.trim().toLowerCase());
 }

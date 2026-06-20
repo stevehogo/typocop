@@ -8,22 +8,24 @@
  */
 import type { Symbol } from "../../../core/domain.js";
 import type { FileNode } from "../structure/index.js";
-import { fromSyntaxNode } from "../../../infrastructure/parsing/ast-node.js";
+import type { RawRelationshipHint } from "../../../infrastructure/parsing/extract-symbols.js";
 import {
-  parseSourceFile,
-  ParseError,
-  initParserForVariant,
-  grammarVariantForFile,
-  type ParsedSource,
-} from "../../../infrastructure/parsing/parse-file.js";
+  runParseTask,
+  parseWorkerEntryPath,
+} from "../../../infrastructure/parsing/parse-worker.js";
 import {
-  extractSymbolsWithQueries,
-  extractSymbols,
-  type RawRelationshipHint,
-} from "../../../infrastructure/parsing/extract-symbols.js";
+  isParseSkipped,
+  type ParseTask,
+  type ParseTaskResult,
+} from "../../../infrastructure/parsing/parse-worker-protocol.js";
 import Parser from "tree-sitter";
 import * as path from "path";
-import { PARSE_CONCURRENCY } from "../../../platform/utils/limits.js";
+import {
+  PARSE_CONCURRENCY,
+  getConfiguredParseThreads,
+  getConfiguredParseWorkerThreshold,
+} from "../../../platform/utils/limits.js";
+import { WorkerPool, type WorkerPoolRunResult } from "../../../platform/utils/worker-pool.js";
 
 export type { RawRelationshipHint } from "../../../infrastructure/parsing/extract-symbols.js";
 
@@ -49,6 +51,25 @@ export interface ParsingResult {
 export interface ExtractAllSymbolsOptions {
   readonly concurrency?: number;
   readonly onProgress?: (done: number, total: number, currentPath?: string) => void;
+  /**
+   * Worker-thread pool controls (B1). All optional; defaults preserve today's
+   * behaviour. Above {@link getConfiguredParseWorkerThreshold} files (and when
+   * `useWorkerThreads !== false`) parsing runs on a `worker_threads` pool;
+   * otherwise it uses the in-process async path.
+   *
+   * @property useWorkerThreads - Force-disable (`false`) the pool regardless of
+   *   file count — used by the incremental small-subset path and tests.
+   * @property workerThreshold  - Override the file-count threshold (tests force
+   *   the pool on with a tiny corpus by passing `1`).
+   * @property parseThreads     - Override the worker count.
+   * @property poolFactory      - Test seam: inject an in-process {@link ParsePool}
+   *   that runs the SAME per-file logic, so determinism/crash/breaker behaviour is
+   *   testable under vitest without a loadable `.ts` worker entry.
+   */
+  readonly useWorkerThreads?: boolean;
+  readonly workerThreshold?: number;
+  readonly parseThreads?: number;
+  readonly poolFactory?: ParsePoolFactory;
 }
 
 // ─── Symbol ID generation ─────────────────────────────────────────────────────
@@ -60,7 +81,6 @@ export interface ExtractAllSymbolsOptions {
  * layering violation. Both paths now emit column-inclusive, comparable IDs.
  */
 export { generateSymbolId } from "../../../infrastructure/parsing/symbol-id.js";
-import { generateSymbolId } from "../../../infrastructure/parsing/symbol-id.js";
 
 // ─── Deduplication ────────────────────────────────────────────────────────────
 
@@ -82,12 +102,58 @@ function deduplicateById(symbols: Symbol[]): Symbol[] {
 interface FileSlot {
   symbols: Symbol[];
   hints: RawRelationshipHint[];
+  /**
+   * sha256 of the file's UTF-8 content (A2). Derived from the SAME content
+   * `parseSourceFile` already read — no second `fs.readFile`. `undefined` when
+   * the file took the size-skip path inside `parseSourceFile` (never read).
+   */
+  contentHash?: string;
 }
 
 /**
- * Process a single file with a worker-owned parser cache.
+ * Per-file Phase-2 result, keyed by relPath (A2). Carries the content hash so
+ * the parse cache can store `relPath → { contentHash, symbols, hints }` without
+ * re-reading the file. Skipped files (parser-init failure / ParseError) are
+ * absent from the map.
+ */
+export interface PerFileParseResult {
+  readonly symbols: Symbol[];
+  readonly hints: RawRelationshipHint[];
+  readonly contentHash: string;
+}
+
+/** {@link extractAllSymbols} output extended with the per-file map (A2). */
+export interface ParsingResultWithPerFile extends ParsingResult {
+  /** relPath → that file's symbols/hints/contentHash. Skipped files are absent. */
+  readonly perFile: Map<string, PerFileParseResult>;
+}
+
+/**
+ * Build the PLAIN, structured-cloneable parse task for one file. The worker (or
+ * the in-process fallback) needs the ABSOLUTE path to read and the RELATIVE path
+ * to stamp onto symbols/hints — both computed here so the two code paths agree.
+ */
+function buildTask(fileNode: FileNode, index: number, relativeBase: string): ParseTask {
+  return {
+    index,
+    filePath: path.resolve(relativeBase, fileNode.path),
+    relativePath: fileNode.path,
+    language: fileNode.language,
+    size: fileNode.size,
+  };
+}
+
+/** Convert a worker/in-process {@link ParseTaskResult} into an ordered slot. */
+function resultToSlot(result: ParseTaskResult): FileSlot | null {
+  if (isParseSkipped(result)) return null;
+  return { symbols: result.symbols, hints: result.hints, contentHash: result.contentHash };
+}
+
+/**
+ * Process a single file with a caller-owned parser cache via the shared
+ * {@link runParseTask} logic (B1).
  *
- * The worker's `parsers` map is NEVER shared with another concurrent slot, so a
+ * The `parsers` map is NEVER shared with another concurrent slot, so a
  * tree-sitter `Parser` is never used by two in-flight parses at once (Risk
  * Notes). Parsers are still reused WITHIN a slot across files of the same
  * variant. Returns null when the file is skipped (parser-init failure or
@@ -95,58 +161,135 @@ interface FileSlot {
  */
 async function processFile(
   fileNode: FileNode,
+  index: number,
   relativeBase: string,
   parsers: Map<string, Parser>,
 ): Promise<FileSlot | null> {
-  const variant = grammarVariantForFile(fileNode.language, fileNode.path);
-  let parser = parsers.get(variant);
-  if (!parser) {
-    try {
-      parser = await initParserForVariant(fileNode.language, variant);
-      parsers.set(variant, parser);
-    } catch (err) {
-      console.warn(
-        `[phase2] Warning: failed to init parser for ${variant} — skipping ${fileNode.path}`,
-        err,
-      );
-      return null;
+  const result = await runParseTask(buildTask(fileNode, index, relativeBase), parsers);
+  return resultToSlot(result);
+}
+
+/**
+ * Pluggable parse-pool used by the worker-thread branch (B1).
+ *
+ * Production wires {@link createWorkerThreadPool} (real `worker_threads`). Tests
+ * inject an IN-PROCESS pool that drives the SAME {@link runParseTask} logic with
+ * injected delays / crash files, so the determinism + crash-isolation + breaker
+ * behaviour is exercised under vitest (where a `.ts` worker entry cannot be
+ * loaded natively) without diverging from the shipped per-file logic.
+ */
+export interface ParsePool {
+  run(
+    tasks: readonly ParseTask[],
+    onSettled?: (index: number) => void,
+  ): Promise<WorkerPoolRunResult<ParseTaskResult>>;
+  destroy(): Promise<void>;
+}
+
+/** Factory the orchestrator calls to build a pool of `size` workers. */
+export type ParsePoolFactory = (size: number) => ParsePool;
+
+/** Real `worker_threads` pool over {@link parseWorkerEntryPath}. */
+function createWorkerThreadPool(size: number): ParsePool {
+  const pool = new WorkerPool<ParseTask, ParseTaskResult>({
+    size,
+    workerEntry: parseWorkerEntryPath(),
+    // Inherit the parent's flags so a custom loader (if any) is available to the
+    // worker; harmless when there is none.
+    execArgv: process.execArgv,
+  });
+  return {
+    run: (tasks, onSettled) => pool.run(tasks, onSettled),
+    destroy: () => pool.destroy(),
+  };
+}
+
+/**
+ * In-process async-pool parse (today's exact path, B5). N logical workers pull
+ * file indices off a shared counter, each with its OWN parser cache. Writes
+ * results into `slots` by original index and fires `reportSettled` exactly once
+ * per file (incl. skips).
+ */
+async function runInProcess(
+  fileNodes: FileNode[],
+  relativeBase: string,
+  slots: (FileSlot | null)[],
+  concurrency: number,
+  reportSettled: (index: number) => void,
+): Promise<void> {
+  const total = fileNodes.length;
+  let nextIndex = 0;
+  async function worker(): Promise<void> {
+    const parsers = new Map<string, Parser>();
+    for (;;) {
+      const i = nextIndex++;
+      if (i >= total) return;
+      slots[i] = await processFile(fileNodes[i], i, relativeBase, parsers);
+      reportSettled(i);
     }
   }
+  const workers: Promise<void>[] = [];
+  for (let w = 0; w < Math.min(concurrency, total); w++) {
+    workers.push(worker());
+  }
+  await Promise.all(workers);
+}
 
-  const fullPath = path.resolve(relativeBase, fileNode.path);
+/**
+ * Worker-thread parse (B1). Dispatches one task per file to the resilient pool;
+ * each settled result is slotted by ORIGINAL index. The pool fires `reportSettled`
+ * exactly once per task — including any task it abandons when the circuit breaker
+ * trips — so `done` reaches `total` from the pool alone.
+ *
+ * On `breakerTripped` the un-parsed files (the pool's `failedIndices` that still
+ * have no symbols) are finished via the IN-PROCESS path so indexing never aborts;
+ * those fills do NOT re-fire progress (the pool already counted them). The pool is
+ * always destroyed in a `finally`.
+ */
+async function runViaWorkerPool(
+  fileNodes: FileNode[],
+  relativeBase: string,
+  slots: (FileSlot | null)[],
+  reportSettled: (index: number) => void,
+  options: ExtractAllSymbolsOptions,
+): Promise<void> {
+  const size = Math.max(1, options.parseThreads ?? getConfiguredParseThreads());
+  const factory = options.poolFactory ?? createWorkerThreadPool;
+  const pool = factory(size);
 
-  // Single parse — the query path queries this live tree directly (B1). The
-  // Phase 1 size is threaded through so parseSourceFile skips the redundant
-  // fs.stat (B5).
-  let parsed: ParsedSource;
+  const tasks: ParseTask[] = fileNodes.map((fileNode, index) =>
+    buildTask(fileNode, index, relativeBase),
+  );
+
+  let breakerTripped = false;
+  let failedIndices: number[] = [];
   try {
-    parsed = await parseSourceFile(fullPath, fileNode.language, parser, fileNode.size);
-  } catch (err) {
-    if (!(err instanceof ParseError)) {
-      console.warn(`[phase2] Warning: unexpected error parsing ${fileNode.path}`, err);
+    const outcome = await pool.run(tasks, reportSettled);
+    breakerTripped = outcome.breakerTripped;
+    failedIndices = outcome.failedIndices;
+    // Slot every result the pool produced (success). Skips/failures stay null.
+    for (const result of outcome.results) {
+      if (result !== null) slots[result.index] = resultToSlot(result);
     }
-    return null;
+  } finally {
+    await pool.destroy();
   }
 
-  const result = extractSymbolsWithQueries(parsed.tree, fileNode.path, fileNode.language, parser);
-
-  if (result.symbols.length > 0) {
-    return { symbols: result.symbols, hints: result.hints };
+  // Breaker fallback: any file the pool did not produce a result for is parsed
+  // in-process now (NOT just on a tripped breaker — a respawn-exhausted file also
+  // lands in failedIndices, and finishing it in-process is strictly safer than
+  // dropping it). Progress was already reported for these indices by the pool, so
+  // we must NOT call reportSettled again here.
+  const unfinished = failedIndices.filter((i) => slots[i] === null);
+  if (unfinished.length > 0) {
+    // Reuse the in-process per-file logic with a fresh parser cache. A handful of
+    // files; sequential is fine and keeps determinism trivial.
+    const parsers = new Map<string, Parser>();
+    for (const i of unfinished) {
+      slots[i] = await processFile(fileNodes[i], i, relativeBase, parsers);
+    }
   }
-
-  // Fallback: structural heuristic extraction with deterministic IDs. Build the
-  // eager ASTNode lazily, only here (never on the common path).
-  const ast = fromSyntaxNode(parsed.tree.rootNode);
-  const fallback = extractSymbols(ast, fileNode.path).map((sym) => ({
-    ...sym,
-    id: generateSymbolId(
-      sym.location.filePath,
-      sym.name,
-      sym.location.startLine,
-      sym.location.startColumn,
-    ),
-  }));
-  return { symbols: fallback, hints: [] };
+  void breakerTripped; // surfaced via metrics later; behaviour is identical either way
 }
 
 /**
@@ -173,6 +316,28 @@ export async function extractAllSymbols(
   rootPath: string = process.cwd(),
   options: ExtractAllSymbolsOptions = {},
 ): Promise<ParsingResult> {
+  const { symbols, hints, skippedFiles } = await extractAllSymbolsWithPerFile(
+    fileNodes,
+    rootPath,
+    options,
+  );
+  return { symbols, hints, skippedFiles };
+}
+
+/**
+ * Phase 2 entry point that ALSO returns a per-file map keyed by relPath (A2).
+ *
+ * Identical parsing/slot/flatten/dedup behaviour to {@link extractAllSymbols} —
+ * the flattened `{symbols, hints, skippedFiles}` are byte-for-byte the same, so
+ * `extractAllSymbols` simply drops the extra `perFile` field. The map lets the
+ * parse cache store `relPath → { contentHash, symbols, hints }` without a second
+ * file read (the hash is computed from the content the parser already read).
+ */
+export async function extractAllSymbolsWithPerFile(
+  fileNodes: FileNode[],
+  rootPath: string = process.cwd(),
+  options: ExtractAllSymbolsOptions = {},
+): Promise<ParsingResultWithPerFile> {
   const total = fileNodes.length;
   const concurrency = Math.max(1, options.concurrency ?? PARSE_CONCURRENCY);
   const onProgress = options.onProgress;
@@ -185,54 +350,62 @@ export async function extractAllSymbols(
     : normalizedRoot;
 
   // One slot per original position preserves deterministic ordering regardless
-  // of which worker finishes first.
+  // of which worker finishes first. This slot array is the single source of
+  // truth for BOTH the in-process path and the worker-pool path, so their
+  // flattened output is byte-identical.
   const slots: (FileSlot | null)[] = new Array(total).fill(null);
-  let skippedFiles = 0;
   // Shared, order-independent completion counter (B6). Bumped as each task
   // settles; `done` ends exactly at `total`.
   let done = 0;
+  const reportSettled = (index: number): void => {
+    done++;
+    onProgress?.(done, total, fileNodes[index]?.path);
+  };
 
-  let nextIndex = 0;
+  // ── Path selection (B1/B2) ──────────────────────────────────────────────────
+  // Use the worker-thread pool ONLY above the threshold and when not disabled.
+  // Below it (or when disabled) the per-worker parser/query compilation cost
+  // outweighs the parallelism win, so the in-process async pool is used.
+  const threshold = options.workerThreshold ?? getConfiguredParseWorkerThreshold();
+  const useWorkers = (options.useWorkerThreads ?? true) && total >= threshold;
 
-  // A worker pulls file indices from the shared counter until exhausted, using
-  // its OWN parser cache — never shared with sibling workers (Risk Notes).
-  async function worker(): Promise<void> {
-    const parsers = new Map<string, Parser>();
-    for (;;) {
-      const i = nextIndex++;
-      if (i >= total) return;
-      const fileNode = fileNodes[i];
-      const slot = await processFile(fileNode, relativeBase, parsers);
-      if (slot === null) {
-        skippedFiles++;
-      } else {
-        slots[i] = slot;
-      }
-      // Per-file completion point — shared by progress + metrics (B6). Counts
-      // skipped files too, so `done` always reaches `total`.
-      done++;
-      onProgress?.(done, total, fileNode.path);
-    }
+  if (useWorkers) {
+    await runViaWorkerPool(fileNodes, relativeBase, slots, reportSettled, options);
+  } else {
+    await runInProcess(fileNodes, relativeBase, slots, concurrency, reportSettled);
   }
 
-  const workers: Promise<void>[] = [];
-  for (let w = 0; w < Math.min(concurrency, total); w++) {
-    workers.push(worker());
+  // Skipped files are exactly the settled slots that produced no symbols/hints
+  // (null). Derive the count from the slots so both paths agree.
+  let skippedFiles = 0;
+  for (let i = 0; i < slots.length; i++) {
+    if (slots[i] === null) skippedFiles++;
   }
-  await Promise.all(workers);
 
-  // Flatten in ORIGINAL order — completion order never affects output.
+  // Flatten in ORIGINAL order — completion order never affects output. Build the
+  // per-file map in the same pass, keyed by relPath, skipping files that had no
+  // hash (size-skipped inside parseSourceFile) so the cache only stores real reads.
   const allSymbols: Symbol[] = [];
   const allHints: RawRelationshipHint[] = [];
-  for (const slot of slots) {
+  const perFile = new Map<string, PerFileParseResult>();
+  for (let i = 0; i < slots.length; i++) {
+    const slot = slots[i];
     if (slot === null) continue;
     allSymbols.push(...slot.symbols);
     allHints.push(...slot.hints);
+    if (slot.contentHash !== undefined) {
+      perFile.set(fileNodes[i].path, {
+        symbols: slot.symbols,
+        hints: slot.hints,
+        contentHash: slot.contentHash,
+      });
+    }
   }
 
   return {
     symbols: deduplicateById(allSymbols),
     hints: allHints,
     skippedFiles,
+    perFile,
   };
 }

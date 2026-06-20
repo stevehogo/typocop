@@ -63,7 +63,7 @@ describe("extractAllSymbols", () => {
 
   it("skips files with unsupported language gracefully", async () => {
     const fileNodes: FileNode[] = [
-      { path: "/nonexistent/file.ts", size: 100, language: "typescript" },
+      { path: "/nonexistent/file.ts", size: 100, language: "typescript", mtimeMs: 0 },
     ];
     const result = await extractAllSymbols(fileNodes);
     expect(Array.isArray(result.symbols)).toBe(true);
@@ -570,8 +570,8 @@ export const helper = (x: number) => x;
     await writeFile(path.join(tmpDir, "a.ts"), TS_WITH_ASSERTION, "utf-8");
     await writeFile(path.join(tmpDir, "widget.tsx"), TSX_SOURCE, "utf-8");
 
-    const tsNode: FileNode = { path: "a.ts", size: 100, language: "typescript" };
-    const tsxNode: FileNode = { path: "widget.tsx", size: 100, language: "typescript" };
+    const tsNode: FileNode = { path: "a.ts", size: 100, language: "typescript", mtimeMs: 0 };
+    const tsxNode: FileNode = { path: "widget.tsx", size: 100, language: "typescript", mtimeMs: 0 };
 
     const tsFirst = await extractAllSymbols([tsNode, tsxNode], tmpDir);
     const tsAfter = await extractAllSymbols([tsxNode, tsNode], tmpDir);
@@ -608,7 +608,7 @@ describe("PR3 B4: same-line symbols get distinct IDs and both survive dedup", ()
       "export const first = () => 1; const second = () => 2;\n",
       "utf-8",
     );
-    const node: FileNode = { path: "sameline.ts", size: 60, language: "typescript" };
+    const node: FileNode = { path: "sameline.ts", size: 60, language: "typescript", mtimeMs: 0 };
 
     const { symbols } = await extractAllSymbols([node], tmpDir);
     const names = symbols.map((s) => s.name).sort();
@@ -643,7 +643,7 @@ describe("PR4 B5: bounded-concurrent parsing equals serial output", () => {
   ];
 
   const nodes = (): FileNode[] =>
-    files.map((f) => ({ path: f.name, size: 200, language: "typescript" as const }));
+    files.map((f) => ({ path: f.name, size: 200, language: "typescript" as const, mtimeMs: 0 }));
 
   beforeEach(async () => {
     tmpDir = await mkdtemp(path.join(os.tmpdir(), "typocop-b5-"));
@@ -695,10 +695,10 @@ describe("PR4 B6: onProgress completion hook", () => {
     await writeFile(path.join(tmpDir, "big.ts"), "export function big() {}\n", "utf-8");
 
     const fileNodes: FileNode[] = [
-      { path: "ok.ts", size: 50, language: "typescript" },
+      { path: "ok.ts", size: 50, language: "typescript", mtimeMs: 0 },
       // knownSize above MAX_FILE_SIZE → skipped without reading
-      { path: "big.ts", size: 64 * 1024 * 1024, language: "typescript" },
-      { path: "missing.ts", size: 100, language: "typescript" },
+      { path: "big.ts", size: 64 * 1024 * 1024, language: "typescript", mtimeMs: 0 },
+      { path: "missing.ts", size: 100, language: "typescript", mtimeMs: 0 },
     ];
 
     const calls: Array<{ done: number; total: number; currentPath?: string }> = [];
@@ -722,8 +722,8 @@ describe("PR4 B6: onProgress completion hook", () => {
 
   it("done reaches total with a single worker and an all-skipped set", async () => {
     const fileNodes: FileNode[] = [
-      { path: "gone1.ts", size: 10, language: "typescript" },
-      { path: "gone2.ts", size: 10, language: "typescript" },
+      { path: "gone1.ts", size: 10, language: "typescript", mtimeMs: 0 },
+      { path: "gone2.ts", size: 10, language: "typescript", mtimeMs: 0 },
     ];
     let lastDone = 0;
     let count = 0;

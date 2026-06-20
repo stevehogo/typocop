@@ -134,7 +134,7 @@ describe("calculateConfidence", () => {
   const intent: QueryIntent = { type: "smartSearch", query: "test" };
 
   const makeSymbol = (): Symbol => ({
-    id: "s1", name: "foo", kind: "function",
+    id: "s1", logicalKey: "s1", name: "foo", kind: "function",
     location: { filePath: "a.ts", startLine: 1, startColumn: 0, endLine: 5, endColumn: 0 },
     visibility: "public", modifiers: [],
   });
@@ -232,7 +232,7 @@ describe("formatResponse", () => {
       intent: { type: "impactAnalysis", target: "foo" },
       symbols: [
         {
-          id: "1", name: "getUserById", kind: "function",
+          id: "1", logicalKey: "1", name: "getUserById", kind: "function",
           location: { filePath: "user.ts", startLine: 10, startColumn: 0, endLine: 20, endColumn: 0 },
           visibility: "public", modifiers: [],
         },

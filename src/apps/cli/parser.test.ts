@@ -23,6 +23,7 @@ describe("parseArgs", () => {
         outputPath: undefined,
         verbose: true,
         refresh: false,
+        incremental: true,
       },
     });
   });
@@ -42,6 +43,7 @@ describe("parseArgs", () => {
         outputPath: undefined,
         verbose: false,
         refresh: false,
+        incremental: true,
       },
     });
   });
@@ -97,6 +99,8 @@ describe("parseArgs", () => {
         outputPath: undefined,
         verbose: false,
         refresh: true,
+        // --refresh is a clear-then-rebuild, which is inherently a full write.
+        incremental: false,
       },
     });
   });
@@ -114,6 +118,7 @@ describe("parseArgs", () => {
         outputPath: undefined,
         verbose: false,
         refresh: true,
+        incremental: false,
       },
     });
   });
@@ -131,7 +136,41 @@ describe("parseArgs", () => {
         outputPath: undefined,
         verbose: false,
         refresh: false,
+        incremental: true,
       },
+    });
+  });
+
+  it("defaults incremental to true when no flag is given (A4)", () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    const args = ["node", "typocop", "parse", "-p", "./src", "-l", "typescript"];
+    const command = parseArgs(args);
+
+    expect(command).toMatchObject({
+      type: "parse",
+      config: { incremental: true, refresh: false },
+    });
+  });
+
+  it("disables incremental with --full (A4)", () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    const args = ["node", "typocop", "parse", "-p", "./src", "-l", "typescript", "--full"];
+    const command = parseArgs(args);
+
+    expect(command).toMatchObject({
+      type: "parse",
+      config: { incremental: false, refresh: false },
+    });
+  });
+
+  it("--full overrides --incremental (A4)", () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    const args = ["node", "typocop", "parse", "-p", "./src", "-l", "typescript", "--incremental", "--full"];
+    const command = parseArgs(args);
+
+    expect(command).toMatchObject({
+      type: "parse",
+      config: { incremental: false },
     });
   });
 
