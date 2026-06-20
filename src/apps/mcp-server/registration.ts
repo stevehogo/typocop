@@ -202,6 +202,29 @@ const TOOL_DEFINITIONS = [
     },
   },
   {
+    name: "find_hotspots",
+    description:
+      "List complexity hotspots: the most cyclomatically-complex symbols (cyclomatic = 1 + branch points: if/for/while/case/catch/&&/||/ternary), ranked highest-first and paged. Each result carries cyclomatic, cognitive (nesting-weighted), and maxLoopDepth. Read-only.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        minComplexity: {
+          type: "number",
+          description: "Minimum cyclomatic complexity threshold, exclusive (default: 10)",
+        },
+        maxResults: {
+          type: "number",
+          description: "Page size cap (default: 50)",
+        },
+        offset: {
+          type: "number",
+          description: "Paging offset — number of hotspots to skip (default: 0)",
+        },
+      },
+      required: [],
+    },
+  },
+  {
     name: "rename",
     description:
       "PREVIEW a coordinated symbol rename: resolves the symbol, lists the definition + edge-backed reference sites (CALLS/IMPORTS/REFERENCES) as high-confidence file:line edits, plus a word-boundary regex for the low-confidence text tail. PREVIEW ONLY — never writes files or the graph.",
@@ -222,6 +245,31 @@ const TOOL_DEFINITIONS = [
         },
       },
       required: ["symbolName", "newName"],
+    },
+  },
+  {
+    name: "shape_check",
+    description:
+      "Detect API contract drift: compares the top-level response keys each route returns (res.json/res.send/return {...}) against the keys consumers read, and reports every key a consumer reads that no route returns. Confidence is 'low' when a consumer's file fetches multiple routes (ambiguous attribution). v1: top-level keys only. Read-only.",
+    inputSchema: {
+      type: "object",
+      properties: {},
+      required: [],
+    },
+  },
+  {
+    name: "api_impact",
+    description:
+      "Combined API view (= route_map + shape_check + impact) for one route: lists the route's blast radius (affected symbols, flows, risk) AND the contract mismatches consumers have with the response shapes. Read-only.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        route: {
+          type: "string",
+          description: "Route symbol name to analyze (e.g. 'GET /users' or the handler name).",
+        },
+      },
+      required: ["route"],
     },
   },
 ];

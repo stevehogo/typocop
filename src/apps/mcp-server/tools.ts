@@ -13,7 +13,9 @@ import { executeSmartSearchTool } from "./smart-search-tool.js";
 import { executeDetectChanges } from "./detect-changes-tool.js";
 import { executeTraceTool } from "./trace-tool.js";
 import { executeFindDeadCode } from "./dead-code-tool.js";
+import { executeFindHotspots } from "./hotspots-tool.js";
 import { executeRenameTool } from "./rename-tool.js";
+import { executeShapeCheck, executeApiImpact } from "./shape-check-tool.js";
 import { formatMCPResponse, type SymbolExplanation } from "./format-response.js";
 import type { ImpactAnalysisResult } from "../../application/querying/impact-analysis.js";
 
@@ -275,8 +277,14 @@ export async function executeTool(
       return executeTraceTool(params, adapter);
     case "find_dead_code":
       return executeFindDeadCode(params, adapter);
+    case "find_hotspots":
+      return executeFindHotspots(params, adapter);
     case "rename":
       return executeRenameTool(params, adapter);
+    case "shape_check":
+      return executeShapeCheck(params, adapter);
+    case "api_impact":
+      return executeApiImpact(params, adapter);
     case "detect_changes": {
       if (!git) {
         throw new Error("detect_changes requires a GitPort (none injected)");

@@ -197,7 +197,12 @@ export async function runIndexingPipeline(config: PipelineConfig): Promise<Pipel
     runPhase2(config, fileNodes, progress.onProgress),
   );
   progress.done();
-  const { symbols, hints, skippedFiles } = phase2;
+  const { symbols: phase2Symbols, hints, skippedFiles } = phase2;
+  // E3: fold `member.access` hints into each consumer symbol's `accessedKeys`
+  // (purely additive — see {@link attachAccessedKeys}). All later phases see the
+  // augmented list; the added optional prop is ignored by resolution/clustering,
+  // so the graph stays byte-identical apart from the new Symbol prop.
+  const symbols = attachAccessedKeys(phase2Symbols, hints);
   metrics.set("skippedFiles", skippedFiles);
   metrics.set("filesParsed", phase2.filesParsed);
   metrics.set("symbolCount", symbols.length);
@@ -789,6 +794,49 @@ function finishMetrics(
  * `lastIndexed` Metadata upsert are NOT counted here — neither flows through the
  * `onRows` persist-progress path, so the drift-guard total excludes them.
  */
+/**
+ * E3: fold `member.access` hints into each consumer symbol's `accessedKeys`.
+ *
+ * Each `access` hint records a `recv.prop` property read attributed (via its
+ * `enclosingSymbolId`, the consumer's intra-run `id`) to the function/method it
+ * sits in. We group the read property keys by that enclosing id and attach them
+ * (de-duplicated, first-seen order) to the matching symbol as `accessedKeys`.
+ *
+ * Purely ADDITIVE: symbols with no attributed reads are returned unchanged
+ * (same object identity), so the resolution/clustering/persist phases produce a
+ * byte-identical graph apart from the new optional Symbol prop. Module-top-level
+ * reads (no enclosing definition) are dropped in v1.
+ */
+function attachAccessedKeys(
+  symbols: readonly Symbol[],
+  hints: readonly RawRelationshipHintLike[],
+): Symbol[] {
+  const keysById = new Map<string, string[]>();
+  const seenById = new Map<string, Set<string>>();
+  for (const hint of hints) {
+    if (hint.kind !== "access") continue;
+    const ownerId = hint.enclosingSymbolId;
+    if (!ownerId) continue;
+    const key = hint.targetName;
+    if (!key) continue;
+    let seen = seenById.get(ownerId);
+    if (!seen) {
+      seen = new Set<string>();
+      seenById.set(ownerId, seen);
+      keysById.set(ownerId, []);
+    }
+    if (!seen.has(key)) {
+      seen.add(key);
+      keysById.get(ownerId)!.push(key);
+    }
+  }
+  if (keysById.size === 0) return symbols as Symbol[];
+  return symbols.map((s) => {
+    const keys = keysById.get(s.id);
+    return keys && keys.length > 0 ? { ...s, accessedKeys: keys } : s;
+  });
+}
+
 export function countPersistRows(
   vectorEntries: number,
   symbols: readonly Symbol[],
@@ -870,6 +918,17 @@ async function storeInDatabases(
       visibility: s.visibility,
       signature: s.signature ?? "",
       documentation: s.documentation ?? "",
+      // E2: complexity metrics persisted as STRINGS (matching the startLine
+      // convention) so they are queryable via `toInteger(s.cyclomatic)`. Absent
+      // metrics default to "0" — countPersistRows is unaffected (props, not rows).
+      cyclomatic: String(s.complexity?.cyclomatic ?? 0),
+      cognitive: String(s.complexity?.cognitive ?? 0),
+      maxLoopDepth: String(s.complexity?.maxLoopDepth ?? 0),
+      // E3: route response shape + consumer-read keys persisted as JSON STRING
+      // props (queried back by `shape_check`). Empty arrays default to "[]" —
+      // countPersistRows is unaffected (props, not rows).
+      responseKeys: JSON.stringify(s.responseKeys ?? []),
+      accessedKeys: JSON.stringify(s.accessedKeys ?? []),
     })),
     countNodes,
     nodeEvents,

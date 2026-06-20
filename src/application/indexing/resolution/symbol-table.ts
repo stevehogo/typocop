@@ -53,7 +53,23 @@ export function createSymbolTable(): SymbolTable {
     type: string,
     metadata?: { parameterCount?: number; returnType?: string; ownerId?: string }
   ): void => {
-    const def: SymbolDefinition = { nodeId, filePath, type, ...metadata };
+    // Build the definition WITHOUT introducing `undefined`-valued optional keys —
+    // tests assert `lookupExactFull` equals exactly `{ nodeId, filePath, type }`
+    // when no metadata is supplied (a `...{ returnType: undefined }` spread would
+    // smuggle the key in and break the deep-equal). Only attach fields that are
+    // actually present.
+    const def: SymbolDefinition = { nodeId, filePath, type };
+    if (metadata) {
+      if (metadata.parameterCount !== undefined) {
+        (def as { parameterCount?: number }).parameterCount = metadata.parameterCount;
+      }
+      if (metadata.returnType !== undefined) {
+        (def as { returnType?: string }).returnType = metadata.returnType;
+      }
+      if (metadata.ownerId !== undefined) {
+        (def as { ownerId?: string }).ownerId = metadata.ownerId;
+      }
+    }
 
     if (!fileIndex.has(filePath)) fileIndex.set(filePath, new Map());
     fileIndex.get(filePath)!.set(name, def);
@@ -86,13 +102,42 @@ export function createSymbolTable(): SymbolTable {
 }
 
 /**
+ * Extract the optional resolution metadata a Symbol carries (E1). Returns
+ * `undefined` when the symbol carries none of `{ parameterCount, returnType,
+ * ownerId }`, so the table never stores empty metadata objects and parity with
+ * the pre-E1 `add(...)` (no 4th arg) is preserved for symbols lacking type
+ * info. DATA ONLY — does not influence which edges are emitted.
+ */
+export function symbolMetadata(
+  sym: Pick<Symbol, "parameterCount" | "returnType" | "ownerId">,
+): { parameterCount?: number; returnType?: string; ownerId?: string } | undefined {
+  if (
+    sym.parameterCount === undefined &&
+    sym.returnType === undefined &&
+    sym.ownerId === undefined
+  ) {
+    return undefined;
+  }
+  const meta: { parameterCount?: number; returnType?: string; ownerId?: string } = {};
+  if (sym.parameterCount !== undefined) meta.parameterCount = sym.parameterCount;
+  if (sym.returnType !== undefined) meta.returnType = sym.returnType;
+  if (sym.ownerId !== undefined) meta.ownerId = sym.ownerId;
+  return meta;
+}
+
+/**
  * Build a SymbolTable from an array of symbols.
  * Convenience wrapper used by Phase 3 resolution.
+ *
+ * E1: populates the optional `{ parameterCount, returnType, ownerId }` metadata
+ * carried by each Symbol. This is purely additive data on `SymbolDefinition`; no
+ * edge-emitting code path reads it yet on the parity-default strategy, so golden
+ * output stays byte-identical.
  */
 export function buildSymbolTable(symbols: Symbol[]): SymbolTable {
   const table = createSymbolTable();
   for (const sym of symbols) {
-    table.add(sym.location.filePath, sym.name, sym.id, sym.kind);
+    table.add(sym.location.filePath, sym.name, sym.id, sym.kind, symbolMetadata(sym));
   }
   return table;
 }

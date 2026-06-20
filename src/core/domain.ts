@@ -37,6 +37,58 @@ export interface Symbol {
   readonly documentation?: string;
   readonly visibility: Visibility;
   readonly modifiers: Modifier[];
+  // ── E1 deeper-resolution carriers (OPTIONAL; additive) ───────────────────
+  // Populated by the parsing layer for functions/methods/constructors so the
+  // resolution `SymbolTable` can expose `{ returnType, parameterCount }` for
+  // MRO-aware member-call resolution and chain binding. Absent ⇒ behaviour is
+  // identical to before (golden edge output unchanged).
+  /** Raw return-type text from the AST (e.g. `User`, `Promise<User>`). */
+  readonly returnType?: string;
+  /** Declared parameter count for a callable symbol. */
+  readonly parameterCount?: number;
+  /**
+   * Intra-run `id` of the owning class/struct/interface for a method or
+   * constructor (E1). Threads method→owner so MRO can walk a class's methods.
+   */
+  readonly ownerId?: string;
+  /**
+   * Per-callable complexity metrics (E2). Populated by the parsing layer for
+   * function/method/constructor defs (where the live tree-sitter `Tree`
+   * exists). Absent for non-callable symbols and where unsupported ⇒ Symbol
+   * shape stays identical to pre-E2 (golden output unchanged).
+   */
+  readonly complexity?: ComplexityMetrics;
+  /**
+   * API contract drift carriers (E3; OPTIONAL, additive). Populated only for the
+   * relevant route/consumer symbols by the framework parsers — absent everywhere
+   * else, so the Symbol shape stays pre-E3 identical.
+   */
+  /**
+   * Top-level keys of the JSON body a route handler returns
+   * (`res.json({...})` / `res.send({...})` / `return {...}`). Attached to route
+   * Symbols (Express/NestJS). Used by `shape_check` to detect contract drift.
+   */
+  readonly responseKeys?: readonly string[];
+  /**
+   * Property keys a consumer symbol reads off a fetched value (`result.data`,
+   * `result.total`). Recorded from the E3 `member.access` capture. Used by
+   * `shape_check` to flag reads of keys no route returns.
+   */
+  readonly accessedKeys?: readonly string[];
+}
+
+/**
+ * Complexity metrics for a callable symbol (E2). Computed as a pure tree-sitter
+ * subtree walk in `infrastructure/parsing/complexity.ts`; persisted on the
+ * Symbol node as STRING props (`cyclomatic`/`cognitive`/`maxLoopDepth`).
+ */
+export interface ComplexityMetrics {
+  /** McCabe cyclomatic complexity: 1 + number of decision nodes. */
+  readonly cyclomatic: number;
+  /** Nesting-weighted cognitive complexity. */
+  readonly cognitive: number;
+  /** Deepest nesting of loop constructs (0 = no loops). */
+  readonly maxLoopDepth: number;
 }
 
 /**
@@ -54,7 +106,13 @@ export function persistedKey(sym: Pick<Symbol, "id" | "logicalKey">): string {
 
 export type RelationType =
   | "calls" | "imports" | "inherits" | "implements"
-  | "contains" | "references" | "defines" | "dependsOn";
+  | "contains" | "references" | "defines" | "dependsOn"
+  // ── E1 MRO-derived edges (ADDITIVE) ──────────────────────────────────────
+  // `overrides`: a subclass method overrides a method of the same name reachable
+  //   via the linearised (C3/MRO) ancestor chain. NEVER replaces `inherits`.
+  // `methodImplements`: a concrete method satisfies an interface/trait method
+  //   contract. NEVER replaces `implements`.
+  | "overrides" | "methodImplements";
 
 export interface Relationship {
   readonly id: string;
@@ -187,6 +245,18 @@ export interface MCPToolResponse {
     entryEdge?: RelationType;
     /** Number of edges from the target to this node (1 = direct caller). */
     hopDistance?: number;
+    // ── E2 complexity hotspots (ADDITIVE; only populated by find_hotspots) ───
+    /** Cyclomatic complexity of this symbol (find_hotspots only). */
+    cyclomatic?: number;
+    /** Cognitive complexity of this symbol (find_hotspots only). */
+    cognitive?: number;
+    /** Deepest loop nesting of this symbol (find_hotspots only). */
+    maxLoopDepth?: number;
+    // ── E3 contract drift (ADDITIVE; only populated by shape_check/api_impact) ─
+    /** Route response keys (route symbols, shape_check only). */
+    responseKeys?: readonly string[];
+    /** Consumer-read keys (consumer symbols, shape_check only). */
+    accessedKeys?: readonly string[];
   }>;
   clusters: Array<{
     id: string;
@@ -258,6 +328,28 @@ export interface MCPToolResponse {
       flags: string;
       confidence: "low";
     };
+  };
+  // ── E3 API contract drift (ADDITIVE; only populated by `shape_check` /
+  //    `api_impact`). Absent for all other tools → wire contract unchanged. ───
+  /**
+   * Result of pairing route response shapes against consumer key reads (E3).
+   * Each mismatch is a key a consumer reads that no matching route returns.
+   */
+  shapeCheck?: {
+    /** Number of route↔consumer pairs that were compared. */
+    pairsChecked: number;
+    mismatches: Array<{
+      /** Symbol id of the consumer that reads the missing key. */
+      consumerId: string;
+      consumerName: string;
+      filePath: string;
+      /** The key the consumer reads that no matching route returns. */
+      key: string;
+      /** Keys the route(s) actually return (sorted, for the diff message). */
+      availableKeys: readonly string[];
+      /** `low` when the consumer file fetches more than one route (R9). */
+      confidence: "high" | "low";
+    }>;
   };
 }
 

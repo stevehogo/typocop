@@ -5,17 +5,47 @@ import { type ASTNode, fromSyntaxNode } from "./ast-node.js";
 import { LANGUAGE_QUERIES } from "./queries.js";
 import { generateSymbolId } from "./symbol-id.js";
 import { generateLogicalKey, OrdinalAllocator } from "./logical-key.js";
+import { computeComplexity } from "./complexity.js";
+
+/**
+ * `@definition.*` capture suffixes that denote a callable (function / method /
+ * constructor) — the only kinds for which complexity is computed (E2).
+ */
+const CALLABLE_DEFINITION_CAPTURES: ReadonlySet<string> = new Set([
+  "definition.function",
+  "definition.method",
+  "definition.constructor",
+  "definition.macro",
+]);
 
 /** Raw relationship hint extracted from AST — resolved into Relationship in Phase 3 */
 export interface RawRelationshipHint {
-  readonly kind: "import" | "call" | "inherits" | "implements";
+  readonly kind: "import" | "call" | "inherits" | "implements" | "access";
   readonly sourceFile: string;
-  /** For imports: the module specifier. For calls/heritage: the target name. */
+  /**
+   * For imports: the module specifier. For calls/heritage: the target name.
+   * For `access` (E3 `member.access`): the property key being read (`data` in
+   * `result.data`).
+   */
   readonly targetName: string;
   /** For heritage: the name of the child class (used to look up its symbol ID). */
   readonly childSymbolId?: string;
   readonly startLine: number;
   readonly language: Language;
+  // ── E1 deeper-resolution hint fields (OPTIONAL; additive) ─────────────────
+  /**
+   * For a member call `recv.method(...)`: the raw receiver expression text
+   * (e.g. `this`, `user`, `this.repo`). Enables MRO-aware member-call
+   * resolution — walking the receiver type's linearised ancestor chain instead
+   * of the global name fallback. Absent for bare `fn(...)` calls.
+   */
+  readonly receiverText?: string;
+  /**
+   * For a call: the `id` of the nearest enclosing definition symbol (function/
+   * method/class) at the call site. Lets resolution attribute the call to its
+   * true caller and lets chain-binding thread `returnType` through `a.b().c()`.
+   */
+  readonly enclosingSymbolId?: string;
 }
 
 /** Combined result of query-based extraction */
@@ -214,6 +244,8 @@ export function extractSymbolsWithQueries(
     const defCapture = match.captures.find((c) => c.name.startsWith("definition."));
     const importSourceCapture = match.captures.find((c) => c.name === "import.source");
     const callNameCapture = match.captures.find((c) => c.name === "call.name");
+    const memberAccessCapture = match.captures.find((c) => c.name === "member.access");
+    const memberObjectCapture = match.captures.find((c) => c.name === "member.object");
     const heritageExtendsCapture = match.captures.find((c) => c.name === "heritage.extends");
     // heritage.implements (Java/C#/PHP) and heritage.trait (Rust) both produce "implements" hints
     const heritageImplCapture = match.captures.find(
@@ -238,6 +270,22 @@ export function extractSymbolsWithQueries(
       // symbols distinct IDs (their name nodes sit at different columns).
       const nameNode = nameCapture.node;
 
+      // E1: optional callable metadata. Only attach fields that resolve to a
+      // concrete value so non-callable symbols (and symbols where the grammar
+      // exposes nothing useful) carry no empty keys — keeping the Symbol shape
+      // identical to pre-E1 wherever no info exists (golden output unchanged).
+      const parameterCount = extractParameterCount(defNode);
+      const returnType = extractReturnType(defNode);
+      const ownerId = extractOwnerId(defNode, filePath);
+
+      // E2: complexity is only meaningful for callables (function/method/
+      // constructor). Computed as a pure subtree walk over the live tree-sitter
+      // node — absent for everything else, so the Symbol shape stays pre-E2
+      // identical where it doesn't apply.
+      const complexity = CALLABLE_DEFINITION_CAPTURES.has(defCapture.name)
+        ? computeComplexity(defNode, language)
+        : undefined;
+
       symbols.push({
         id: generateSymbolId(
           filePath,
@@ -260,6 +308,10 @@ export function extractSymbolsWithQueries(
         },
         visibility: inferVisibility(defNode, language),
         modifiers: inferModifiers(defNode, language),
+        ...(parameterCount !== undefined ? { parameterCount } : {}),
+        ...(returnType !== undefined ? { returnType } : {}),
+        ...(ownerId !== undefined ? { ownerId } : {}),
+        ...(complexity !== undefined ? { complexity } : {}),
       });
     }
 
@@ -281,13 +333,49 @@ export function extractSymbolsWithQueries(
     if (callNameCapture) {
       const calleeName = callNameCapture.node.text.trim();
       if (calleeName) {
+        // E1: receiver text (for `recv.method(...)`) and the nearest enclosing
+        // definition id, so resolution can do MRO-aware member-call resolution
+        // and chain binding. Both optional — bare `fn()` carries no receiver.
+        const receiverText = extractReceiverText(callNameCapture.node);
+        const enclosingSymbolId = extractEnclosingSymbolId(callNameCapture.node, filePath);
         hints.push({
           kind: "call",
           sourceFile: filePath,
           targetName: calleeName,
           startLine: callNameCapture.node.startPosition.row,
           language,
+          ...(receiverText !== undefined ? { receiverText } : {}),
+          ...(enclosingSymbolId !== undefined ? { enclosingSymbolId } : {}),
         });
+      }
+    }
+
+    // ── Member-access hints (E3; shared member.access capture) ───────────────
+    // A `recv.prop` property READ. Skipped when the member expression is itself
+    // a call callee (`recv.method(...)`) — those are already emitted as `call`
+    // hints, so this never duplicates the E1 receiver capture. Carries the
+    // property as `targetName` and the receiver as `receiverText`, plus the
+    // nearest enclosing definition id so a consumer's reads can be attributed.
+    if (memberAccessCapture && memberObjectCapture) {
+      const member = memberAccessCapture.node.parent; // member_expression
+      const isCallee =
+        member?.parent?.type === "call_expression" &&
+        member.parent.childForFieldName("function") === member;
+      if (!isCallee) {
+        const key = memberAccessCapture.node.text.trim();
+        const receiver = memberObjectCapture.node.text.trim();
+        if (key && receiver) {
+          const enclosingSymbolId = extractEnclosingSymbolId(memberAccessCapture.node, filePath);
+          hints.push({
+            kind: "access",
+            sourceFile: filePath,
+            targetName: key,
+            startLine: memberAccessCapture.node.startPosition.row,
+            language,
+            receiverText: receiver,
+            ...(enclosingSymbolId !== undefined ? { enclosingSymbolId } : {}),
+          });
+        }
       }
     }
 
@@ -344,6 +432,169 @@ function assignLogicalKeys(symbols: Symbol[]): Symbol[] {
     });
   }
   return out;
+}
+
+// ─── E1 callable / call metadata extraction (language-agnostic, best-effort) ──
+
+/** Parameter-list node types across the supported grammars. */
+const PARAM_LIST_TYPES: ReadonlySet<string> = new Set([
+  "formal_parameters",   // ts/js
+  "parameters",          // python, rust, go (params)
+  "parameter_list",      // java, c#, go, c, cpp
+  "argument_list",       // python class superclasses (not params — excluded by child filter)
+]);
+
+/** Child node types that count as a single declared parameter. */
+const PARAM_NODE_TYPES: ReadonlySet<string> = new Set([
+  "required_parameter", "optional_parameter", "parameter", "formal_parameter",
+  "spread_parameter", "typed_parameter", "default_parameter",
+  "typed_default_parameter", "self_parameter", "variadic_parameter",
+  "simple_parameter", "property_promotion_parameter",
+]);
+
+/**
+ * Count declared parameters of a callable definition node. Returns `undefined`
+ * when the node exposes no recognisable parameter list (so non-callables and
+ * grammars we don't model carry no `parameterCount`). Best-effort and additive —
+ * never affects which edges are emitted.
+ */
+function extractParameterCount(defNode: Parser.SyntaxNode): number | undefined {
+  const list = defNode.namedChildren.find(
+    (c) => PARAM_LIST_TYPES.has(c.type) && c.type !== "argument_list",
+  ) ?? findDescendantParamList(defNode);
+  if (!list) return undefined;
+  let count = 0;
+  for (const child of list.namedChildren) {
+    if (PARAM_NODE_TYPES.has(child.type) || child.type.endsWith("_parameter")) count++;
+    else if (child.type === "identifier" || child.type === "typed_parameter") count++;
+  }
+  return count;
+}
+
+/** Shallow search for a parameter list nested one level down (e.g. C/C++ declarators). */
+function findDescendantParamList(defNode: Parser.SyntaxNode): Parser.SyntaxNode | undefined {
+  for (const child of defNode.namedChildren) {
+    const nested = child.namedChildren.find(
+      (c) => PARAM_LIST_TYPES.has(c.type) && c.type !== "argument_list",
+    );
+    if (nested) return nested;
+  }
+  return undefined;
+}
+
+/**
+ * Extract the raw return-type text of a callable definition node, if the grammar
+ * annotates one (TS `: T`, Python `-> T`, Rust `-> T`, etc.). Returns `undefined`
+ * otherwise. The text is trimmed of a leading `:`/`->` marker.
+ */
+function extractReturnType(defNode: Parser.SyntaxNode): string | undefined {
+  // tree-sitter exposes the return type via a `return_type` field on most
+  // grammars; fall back to a `type_annotation` named child (TS arrow/lexical).
+  const byField = defNode.childForFieldName("return_type");
+  const node = byField ?? defNode.namedChildren.find((c) => c.type === "type_annotation");
+  if (!node) return undefined;
+  const text = node.text.replace(/^\s*(?::|->)\s*/, "").trim();
+  return text.length > 0 ? text : undefined;
+}
+
+/** Definition node types that own methods/constructors (E1 `ownerId`). */
+const OWNER_NODE_TYPES: ReadonlySet<string> = new Set([
+  "class_declaration", "class_definition", "class_specifier", "class",
+  "interface_declaration", "struct_declaration", "struct_specifier",
+  "struct_item", "trait_item", "impl_item", "enum_declaration",
+  "record_declaration", "object_declaration", "protocol_declaration",
+  "namespace_definition",
+]);
+
+/** Identifier child types that name a definition node. */
+const NAME_CHILD_TYPES: ReadonlySet<string> = new Set([
+  "identifier", "type_identifier", "property_identifier", "name",
+  "namespace_identifier", "simple_identifier", "constant",
+]);
+
+function nameNodeOf(node: Parser.SyntaxNode): Parser.SyntaxNode | undefined {
+  const byField = node.childForFieldName("name");
+  if (byField) return byField;
+  return node.namedChildren.find((c) => NAME_CHILD_TYPES.has(c.type));
+}
+
+/**
+ * Compute the intra-run `id` of the nearest enclosing class/struct/interface for
+ * a method/constructor definition node (E1 `ownerId`). Mirrors the symbol-id
+ * derivation used for definitions (anchored to the owner's NAME node) so the
+ * value matches the owner Symbol's real `id`. Returns `undefined` at top level.
+ */
+function extractOwnerId(defNode: Parser.SyntaxNode, filePath: string): string | undefined {
+  let cur = defNode.parent;
+  while (cur) {
+    if (OWNER_NODE_TYPES.has(cur.type)) {
+      const nameNode = nameNodeOf(cur);
+      if (nameNode) {
+        return generateSymbolId(
+          filePath,
+          nameNode.text.trim(),
+          nameNode.startPosition.row,
+          nameNode.startPosition.column,
+        );
+      }
+    }
+    cur = cur.parent;
+  }
+  return undefined;
+}
+
+/**
+ * For a call-name node nested in a member/attribute/selector expression, return
+ * the raw receiver text (`recv` in `recv.method(...)`). Returns `undefined` for
+ * a bare-identifier call. Best-effort across grammars — looks one level up at the
+ * member-access node and takes its object/leading child.
+ */
+function extractReceiverText(callNameNode: Parser.SyntaxNode): string | undefined {
+  const access = callNameNode.parent;
+  if (!access) return undefined;
+  const memberTypes = new Set([
+    "member_expression", "attribute", "selector_expression", "field_expression",
+    "member_access_expression", "scoped_identifier", "navigation_expression",
+    "member_call_expression", "scoped_call_expression",
+  ]);
+  if (!memberTypes.has(access.type)) return undefined;
+  // Prefer the explicit object/receiver field where the grammar provides one.
+  const object =
+    access.childForFieldName("object") ??
+    access.childForFieldName("receiver") ??
+    access.childForFieldName("path") ??
+    access.namedChildren.find((c) => c !== callNameNode);
+  const text = object?.text.trim();
+  return text && text.length > 0 ? text : undefined;
+}
+
+/**
+ * Walk up from a call site to the nearest enclosing definition node and return
+ * its intra-run `id` (E1 `enclosingSymbolId`). Returns `undefined` for calls at
+ * module top level (no enclosing definition).
+ */
+function extractEnclosingSymbolId(callNameNode: Parser.SyntaxNode, filePath: string): string | undefined {
+  const DEF_TYPES = new Set([
+    "function_declaration", "function_definition", "function_item",
+    "method_definition", "method_declaration", "constructor_declaration",
+    "arrow_function", "function_expression", "local_function_statement",
+  ]);
+  let cur = callNameNode.parent;
+  while (cur) {
+    if (DEF_TYPES.has(cur.type)) {
+      const nameNode = nameNodeOf(cur);
+      if (nameNode) {
+        return generateSymbolId(
+          filePath,
+          nameNode.text.trim(),
+          nameNode.startPosition.row,
+          nameNode.startPosition.column,
+        );
+      }
+    }
+    cur = cur.parent;
+  }
+  return undefined;
 }
 
 function inferVisibility(node: Parser.SyntaxNode, language: Language): Visibility {

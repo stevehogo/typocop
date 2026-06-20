@@ -46,7 +46,15 @@ depcruise clean (359 modules). Flagship auto-augment hook (`hooks/claude/*.cjs` 
 impact explainability (node-role/entry-edge), 3 new MCP tools (`trace`, `rename`, `find_dead_code`),
 token-budgeted slicing, and the dead `find_dependents.maxDepth` fix; existing 6 MCP tools intact.
 
-Waves 1+2 (A,B) committed (prior); Wave 3 (C) committed `95d273d`; Wave 4 (D) committed as its own checkpoint. Wave 5 (E) remains.
+**Wave 5 (resolution/analytics E1,E2,E3) landed & independently verified 2026-06-20** via the
+`resolution-analytics-wave-E` workflow (E3's impl agent crashed mid-edit; completed with a one-line
+Kùzu `CREATE NODE TABLE` schema fix for `responseKeys`/`accessedKeys`): full suite 1730 passed /
+5 skipped / 0 failed; typecheck/typecheck:tests/depcruise clean (385 modules). Deeper resolution
+(scope-resolver registry + MRO/C3 additive `overrides`/`methodImplements` edges + chain-binding;
+golden resolution tests intact), complexity metrics + `find_hotspots`, and API contract drift
+(`shape_check`/`api_impact`). **12 MCP tools total.**
+
+Waves 1–5 (A–E concrete, 21/22 features) committed on `feature/refactor-code-base`. Only E5 (PDG/taint RFC) remains.
 
 | Task | Feature | Status | Blocked by |
 |---|---|---|---|
@@ -68,9 +76,9 @@ Waves 1+2 (A,B) committed (prior); Wave 3 (C) committed `95d273d`; Wave 4 (D) co
 | #16 | D4 — Token-budgeted context slicing | ✅ done | — |
 | #17 | D5 — Coordinated `rename` tool (preview-only) | ✅ done | — |
 | #18 | D6 — Dead-code detection | ✅ done | — |
-| #19 | E1 — Deeper cross-file resolution | pending | — |
-| #20 | E2 — Queryable complexity metrics | pending | — |
-| #21 | E3 — API contract drift (`shape_check`/`api_impact`) | pending | — |
+| #19 | E1 — Deeper cross-file resolution | ✅ done | — |
+| #20 | E2 — Queryable complexity metrics | ✅ done | — |
+| #21 | E3 — API contract drift (`shape_check`/`api_impact`) | ✅ done | — |
 | #22 | E5 — RFC: PDG + interprocedural taint | pending | E1 |
 
 ## Commit policy (RULE)
@@ -81,7 +89,7 @@ Changed files are **committed as a checkpoint per verified wave** — never left
 4. **Scope each commit to the wave's files** (`git add` the workflow's reported `filesChanged` + their tests), so unrelated pre-existing dirty files and any in-flight wave stay out.
 5. Do not `git push` or open a PR unless explicitly asked.
 
-**Checkpoint status:** Waves 1–4 are all committed on `feature/refactor-code-base` (1+2 prior; 3 = `95d273d`; 4 its own checkpoint). Only Wave 5 (E) remains.
+**Checkpoint status:** Waves 1–5 (A–E concrete, 21 features) are all committed on `feature/refactor-code-base`. Only E5 (PDG + interprocedural taint — an XL product-line RFC) remains.
 
 ---
 

@@ -238,6 +238,26 @@ export function validateToolParams(
       break;
     }
 
+    case "find_hotspots": {
+      for (const key of ["minComplexity", "maxResults", "offset"] as const) {
+        if (params[key] !== undefined && typeof params[key] !== "number") {
+          throw new MCPValidationError(
+            `find_hotspots '${key}' must be a number`,
+            "INVALID_PARAMETER_TYPE",
+            { tool: toolName, parameter: key, expected: "number" },
+          );
+        }
+      }
+      if (params.maxResults !== undefined && (params.maxResults as number) <= 0) {
+        throw new MCPValidationError(
+          "find_hotspots 'maxResults' must be a positive number",
+          "INVALID_PARAMETER_TYPE",
+          { tool: toolName, parameter: "maxResults", expected: "positive number" },
+        );
+      }
+      break;
+    }
+
     case "rename": {
       if (!params.symbolName || typeof params.symbolName !== "string") {
         throw new MCPValidationError(
@@ -271,6 +291,20 @@ export function validateToolParams(
       }
       break;
     }
+
+    case "shape_check":
+      // No required params (v1 checks the whole graph; no options).
+      break;
+
+    case "api_impact":
+      if (!params.route || typeof params.route !== "string") {
+        throw new MCPValidationError(
+          "api_impact requires a 'route' parameter (route symbol name)",
+          "MISSING_PARAMETER",
+          { tool: toolName, missing: "route" },
+        );
+      }
+      break;
 
     default:
       throw new MCPValidationError(

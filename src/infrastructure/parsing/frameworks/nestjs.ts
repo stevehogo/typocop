@@ -5,6 +5,7 @@
 import type { Symbol, FrameworkSupport } from "../../../core/domain.js";
 import { extractSymbols } from "../extract-symbols.js";
 import { fromSyntaxNode } from "../ast-node.js";
+import { extractResponseKeys } from "./response-shape.js";
 import path from "path";
 import fs from "fs/promises";
 import Parser from "tree-sitter";
@@ -37,17 +38,45 @@ export async function parseRouteDecorators(filePath: string, parser: Parser): Pr
     const tree = parser.parse(content);
     const ast = fromSyntaxNode(tree.rootNode);
     const symbols = extractSymbols(ast, filePath);
-    
+
+    // Map method name → its tree-sitter node so we can extract the response
+    // shape (E3) from a route handler's body.
+    const methodNodes = collectMethodNodes(tree.rootNode);
+
     // Filter for methods with route decorators
     const routePattern = /@(Get|Post|Put|Delete|Patch|All)\s*\(/;
-    return symbols.filter((s: Symbol) => 
-      s.kind === "method" && 
-      s.signature && 
-      routePattern.test(s.signature)
-    );
+    return symbols
+      .filter((s: Symbol) =>
+        s.kind === "method" &&
+        s.signature &&
+        routePattern.test(s.signature),
+      )
+      .map((s: Symbol) => {
+        const node = methodNodes.get(s.name);
+        const responseKeys = node ? extractResponseKeys(node, "typescript") : [];
+        return responseKeys.length > 0 ? { ...s, responseKeys } : s;
+      });
   } catch {
     return [];
   }
+}
+
+/**
+ * Map each class-method name to its tree-sitter `method_definition` node so the
+ * route parser can extract a handler's response shape (E3). Last definition wins
+ * on duplicate names (acceptable for the v1 shape probe).
+ */
+function collectMethodNodes(root: Parser.SyntaxNode): Map<string, Parser.SyntaxNode> {
+  const out = new Map<string, Parser.SyntaxNode>();
+  const walk = (node: Parser.SyntaxNode): void => {
+    if (node.type === "method_definition") {
+      const name = node.childForFieldName("name")?.text;
+      if (name) out.set(name, node);
+    }
+    for (const child of node.namedChildren) walk(child);
+  };
+  walk(root);
+  return out;
 }
 
 /**

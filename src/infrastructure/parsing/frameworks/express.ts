@@ -2,9 +2,10 @@
  * Express framework-specific parser.
  * Requirements: 14.4, 14.10
  */
-import type { Symbol, FrameworkSupport } from "../../../core/domain.js";
+import type { Symbol, FrameworkSupport, Language } from "../../../core/domain.js";
 import { extractSymbols } from "../extract-symbols.js";
 import { fromSyntaxNode } from "../ast-node.js";
+import { extractResponseKeys } from "./response-shape.js";
 import path from "path";
 import fs from "fs/promises";
 import Parser from "tree-sitter";
@@ -30,42 +31,69 @@ export const EXPRESS_SUPPORT: FrameworkSupport = {
  * Parse Express route handlers (app.get, app.post, etc.).
  * Requirement: 14.4
  */
+const HTTP_METHODS: ReadonlySet<string> = new Set(["get", "post", "put", "delete", "patch", "all"]);
+
 export async function parseExpressRoutes(filePath: string, parser: Parser): Promise<Symbol[]> {
   try {
     const content = await fs.readFile(filePath, "utf-8");
+    const tree = parser.parse(content);
+    const language: Language = filePath.endsWith(".ts") || filePath.endsWith(".tsx")
+      ? "typescript"
+      : "javascript";
     const symbols: Symbol[] = [];
-    
-    // Extract app.get/post/put/delete/patch patterns
-    const routePattern = /app\.(get|post|put|delete|patch|all)\s*\(\s*['"`]([^'"`]+)['"`]/g;
-    let match;
-    
-    while ((match = routePattern.exec(content)) !== null) {
-      const [, method, route] = match;
-      const lineNumber = content.substring(0, match.index).split("\n").length;
-      
+
+    // Walk for `app.<method>('<route>', ..., handler)` call expressions so we can
+    // reach the handler node and extract its response shape (E3).
+    walkCalls(tree.rootNode, (call) => {
+      const callee = call.childForFieldName("function");
+      if (callee?.type !== "member_expression") return;
+      const method = callee.childForFieldName("property")?.text;
+      if (!method || !HTTP_METHODS.has(method)) return;
+
+      const args = call.childForFieldName("arguments");
+      const argNodes = args?.namedChildren ?? [];
+      const routeArg = argNodes[0];
+      if (!routeArg || routeArg.type !== "string") return;
+      const route = routeArg.text.replace(/^['"`]|['"`]$/g, "");
+      if (!route) return;
+
+      // The handler is the last argument that is a function/arrow.
+      const handler = [...argNodes].reverse().find(
+        (a) => a.type === "arrow_function" || a.type === "function_expression",
+      );
+      const responseKeys = handler ? extractResponseKeys(handler, language) : [];
+
+      const id = `express:route:${method}:${route}`;
       symbols.push({
-        id: `express:route:${method}:${route}`,
+        id,
         // Framework route ids are already position-independent (route-derived),
         // so the persisted logicalKey is the same stable id (A1).
-        logicalKey: `express:route:${method}:${route}`,
+        logicalKey: id,
         name: `${method.toUpperCase()} ${route}`,
         kind: "function",
         location: {
           filePath,
-          startLine: lineNumber,
+          startLine: call.startPosition.row + 1,
           startColumn: 0,
-          endLine: lineNumber,
+          endLine: call.endPosition.row + 1,
           endColumn: 0,
         },
         visibility: "public",
         modifiers: [],
+        ...(responseKeys.length > 0 ? { responseKeys } : {}),
       });
-    }
-    
+    });
+
     return symbols;
   } catch {
     return [];
   }
+}
+
+/** Pre-order DFS collecting `call_expression` nodes. */
+function walkCalls(node: Parser.SyntaxNode, visit: (n: Parser.SyntaxNode) => void): void {
+  if (node.type === "call_expression") visit(node);
+  for (const child of node.namedChildren) walkCalls(child, visit);
 }
 
 /**

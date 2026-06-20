@@ -12,14 +12,21 @@ import type {
   Relationship,
   RelationType,
 } from "../../../core/domain.js";
+import type { Language } from "../../../core/domain.js";
 import type { RawRelationshipHint } from "../parsing/index.js";
-import { buildSymbolTable } from "./symbol-table.js";
+import { buildSymbolTable, symbolMetadata } from "./symbol-table.js";
 import { createResolutionContext } from "./resolution-context.js";
 import { loadLanguageConfigs, type LanguageConfigs } from "../language-config.js";
 import {
   getOrCreateExtNode,
   isExternalPackage,
 } from "./external-packages.js";
+import { getScopeResolver } from "./scope-resolver.js";
+import type { CallResolutionDeps } from "./scope-resolver.js";
+// Side-effect import: registers the built-in per-language scope resolvers (E1).
+import "./resolvers/index.js";
+import { computeMRO, c3Linearize, gatherAncestors } from "./mro.js";
+import { resolveReceiverType, type ChainBindingDeps } from "./chain-binding.js";
 
 // ─── Symbol map ───────────────────────────────────────────────────────────────
 
@@ -254,11 +261,31 @@ export function resolveHints(
     symbolsByFile.set(sym.location.filePath, list);
   }
 
-  // Build resolution context and populate symbol table
+  // Build resolution context and populate symbol table. E1: thread the optional
+  // `{ parameterCount, returnType, ownerId }` metadata each Symbol carries into
+  // the SymbolDefinition (data only — the default `single` strategy never reads
+  // it, so the emitted edge set is byte-identical to pre-E1).
   const ctx = createResolutionContext();
   for (const sym of symbols) {
-    ctx.symbols.add(sym.location.filePath, sym.name, sym.id, sym.kind);
+    ctx.symbols.add(sym.location.filePath, sym.name, sym.id, sym.kind, symbolMetadata(sym));
   }
+
+  // ─── E1 MRO / chain support indexes (built once) ───────────────────────────
+  // methodsByOwner: ownerId → method/function Symbols owned by that type. Feeds
+  // both MRO-aware member-call resolution and chain binding.
+  const methodsByOwner = new Map<string, Symbol[]>();
+  for (const sym of symbols) {
+    if ((sym.kind !== "method" && sym.kind !== "function") || sym.ownerId === undefined) continue;
+    const bucket = methodsByOwner.get(sym.ownerId) ?? [];
+    bucket.push(sym);
+    methodsByOwner.set(sym.ownerId, bucket);
+  }
+  // mroLinear: classId → C3-linearised ancestor ids, derived from the heritage
+  // HINTS (independent of edge resolution, so available before the hint loop).
+  const mroLinear = buildMroLinearizationFromHints(hints, symbols, symbolById);
+
+  // Shared selector deps (parity selector + per-language resolvers).
+  const callDeps: CallResolutionDeps = { ctx, symbolById, symbolMap };
 
   // DEPENDS_ON external-dependency fan-out reporting (behavior unchanged; count only).
   let dependsOnEdgeCount = 0;
@@ -363,16 +390,35 @@ export function resolveHints(
           const fileSym = symbolsByFile.get(hint.sourceFile);
           const caller = fileSym?.find((s) => s.location.startLine <= hint.startLine && s.location.endLine >= hint.startLine);
           if (!caller) break;
-          const ctxResult = ctx.resolve(hint.targetName, hint.sourceFile);
-          const resolvedId = ctxResult?.candidates[0]?.nodeId;
-          // Resolve the ctx candidate id via symbolById (it is an id). The old
-          // `symbolMap.get(name).find(s => s.id === resolvedId)` was name+id and
-          // worked, but the id index is clearer and avoids the name scan. Keep
-          // the same-file refinement semantics: only use it when it differs from
-          // the caller.
-          const sameFile = resolvedId ? symbolById.get(resolvedId) : undefined;
-          const target = (sameFile && sameFile.id !== caller.id) ? sameFile
-            : (symbolMap.get(hint.targetName) ?? []).find((s) => s.id !== caller.id);
+
+          const resolver = getScopeResolver(hint.language);
+
+          // ── E1 step 4: MRO-aware member-call resolution (ADDITIVE) ──────────
+          // Only attempts when the resolver opts into `mro` AND the call has a
+          // known receiver whose type linearises to an ancestor that declares the
+          // method. Produces a target ONLY when the global single-strategy would
+          // have produced a DIFFERENT (or no) one — never overriding an existing
+          // same-file precise hit. If it yields nothing, we fall through to the
+          // byte-identical parity selector below.
+          let target: Symbol | undefined;
+          if (resolver.strategy === "mro" && hint.receiverText) {
+            target = resolveMemberCallTarget(
+              hint.targetName,
+              hint.receiverText,
+              caller,
+              { symbolById, symbolMap, methodsByOwner, mroLinear },
+              resolver.propagatesReturnTypes,
+            );
+          }
+
+          // ── Parity selector (today's behaviour, byte-identical) ─────────────
+          if (!target) {
+            target = resolver.selectCallTarget(
+              { calleeName: hint.targetName, receiverText: hint.receiverText, caller, sourceFile: hint.sourceFile },
+              callDeps,
+            );
+          }
+
           if (target) add({ id: relId("calls", caller.id, target.id), source: caller.id, target: target.id, relType: "calls", metadata: {} });
           break;
         }
@@ -393,6 +439,15 @@ export function resolveHints(
 
     ctx.clearCache();
   }
+
+  // ── E1 step 3: MRO-derived edges (ADDITIVE) ────────────────────────────────
+  // Computed AFTER the hint loop so all `inherits`/`implements` edges exist.
+  // `computeMRO` emits ONLY new `overrides`/`methodImplements` relTypes; it never
+  // touches existing edge ids. `add` dedups, so re-emission is a no-op. When no
+  // symbol carries method `ownerId` (e.g. synthetic fixtures), it emits nothing —
+  // golden output stays byte-identical.
+  const mro = computeMRO(symbols, relationships);
+  for (const rel of mro.relationships) add(rel);
 
   return {
     relationships,
@@ -419,6 +474,90 @@ export interface ResolveHintsResult {
    * Optional because the legacy `resolveReferences` path does not produce it.
    */
   readonly dependsOnStats?: DependsOnStats;
+}
+
+// ─── E1 MRO-aware member-call resolution (ADDITIVE helpers) ───────────────────
+
+/**
+ * Build a `classId → C3-linearised ancestor ids` map from the heritage HINTS,
+ * resolving each heritage hint's child/parent NAMES to concrete symbol ids. Used
+ * by member-call resolution to walk a receiver type's ancestor chain. Independent
+ * of edge resolution, so it can be built before the hint loop.
+ */
+function buildMroLinearizationFromHints(
+  hints: RawRelationshipHint[],
+  symbols: Symbol[],
+  symbolById: Map<string, Symbol>,
+): Map<string, string[]> {
+  const byName = buildSymbolMap(symbols);
+  const parentMap = new Map<string, string[]>();
+  for (const hint of hints) {
+    if (hint.kind !== "inherits" && hint.kind !== "implements") continue;
+    if (!hint.childSymbolId) continue;
+    const childCandidates = byName.get(hint.childSymbolId) ?? [];
+    const child = childCandidates.find((s) => s.location.filePath === hint.sourceFile) ?? childCandidates[0];
+    if (!child) continue;
+    const parent = (byName.get(hint.targetName) ?? []).find((s) => s.id !== child.id);
+    if (!parent) continue;
+    const list = parentMap.get(child.id) ?? [];
+    list.push(parent.id);
+    parentMap.set(child.id, list);
+  }
+  const cache = new Map<string, string[] | null>();
+  const out = new Map<string, string[]>();
+  for (const classId of parentMap.keys()) {
+    const linear = c3Linearize(classId, parentMap, cache);
+    out.set(classId, linear ?? gatherAncestors(classId, parentMap));
+  }
+  // Make sure every symbolById key exists if needed by chain binding (no-op map
+  // entries omitted intentionally).
+  void symbolById;
+  return out;
+}
+
+/**
+ * MRO-aware member-call target selection (E1 step 4). Resolves the receiver type
+ * (optionally via chain binding when `propagatesReturnTypes`), then walks the
+ * receiver type's linearised ancestor chain for the FIRST type that declares a
+ * method named `calleeName`. Returns `undefined` (→ parity fallback) when the
+ * receiver type or method can't be determined.
+ */
+function resolveMemberCallTarget(
+  calleeName: string,
+  receiverText: string,
+  caller: Symbol,
+  deps: {
+    symbolById: Map<string, Symbol>;
+    symbolMap: Map<string, Symbol[]>;
+    methodsByOwner: Map<string, Symbol[]>;
+    mroLinear: Map<string, string[]>;
+  },
+  propagatesReturnTypes: boolean,
+): Symbol | undefined {
+  // Resolve the receiver type. `this`/`self` always work; chained receivers only
+  // when the resolver propagates return types.
+  const text = receiverText.trim();
+  const isSelf = text === "this" || text === "self";
+  if (!isSelf && !propagatesReturnTypes) return undefined;
+
+  const chainDeps: ChainBindingDeps = {
+    symbolById: deps.symbolById,
+    symbolMap: deps.symbolMap,
+    methodsByOwner: deps.methodsByOwner,
+  };
+  const receiverType = resolveReceiverType(receiverText, caller, chainDeps);
+  if (!receiverType) return undefined;
+
+  // Search the receiver type's own methods first, then its linearised ancestors.
+  const ownMethod = (deps.methodsByOwner.get(receiverType.id) ?? []).find((m) => m.name === calleeName);
+  if (ownMethod && ownMethod.id !== caller.id) return ownMethod;
+
+  const linear = deps.mroLinear.get(receiverType.id) ?? [];
+  for (const ancestorId of linear) {
+    const m = (deps.methodsByOwner.get(ancestorId) ?? []).find((mm) => mm.name === calleeName);
+    if (m && m.id !== caller.id) return m;
+  }
+  return undefined;
 }
 
 // ─── Phase 3 entry point ─────────────────────────────────────────────────────

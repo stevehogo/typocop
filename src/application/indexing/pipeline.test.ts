@@ -206,6 +206,36 @@ describe("runIndexingPipeline — DatabaseAdapter integration", () => {
     expect(graph.createRelationship).toHaveBeenCalledWith("proc-1", "stub", "HAS_STEP", { step_order: "0" });
   });
 
+  // E2: complexity metrics persist on the Symbol node as STRING props.
+  it("persists complexity metrics as string props on Symbol nodes (E2)", async () => {
+    const { adapter, graph } = makeMockAdapter(false);
+    const sym: Symbol = {
+      ...STUB_SYMBOL,
+      complexity: { cyclomatic: 7, cognitive: 11, maxLoopDepth: 2 },
+    };
+    mockExtractAllSymbols.mockResolvedValue({ symbols: [sym], hints: [], skippedFiles: 0 });
+
+    await runIndexingPipeline({ sourcePath: ".", language: "typescript", verbose: false, adapter });
+
+    expect(graph.createNode).toHaveBeenCalledWith(
+      "Symbol",
+      expect.objectContaining({ id: "stub", cyclomatic: "7", cognitive: "11", maxLoopDepth: "2" }),
+    );
+  });
+
+  // E2: symbols WITHOUT complexity (non-callables, pre-E2) default to "0".
+  it("defaults missing complexity props to '0' on Symbol nodes (E2)", async () => {
+    const { adapter, graph } = makeMockAdapter(false);
+    // STUB_SYMBOL has no `complexity` field.
+
+    await runIndexingPipeline({ sourcePath: ".", language: "typescript", verbose: false, adapter });
+
+    expect(graph.createNode).toHaveBeenCalledWith(
+      "Symbol",
+      expect.objectContaining({ id: "stub", cyclomatic: "0", cognitive: "0", maxLoopDepth: "0" }),
+    );
+  });
+
   it("stores external dependency nodes and DEPENDS_ON edges", async () => {
     const { adapter, graph } = makeMockAdapter(false);
     mockResolveReferences.mockReturnValue({

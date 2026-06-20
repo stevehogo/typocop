@@ -62,6 +62,10 @@ export const TYPESCRIPT_QUERIES = `
 (new_expression
   constructor: (identifier) @call.name) @call
 
+(member_expression
+  object: (identifier) @member.object
+  property: (property_identifier) @member.access) @member
+
 (class_declaration
   name: (type_identifier) @heritage.class
   (class_heritage
@@ -122,6 +126,10 @@ export const JAVASCRIPT_QUERIES = `
 
 (new_expression
   constructor: (identifier) @call.name) @call
+
+(member_expression
+  object: (identifier) @member.object
+  property: (property_identifier) @member.access) @member
 
 (class_declaration
   name: (identifier) @heritage.class

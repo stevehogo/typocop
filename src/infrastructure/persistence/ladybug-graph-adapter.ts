@@ -100,7 +100,7 @@ export class LadybugGraphAdapter implements GraphAdapter {
     for (const label of nodeLabels) {
       const tbl = this.prefixLabel(label);
       await this.exec(
-        `CREATE NODE TABLE IF NOT EXISTS ${tbl} (id STRING, name STRING, kind STRING, filePath STRING, startLine STRING, startColumn STRING, endLine STRING, endColumn STRING, visibility STRING, signature STRING, documentation STRING, category STRING, confidence STRING, symbolCount STRING, entryPoint STRING, stepCount STRING, key STRING, timestamp STRING, aliases STRING, ecosystem STRING, PRIMARY KEY(id))`,
+        `CREATE NODE TABLE IF NOT EXISTS ${tbl} (id STRING, name STRING, kind STRING, filePath STRING, startLine STRING, startColumn STRING, endLine STRING, endColumn STRING, visibility STRING, signature STRING, documentation STRING, cyclomatic STRING, cognitive STRING, maxLoopDepth STRING, responseKeys STRING, accessedKeys STRING, category STRING, confidence STRING, symbolCount STRING, entryPoint STRING, stepCount STRING, key STRING, timestamp STRING, aliases STRING, ecosystem STRING, PRIMARY KEY(id))`,
       );
     }
 

@@ -23,12 +23,17 @@ import type { FileNode } from "../file-node.js";
  * leaf. Do NOT add behaviour — this is a data contract only.
  */
 export interface CachedRelationshipHint {
-  readonly kind: "import" | "call" | "inherits" | "implements";
+  readonly kind: "import" | "call" | "inherits" | "implements" | "access";
   readonly sourceFile: string;
   readonly targetName: string;
   readonly childSymbolId?: string;
   readonly startLine: number;
   readonly language: Language;
+  // ── E1 deeper-resolution + E3 member.access carriers (OPTIONAL; additive) ──
+  // Kept structurally in sync with `RawRelationshipHint` so cached hints (which
+  // are JSON-round-tripped) preserve these fields across the incremental path.
+  readonly receiverText?: string;
+  readonly enclosingSymbolId?: string;
 }
 
 /**
