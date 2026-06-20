@@ -40,7 +40,13 @@ depcruise clean (334 modules). Git-diff→changed-symbols layer (`GitPort`), the
 `detect_changes` (reuses `executePreCommitCheck`), and watch mode (chokidar) on `reindexChangedFiles`;
 existing 5 MCP tools intact.
 
-Waves 1+2 (A,B) are committed (prior). Wave 3 (C) is committed as its own checkpoint. Waves 4–5 (D,E) remain.
+**Wave 4 (agent MCP tools D1,D2,D3,D4,D6,D5) landed & independently verified 2026-06-20** via the
+`agent-tools-wave-D` workflow: full suite 1661 passed / 5 skipped / 0 failed; typecheck/typecheck:tests/
+depcruise clean (359 modules). Flagship auto-augment hook (`hooks/claude/*.cjs` + `augment.ts` + `setup`),
+impact explainability (node-role/entry-edge), 3 new MCP tools (`trace`, `rename`, `find_dead_code`),
+token-budgeted slicing, and the dead `find_dependents.maxDepth` fix; existing 6 MCP tools intact.
+
+Waves 1+2 (A,B) committed (prior); Wave 3 (C) committed `95d273d`; Wave 4 (D) committed as its own checkpoint. Wave 5 (E) remains.
 
 | Task | Feature | Status | Blocked by |
 |---|---|---|---|
@@ -56,12 +62,12 @@ Waves 1+2 (A,B) are committed (prior). Wave 3 (C) is committed as its own checkp
 | #10 | C1 — Git-diff → changed-symbols layer | ✅ done | — |
 | #11 | C2 — `detect_changes` MCP tool | ✅ done | C1 |
 | #12 | C3 — Watch mode + CLI `watch` | ✅ done | A5 |
-| #13 | D1 — Auto-augmenting Claude Code hook **[FLAGSHIP]** | pending | — |
-| #14 | D2 — Impact-analysis explainability | pending | — |
-| #15 | D3 — `trace` tool + fix dead `maxDepth` | pending | — |
-| #16 | D4 — Token-budgeted context slicing | pending | — |
-| #17 | D5 — Coordinated `rename` tool (preview-only) | pending | — |
-| #18 | D6 — Dead-code detection | pending | — |
+| #13 | D1 — Auto-augmenting Claude Code hook **[FLAGSHIP]** | ✅ done | — |
+| #14 | D2 — Impact-analysis explainability | ✅ done | — |
+| #15 | D3 — `trace` tool + fix dead `maxDepth` | ✅ done | — |
+| #16 | D4 — Token-budgeted context slicing | ✅ done | — |
+| #17 | D5 — Coordinated `rename` tool (preview-only) | ✅ done | — |
+| #18 | D6 — Dead-code detection | ✅ done | — |
 | #19 | E1 — Deeper cross-file resolution | pending | — |
 | #20 | E2 — Queryable complexity metrics | pending | — |
 | #21 | E3 — API contract drift (`shape_check`/`api_impact`) | pending | — |
@@ -75,7 +81,7 @@ Changed files are **committed as a checkpoint per verified wave** — never left
 4. **Scope each commit to the wave's files** (`git add` the workflow's reported `filesChanged` + their tests), so unrelated pre-existing dirty files and any in-flight wave stay out.
 5. Do not `git push` or open a PR unless explicitly asked.
 
-**Retroactive backlog:** Waves 1 (A1–A5) and 2 (B2/B1/B4/B3) are verified-green but **not yet committed**. They get their checkpoint commits **once the in-flight Wave 3 (C-stream) finishes and verifies** — committing now would sweep in partial C edits.
+**Checkpoint status:** Waves 1–4 are all committed on `feature/refactor-code-base` (1+2 prior; 3 = `95d273d`; 4 its own checkpoint). Only Wave 5 (E) remains.
 
 ---
 

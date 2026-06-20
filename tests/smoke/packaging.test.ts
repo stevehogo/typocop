@@ -8,16 +8,17 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, "../..");
 
 describe("package.json field assertions", () => {
-  it("declares bin field with typocop and typocop-mcp", () => {
+  it("declares bin field with typocop, typocop-mcp, and the augment hook (D1)", () => {
     expect(pkg.bin).toEqual({
       typocop: "dist/apps/cli/main.js",
       "typocop-mcp": "dist/apps/mcp-server/main.js",
       "typocop-ladybug-server": "dist/apps/ladybug-server/main.js",
+      "typocop-hook": "hooks/claude/typocop-hook.cjs",
     });
   });
 
-  it("declares files field with dist and README.md", () => {
-    expect(pkg.files).toEqual(["dist", "proto", "README.md"]);
+  it("declares files field with dist, hooks (D1), proto and README.md", () => {
+    expect(pkg.files).toEqual(["dist", "hooks", "proto", "README.md"]);
   });
 
   it("declares engines with node >=20.0.0", () => {

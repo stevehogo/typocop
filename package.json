@@ -8,10 +8,12 @@
   "bin": {
     "typocop": "dist/apps/cli/main.js",
     "typocop-mcp": "dist/apps/mcp-server/main.js",
-    "typocop-ladybug-server": "dist/apps/ladybug-server/main.js"
+    "typocop-ladybug-server": "dist/apps/ladybug-server/main.js",
+    "typocop-hook": "hooks/claude/typocop-hook.cjs"
   },
   "files": [
     "dist",
+    "hooks",
     "proto",
     "README.md"
   ],

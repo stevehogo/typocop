@@ -55,6 +55,54 @@ describe("validateToolParams", () => {
     it("throws for non-string symbolName", () => {
       expect(() => validateToolParams("get_symbol_context", { symbolName: 123 })).toThrow(MCPValidationError);
     });
+
+    // D4 token-budgeted slicing params
+    it("accepts valid tokenBudget / pin / maxDepth", () => {
+      expect(() =>
+        validateToolParams("get_symbol_context", {
+          symbolName: "test",
+          tokenBudget: 500,
+          pin: ["a", "b"],
+          maxDepth: 2,
+        }),
+      ).not.toThrow();
+    });
+
+    it("accepts tokenBudget 0 (unlimited)", () => {
+      expect(() =>
+        validateToolParams("get_symbol_context", { symbolName: "test", tokenBudget: 0 }),
+      ).not.toThrow();
+    });
+
+    it("throws for negative tokenBudget", () => {
+      expect(() =>
+        validateToolParams("get_symbol_context", { symbolName: "test", tokenBudget: -1 }),
+      ).toThrow("tokenBudget");
+    });
+
+    it("throws for non-number tokenBudget", () => {
+      expect(() =>
+        validateToolParams("get_symbol_context", { symbolName: "test", tokenBudget: "lots" }),
+      ).toThrow(MCPValidationError);
+    });
+
+    it("throws for non-array pin", () => {
+      expect(() =>
+        validateToolParams("get_symbol_context", { symbolName: "test", pin: "a" }),
+      ).toThrow("pin");
+    });
+
+    it("throws for pin with non-string elements", () => {
+      expect(() =>
+        validateToolParams("get_symbol_context", { symbolName: "test", pin: ["a", 2] }),
+      ).toThrow("pin");
+    });
+
+    it("throws for non-number maxDepth", () => {
+      expect(() =>
+        validateToolParams("get_symbol_context", { symbolName: "test", maxDepth: "deep" }),
+      ).toThrow("maxDepth");
+    });
   });
 
   describe("find_dependents", () => {
@@ -96,6 +144,25 @@ describe("validateToolParams", () => {
 
     it("throws for invalid changeType", () => {
       expect(() => validateToolParams("impact_analysis", { symbolName: "test", changeType: "invalid" })).toThrow(MCPValidationError);
+    });
+  });
+
+  describe("trace", () => {
+    it("accepts valid params", () => {
+      expect(() => validateToolParams("trace", { fromSymbol: "a", toSymbol: "b" })).not.toThrow();
+      expect(() => validateToolParams("trace", { fromSymbol: "a", toSymbol: "b", maxDepth: 5 })).not.toThrow();
+    });
+
+    it("throws for missing fromSymbol", () => {
+      expect(() => validateToolParams("trace", { toSymbol: "b" })).toThrow(MCPValidationError);
+    });
+
+    it("throws for missing toSymbol", () => {
+      expect(() => validateToolParams("trace", { fromSymbol: "a" })).toThrow(MCPValidationError);
+    });
+
+    it("throws for non-number maxDepth", () => {
+      expect(() => validateToolParams("trace", { fromSymbol: "a", toSymbol: "b", maxDepth: "5" })).toThrow(MCPValidationError);
     });
   });
 

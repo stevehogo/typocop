@@ -34,6 +34,19 @@ const TOOL_DEFINITIONS = [
           type: "number",
           description: "Maximum number of results to return (default: 100)",
         },
+        tokenBudget: {
+          type: "number",
+          description: "Optional max estimated tokens for the returned context (D4). When set, slices target + direct callers/callees in BFS order to fit; pinned symbols are always kept. 0 = unlimited.",
+        },
+        pin: {
+          type: "array",
+          items: { type: "string" },
+          description: "Optional symbol ids to always include in the slice regardless of token budget.",
+        },
+        maxDepth: {
+          type: "number",
+          description: "Optional max hop distance for the slice (default: 1 = target + direct neighbours).",
+        },
       },
       required: ["symbolName"],
     },
@@ -118,6 +131,29 @@ const TOOL_DEFINITIONS = [
     },
   },
   {
+    name: "trace",
+    description:
+      "Trace the shortest call/containment path between two symbols over CALLS|CONTAINS edges, returning the per-hop chain (symbol, file:line, edge type).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        fromSymbol: {
+          type: "string",
+          description: "Source symbol name or id (start of the path)",
+        },
+        toSymbol: {
+          type: "string",
+          description: "Destination symbol name or id (end of the path)",
+        },
+        maxDepth: {
+          type: "number",
+          description: "Maximum traversal depth in edges (default + cap: 20)",
+        },
+      },
+      required: ["fromSymbol", "toSymbol"],
+    },
+  },
+  {
     name: "detect_changes",
     description:
       "Detect uncommitted/git changes and analyze their blast radius: affected symbols, business flows, and risk level (elevates to CRITICAL for auth/payment/checkout/security/session/token code).",
@@ -140,6 +176,52 @@ const TOOL_DEFINITIONS = [
         },
       },
       required: [],
+    },
+  },
+  {
+    name: "find_dead_code",
+    description:
+      "List likely-dead-code candidates: symbols with no incoming CALLS edge that are neither exported nor entry-point-named (main/handlers/REST verbs/controllers). Read-only — never deletes. Candidates must be verified before deletion; dynamic/reflective calls are not tracked.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        kind: {
+          type: "string",
+          enum: [
+            "function", "class", "method", "interface",
+            "variable", "import", "export", "type",
+          ],
+          description: "Optional symbol-kind filter (e.g. 'function', 'method').",
+        },
+        maxResults: {
+          type: "number",
+          description: "Maximum number of candidates to return (default: 100)",
+        },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "rename",
+    description:
+      "PREVIEW a coordinated symbol rename: resolves the symbol, lists the definition + edge-backed reference sites (CALLS/IMPORTS/REFERENCES) as high-confidence file:line edits, plus a word-boundary regex for the low-confidence text tail. PREVIEW ONLY — never writes files or the graph.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        symbolName: {
+          type: "string",
+          description: "Current name (or id) of the symbol to rename",
+        },
+        newName: {
+          type: "string",
+          description: "Proposed new name (must be a valid identifier)",
+        },
+        filePath: {
+          type: "string",
+          description: "Optional file path to disambiguate an ambiguous symbol name",
+        },
+      },
+      required: ["symbolName", "newName"],
     },
   },
 ];

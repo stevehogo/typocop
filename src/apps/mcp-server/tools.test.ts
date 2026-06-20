@@ -229,4 +229,105 @@ describe("executeTool", () => {
       ).rejects.toThrow("query is required");
     });
   });
+
+  // ── D4: token-budgeted context slicing wiring through get_symbol_context ─────
+  describe("get_symbol_context token-budgeted slicing (D4)", () => {
+    function node(id: string, startLine = 1, endLine = 1) {
+      return {
+        n: {
+          labels: ["Symbol"],
+          properties: {
+            id,
+            name: id,
+            kind: "function",
+            filePath: `/repo/${id}.ts`,
+            startLine: String(startLine),
+            startColumn: "0",
+            endLine: String(endLine),
+            endColumn: "0",
+            visibility: "public",
+          },
+        },
+      };
+    }
+
+    // Wire a query-aware mock: exact resolve → target; caller/callee traversals →
+    // two callers + two callees; everything else (processes/clusters/ext) → [].
+    function wireContext() {
+      vi.mocked(adapter._graph.runCypher).mockImplementation(async (query: string) => {
+        if (query.includes("WHERE n.id = $val OR n.name = $val")) return [node("target")] as never;
+        // findDependents: (n)-[:CALLS*]->(t) RETURN DISTINCT n
+        if (query.includes("(n:Symbol)-[e:CALLS") && query.includes("(t:Symbol)")) {
+          return [node("caller1"), node("caller2")] as never;
+        }
+        // findDependencies: (s)-[:CALLS*]->(n) RETURN DISTINCT n
+        if (query.includes("(s:Symbol)-[e:CALLS") && query.includes("(n:Symbol)")) {
+          return [node("callee1"), node("callee2")] as never;
+        }
+        return [] as never;
+      });
+    }
+
+    it("with no tokenBudget the default (unsliced) behaviour is unchanged", async () => {
+      wireContext();
+      const result = await executeTool("get_symbol_context", { symbolName: "target" }, adapter);
+      // target + 2 callers + 2 callees
+      expect(result.symbols).toHaveLength(5);
+      expect(result.truncationReason).toBeUndefined();
+      expect(result.estimatedTokens).toBeUndefined();
+      expect(result.summary).toContain("related symbols");
+    });
+
+    it("a generous budget includes everything and reports complete", async () => {
+      wireContext();
+      const result = await executeTool(
+        "get_symbol_context",
+        { symbolName: "target", tokenBudget: 100000 },
+        adapter,
+      );
+      expect(result.symbols).toHaveLength(5);
+      expect(result.truncationReason).toBe("complete");
+      expect(typeof result.estimatedTokens).toBe("number");
+      expect(result.summary).toContain("Context slice");
+    });
+
+    it("budget 0 with a pin returns only the pinned symbol(s)", async () => {
+      wireContext();
+      const result = await executeTool(
+        "get_symbol_context",
+        { symbolName: "target", tokenBudget: 1, pin: ["caller2"] },
+        adapter,
+      );
+      expect(result.symbols.map((s) => s.id)).toEqual(["caller2"]);
+      expect(result.truncationReason).toBe("token_budget");
+    });
+
+    it("pinned symbol is always present even when far over budget", async () => {
+      wireContext();
+      const result = await executeTool(
+        "get_symbol_context",
+        { symbolName: "target", tokenBudget: 1, pin: ["target", "callee1"] },
+        adapter,
+      );
+      const ids = result.symbols.map((s) => s.id);
+      expect(ids).toContain("target");
+      expect(ids).toContain("callee1");
+    });
+
+    it("deterministic ordering: target → callers → callees", async () => {
+      wireContext();
+      const result = await executeTool(
+        "get_symbol_context",
+        { symbolName: "target", tokenBudget: 0 },
+        adapter,
+      );
+      expect(result.symbols.map((s) => s.id)).toEqual([
+        "target",
+        "caller1",
+        "caller2",
+        "callee1",
+        "callee2",
+      ]);
+    });
+  });
 });

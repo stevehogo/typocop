@@ -4,7 +4,7 @@
  */
 import type { GraphAdapter, GraphNode } from "../../core/ports/persistence.js";
 import { prop } from "../../core/ports/persistence.js";
-import type { Relationship, Process, QueryResult } from "../../core/domain.js";
+import type { Relationship, Process, QueryResult, Symbol } from "../../core/domain.js";
 import { graphNodeToCluster } from "./process-helpers.js";
 import { type CypherNodeRow, rowToNode, graphNodeToSymbol } from "./graph-helpers.js";
 import { MAX_TRAVERSAL_DEPTH } from "../../platform/utils/limits.js";
@@ -116,7 +116,17 @@ async function graphNodeToProcess(node: GraphNode, graph: GraphAdapter): Promise
 }
 
 /** Return type for executeContextRetrieval, including resolution info for callers. */
-export type ContextRetrievalResult = { resolution: SymbolResolution } & Pick<QueryResult, "symbols" | "relationships" | "clusters" | "processes" | "confidence" | "riskLevel" | "affectedFlows">;
+export type ContextRetrievalResult = {
+  resolution: SymbolResolution;
+  /**
+   * Depth-1 BFS partition used by token-budgeted slicing (D4). Always present
+   * (empty arrays when not_found). The flattened {@link QueryResult.symbols} is
+   * unchanged; this is purely additive context for {@link sliceContext}.
+   */
+  target?: Symbol;
+  callers?: readonly Symbol[];
+  callees?: readonly Symbol[];
+} & Pick<QueryResult, "symbols" | "relationships" | "clusters" | "processes" | "confidence" | "riskLevel" | "affectedFlows">;
 
 /**
  * Execute a context retrieval query - provides 360° view of a symbol.
@@ -144,6 +154,8 @@ export async function executeContextRetrieval(
   if (resolution.kind === "not_found") {
     return {
       resolution,
+      callers: [],
+      callees: [],
       symbols: [],
       relationships: [],
       clusters: [],
@@ -221,6 +233,9 @@ export async function executeContextRetrieval(
   // Req 12.6 — return complete context with resolution info
   return {
     resolution,
+    target: targetSymbol,
+    callers,
+    callees,
     symbols: allSymbols,
     relationships,
     clusters,

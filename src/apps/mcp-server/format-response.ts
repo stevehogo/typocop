@@ -7,7 +7,7 @@
  * …) reuse one formatter rather than each re-deriving the mapping.
  * Requirements: 15.6, 15.8
  */
-import type { MCPToolResponse, QueryResult } from "../../core/domain.js";
+import type { MCPToolResponse, NodeRole, RelationType, QueryResult } from "../../core/domain.js";
 
 /** Partial QueryResult without intent field. */
 export type PartialQueryResult = Pick<
@@ -16,21 +16,47 @@ export type PartialQueryResult = Pick<
 >;
 
 /**
+ * D2 explainability fields to merge onto a response symbol, keyed by symbol id.
+ * Optional — only impact analysis supplies it; all other tools omit it and the
+ * fields stay absent (ADDITIVE, no breakage).
+ */
+export interface SymbolExplanation {
+  readonly nodeRole: NodeRole;
+  readonly entryEdge: RelationType;
+  readonly hopDistance: number;
+}
+
+/**
  * Convert QueryResult to MCPToolResponse format.
+ * `explanationsById` (D2) optionally attaches per-symbol role/edge/hop fields.
  * Requirements: 15.6, 15.8
  */
-export function formatMCPResponse(result: PartialQueryResult, summary: string): MCPToolResponse {
+export function formatMCPResponse(
+  result: PartialQueryResult,
+  summary: string,
+  explanationsById?: ReadonlyMap<string, SymbolExplanation>,
+): MCPToolResponse {
   return {
-    symbols: result.symbols.map((s) => ({
-      id: s.id,
-      name: s.name,
-      kind: s.kind,
-      location: {
-        filePath: s.location.filePath,
-        startLine: s.location.startLine,
-      },
-      relationship: "related", // Default relationship type
-    })),
+    symbols: result.symbols.map((s) => {
+      const explanation = explanationsById?.get(s.id);
+      return {
+        id: s.id,
+        name: s.name,
+        kind: s.kind,
+        location: {
+          filePath: s.location.filePath,
+          startLine: s.location.startLine,
+        },
+        relationship: "related", // Default relationship type
+        ...(explanation
+          ? {
+              nodeRole: explanation.nodeRole,
+              entryEdge: explanation.entryEdge,
+              hopDistance: explanation.hopDistance,
+            }
+          : {}),
+      };
+    }),
     clusters: result.clusters.map((c) => ({
       id: c.id,
       name: c.name,

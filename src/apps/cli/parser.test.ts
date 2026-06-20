@@ -220,6 +220,30 @@ describe("parseArgs", () => {
     });
   });
 
+  it("parses the augment command and joins a multi-word pattern (D1)", () => {
+    const command = parseArgs(["node", "typocop", "augment", "--", "getUser"]);
+    expect(command).toEqual({ type: "augment", pattern: "getUser" });
+  });
+
+  it("augment with no pattern yields an empty pattern (D1)", () => {
+    const command = parseArgs(["node", "typocop", "augment"]);
+    expect(command).toEqual({ type: "augment", pattern: "" });
+  });
+
+  it("parses the setup command (D1)", () => {
+    expect(parseArgs(["node", "typocop", "setup"])).toEqual({
+      type: "setup",
+      settingsPath: undefined,
+    });
+  });
+
+  it("parses setup with an explicit --settings path (D1)", () => {
+    expect(parseArgs(["node", "typocop", "setup", "-s", "/tmp/settings.json"])).toEqual({
+      type: "setup",
+      settingsPath: "/tmp/settings.json",
+    });
+  });
+
   it("help text includes refresh option", () => {
     // Capture stdout to verify help text
     let helpOutput = "";

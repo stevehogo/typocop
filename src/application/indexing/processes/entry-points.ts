@@ -10,23 +10,15 @@
  */
 import type { Symbol, Relationship } from "../../../core/domain.js";
 import { MAX_ENTRY_POINTS } from "../../../platform/utils/limits.js";
+import { ENTRY_POINT_PATTERNS } from "../../../platform/utils/entry-point-names.js";
 
 // ─── Name patterns ────────────────────────────────────────────────────────────
 
-const ENTRY_POINT_PATTERNS: RegExp[] = [
-  /^(main|init|bootstrap|start|run|setup|configure)$/i,
-  /^handle[A-Z]/,
-  /^on[A-Z]/,
-  /Handler$/,
-  /Controller$/,
-  /^process[A-Z]/,
-  /^execute[A-Z]/,
-  /^perform[A-Z]/,
-  /^dispatch[A-Z]/,
-  /^(index|show|store|update|destroy|create|edit)$/,
-  /^__invoke$/,
-  /^(get|post|put|delete|patch)[A-Z]/,
-];
+// ENTRY_POINT_PATTERNS / isEntryPointName live in the platform leaf
+// (platform/utils/entry-point-names.ts) so dead-code detection (D6) can reuse
+// them without crossing the application sibling boundary. Re-exported here to
+// preserve this module's existing public surface.
+export { ENTRY_POINT_PATTERNS, isEntryPointName } from "../../../platform/utils/entry-point-names.js";
 
 const UTILITY_PATTERNS: RegExp[] = [
   /^(get|set|is|has|can|should|will|did)[A-Z]/,

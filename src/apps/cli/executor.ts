@@ -18,6 +18,8 @@ import { FileIndexCache } from "../../infrastructure/cache/file-index-cache.js";
 import { FileEmbeddingCache } from "../../infrastructure/cache/embedding-cache.js";
 import { executeObsidianExport } from "../../application/export-render/index.js";
 import { createFileWatcher, type FileWatcher } from "../../infrastructure/watch/file-watcher.js";
+import { augment } from "../../application/querying/augment.js";
+import { mergeTypocopHook, type ClaudeSettings } from "./setup.js";
 
 /**
  * A5: build the disk-backed parse + embedding caches for a prefix.
@@ -568,6 +570,83 @@ async function configureHuggingFaceEmbeddings(): Promise<void> {
   }
 }
 
+/** Marker prefixed to the augment block on stderr; the hook scrapes from here. */
+export const TYPOCOP_AUGMENT_MARKER = "[typocop]";
+
+/**
+ * D1 — `typocop augment <pattern>`: emit graph context for a search pattern.
+ *
+ * Writes a `[typocop]`-marked block to STDERR (stdout is reserved — native
+ * DB/embedding libraries print there, which would corrupt the hook's
+ * stdout-JSON contract) and ALWAYS resolves without throwing. The hook treats
+ * any failure as "no context"; this function therefore swallows EVERY error so
+ * the CLI exits 0 even when the DB is unavailable, locked, or empty.
+ */
+export async function executeAugment(pattern: string): Promise<void> {
+  if (!pattern || pattern.trim().length < 3) return;
+  let adapter: DatabaseAdapter | undefined;
+  try {
+    const config = configurationManager.getConfiguration();
+    adapter = await createDatabaseAdapter(config, createEmbeddingAdapterFromConfig(config));
+    const block = await augment(pattern, adapter.getGraphAdapter());
+    if (block) {
+      process.stderr.write(`${TYPOCOP_AUGMENT_MARKER} ${block}\n`);
+    }
+  } catch {
+    // Fail-silent: never surface an error from the augment path.
+  } finally {
+    if (adapter) {
+      try {
+        await adapter.close();
+      } catch {
+        /* ignore close errors on the fail-silent path */
+      }
+    }
+  }
+}
+
+/**
+ * D1 — `typocop setup`: idempotently merge the augment hook into a Claude Code
+ * `settings.json`. Pure merge in {@link mergeTypocopHook}; this is the fs shell
+ * (read → merge → write) around it.
+ */
+export async function executeSetup(settingsPath?: string): Promise<void> {
+  const fs = await import("node:fs");
+  const path = await import("node:path");
+
+  const target = settingsPath
+    ? path.resolve(settingsPath)
+    : path.resolve(process.cwd(), ".claude", "settings.json");
+
+  // The hook command Claude Code runs. Resolves the installed CLI via the `bin`
+  // entry; falls back to `npx typocop` when not on PATH. `augment` reads the
+  // tool stdin JSON-described pattern through the hook script (typocop-hook.cjs).
+  const hookCommand = "typocop-hook";
+
+  let existing: ClaudeSettings = {};
+  try {
+    const raw = fs.readFileSync(target, "utf-8");
+    existing = JSON.parse(raw) as ClaudeSettings;
+  } catch {
+    // Missing/empty/unparseable → start from a fresh object.
+    existing = {};
+  }
+
+  const { settings, changed } = mergeTypocopHook(existing, hookCommand);
+
+  if (!changed) {
+    console.error(chalk.green("✓ typocop augment hook already configured."));
+    console.error(chalk.dim(`  ${target}`));
+    return;
+  }
+
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  fs.writeFileSync(target, JSON.stringify(settings, null, 2) + "\n", "utf-8");
+
+  console.error(chalk.green("✓ Installed typocop augment hook."));
+  console.error(chalk.dim(`  ${target}`));
+}
+
 export async function executeCLI(command: CLICommand): Promise<void> {
   switch (command.type) {
     case "hf": {
@@ -641,6 +720,17 @@ export async function executeCLI(command: CLICommand): Promise<void> {
       const { sourcePath, language, verbose } = command.config;
       console.error(chalk.blue(`Starting watch mode for ${language} codebase at ${sourcePath}`));
       await executeWatch(sourcePath, language, verbose);
+      break;
+    }
+
+    case "augment": {
+      // D1: emit graph context to stderr; never throws (always exit 0).
+      await executeAugment(command.pattern);
+      break;
+    }
+
+    case "setup": {
+      await executeSetup(command.settingsPath);
       break;
     }
 

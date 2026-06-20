@@ -36,7 +36,9 @@ export type CLICommand =
   | { type: "obsidian"; config: ObsidianExportConfig }
   | { type: "hf" }
   | { type: "ollama"; url?: string }
-  | { type: "watch"; config: CLIConfig };
+  | { type: "watch"; config: CLIConfig }
+  | { type: "augment"; pattern: string }
+  | { type: "setup"; settingsPath?: string };
 
 const supportedLanguages: Language[] = [
   "php", "typescript", "javascript", "python", "java",
@@ -143,6 +145,25 @@ export function parseArgs(rawArgs: string[]): CLICommand {
           incremental: true,
         },
       };
+    });
+
+  program
+    .command("augment")
+    .description("Emit graph context for a search pattern to stderr (used by the Claude Code hook)")
+    .argument("[pattern...]", "Search pattern to augment (e.g. a symbol name)")
+    .action((patternParts: string[]) => {
+      // commander collects the variadic positional; join so a multi-word
+      // pattern survives. `augment -- <pattern>` (the hook's form) drops `--`.
+      const pattern = (patternParts ?? []).join(" ").trim();
+      parsedCommand = { type: "augment", pattern };
+    });
+
+  program
+    .command("setup")
+    .description("Install the typocop auto-augment hook into a Claude Code settings.json")
+    .option("-s, --settings <path>", "Path to the settings.json to merge into (default: ./.claude/settings.json)")
+    .action((options) => {
+      parsedCommand = { type: "setup", settingsPath: options.settings };
     });
 
   program

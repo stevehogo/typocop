@@ -164,6 +164,14 @@ export interface QueryResult {
 
 // ─── MCP Tool Response ────────────────────────────────────────────────────────
 
+/**
+ * Structural role of a node in the call graph (D2 explainability). Classified
+ * from hop-1 in/out degree + export status. Mirrors the application-layer
+ * `NodeRole` (kept here so the wire response contract is self-contained in the
+ * leaf domain module without an application→core cycle).
+ */
+export type NodeRole = "EntryPoint" | "Utility" | "CoreLogic" | "Isolated" | "Adapter";
+
 export interface MCPToolResponse {
   symbols: Array<{
     id: string;
@@ -172,6 +180,13 @@ export interface MCPToolResponse {
     location: { filePath: string; startLine: number };
     relationship: string;
     score?: number; // Semantic similarity score [0.0, 1.0]
+    // ── D2 explainability (ADDITIVE; only populated by impact analysis) ──────
+    /** Structural role of this affected node. */
+    nodeRole?: NodeRole;
+    /** First-hop edge type that pulled this node into the blast radius. */
+    entryEdge?: RelationType;
+    /** Number of edges from the target to this node (1 = direct caller). */
+    hopDistance?: number;
   }>;
   clusters: Array<{
     id: string;
@@ -189,6 +204,61 @@ export interface MCPToolResponse {
   riskLevel: RiskLevel;
   affectedFlows: string[];
   summary: string; // REQUIRED — human-readable, used directly by AI editors (Req 15.8)
+  // ── D3 trace (ADDITIVE; only populated by the `trace` tool) ────────────────
+  /**
+   * Shortest CALLS|CONTAINS hop chain between two symbols (D3). Absent for all
+   * other tools, so the wire contract stays backward compatible.
+   */
+  trace?: {
+    /** True when a path was found between the two resolved endpoints. */
+    found: boolean;
+    /** Number of EDGES on the path (`hops.length - 1`). */
+    length: number;
+    hops: Array<{
+      symbolId: string;
+      name: string;
+      filePath: string;
+      startLine: number;
+      /** Edge type linking this hop to the next; absent on the final hop. */
+      edgeToNext?: RelationType;
+    }>;
+  };
+  // ── D4 token-budgeted slicing (ADDITIVE; only set when get_symbol_context is
+  //    called with a tokenBudget). Absent otherwise → wire contract unchanged. ─
+  /**
+   * Why context slicing stopped: `complete` (everything fit), `token_budget`
+   * (budget exhausted, some symbols dropped), or `max_depth` (depth limit hit).
+   */
+  truncationReason?: "complete" | "token_budget" | "max_depth";
+  /** Sum of the per-symbol token estimates for the returned (sliced) symbols. */
+  estimatedTokens?: number;
+  // ── D5 coordinated rename (ADDITIVE; only populated by the `rename` tool).
+  //    Absent for all other tools → wire contract unchanged. ─────────────────
+  /**
+   * A PREVIEW-ONLY rename plan (D5). `preview` is ALWAYS true — v1 never
+   * mutates files or the graph; it returns a diff plan the caller can apply.
+   */
+  rename?: {
+    /** INVARIANT: always true. No write/fs path exists in v1. */
+    preview: true;
+    oldName: string;
+    newName: string;
+    highConfidenceCount: number;
+    lowConfidenceCount: number;
+    /** Edge-backed, file:line-anchored edits (definition + references). */
+    edits: Array<{
+      filePath: string;
+      line: number;
+      confidence: "high" | "low";
+      kind: "definition" | "reference";
+    }>;
+    /** Word-boundary regex descriptor for the low-confidence text tail. */
+    lowConfidence: {
+      pattern: string;
+      flags: string;
+      confidence: "low";
+    };
+  };
 }
 
 // ─── Search & Embeddings ──────────────────────────────────────────────────────

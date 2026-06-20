@@ -10,6 +10,8 @@ import { MAX_TRAVERSAL_DEPTH } from "../../platform/utils/limits.js";
 import { rowToNode, graphNodeToSymbol } from "./graph-helpers.js";
 import type { CypherNodeRow } from "./graph-helpers.js";
 import { resolveSymbol, type SymbolResolution } from "./symbol-resolver.js";
+import { explainAffectedNode, type AffectedNodeExplanation, type NodeDegree } from "./explainability.js";
+import type { RelationType } from "../../core/domain.js";
 
 /** Core component name patterns that elevate risk to CRITICAL. */
 const CORE_COMPONENT_PATTERNS = [
@@ -52,12 +54,115 @@ interface CypherExternalDependencyRow {
   ext: { labels: string[]; properties: Record<string, string> };
 }
 
-async function findDependents(graph: GraphAdapter, symbolId: string): Promise<GraphNode[]> {
+/**
+ * Clamp a requested traversal depth to (0, {@link MAX_TRAVERSAL_DEPTH}].
+ * `undefined`/invalid/out-of-range → MAX_TRAVERSAL_DEPTH (the prior default).
+ */
+export function clampTraversalDepth(maxDepth?: number): number {
+  if (maxDepth === undefined || !Number.isFinite(maxDepth) || maxDepth < 1) {
+    return MAX_TRAVERSAL_DEPTH;
+  }
+  return Math.min(Math.floor(maxDepth), MAX_TRAVERSAL_DEPTH);
+}
+
+async function findDependents(
+  graph: GraphAdapter,
+  symbolId: string,
+  maxDepth: number = MAX_TRAVERSAL_DEPTH,
+): Promise<GraphNode[]> {
+  const depth = clampTraversalDepth(maxDepth);
   const rows = await graph.runCypher<CypherNodeRow>(
-    `MATCH (n:Symbol)-[e:CALLS*1..${MAX_TRAVERSAL_DEPTH}]->(t:Symbol) WHERE t.id = $val OR t.name = $val RETURN DISTINCT n`,
+    `MATCH (n:Symbol)-[e:CALLS*1..${depth}]->(t:Symbol) WHERE t.id = $val OR t.name = $val RETURN DISTINCT n`,
     { val: symbolId },
   ) ?? [];
   return rows.map(rowToNode);
+}
+
+/** Map a raw Cypher edge label (possibly prefixed, e.g. `tpc_CALLS`) to a RelationType. */
+function edgeLabelToRelType(label: string): RelationType {
+  const bare = label.includes("_") ? label.slice(label.lastIndexOf("_") + 1) : label;
+  switch (bare.toUpperCase()) {
+    case "CALLS": return "calls";
+    case "IMPORTS": return "imports";
+    case "INHERITS": return "inherits";
+    case "IMPLEMENTS": return "implements";
+    case "CONTAINS": return "contains";
+    case "REFERENCES": return "references";
+    case "DEFINES": return "defines";
+    case "DEPENDS_ON": return "dependsOn";
+    default: return "calls";
+  }
+}
+
+/** Row for the 1-hop direct-caller query: a direct caller id + the edge type that links it. */
+interface CypherDirectCallerRow {
+  callerId: string;
+  edgeType: string;
+}
+
+/**
+ * Find the DIRECT (1-hop) callers of the target and the edge type that links
+ * each one. These are the nodes that "break immediately" — hopDistance 1 — and
+ * the edge type is the {@link AffectedNodeExplanation.entryEdge}.
+ */
+async function findDirectCallers(
+  graph: GraphAdapter,
+  symbolId: string,
+): Promise<Map<string, RelationType>> {
+  const rows = await graph.runCypher<CypherDirectCallerRow>(
+    `MATCH (n:Symbol)-[e]->(t:Symbol)
+     WHERE t.id = $val OR t.name = $val
+     RETURN DISTINCT n.id AS callerId, type(e) AS edgeType`,
+    { val: symbolId },
+  ) ?? [];
+  const map = new Map<string, RelationType>();
+  for (const row of rows) {
+    if (!row?.callerId) continue;
+    // First edge type wins (a node may have several edge types to the target).
+    if (!map.has(row.callerId)) {
+      map.set(row.callerId, edgeLabelToRelType(row.edgeType ?? "CALLS"));
+    }
+  }
+  return map;
+}
+
+/** Row for the batched hop-1 degree aggregate. */
+interface CypherDegreeRow {
+  id: string;
+  inDegree: number | string | null;
+  outDegree: number | string | null;
+}
+
+function toCount(v: number | string | null | undefined): number {
+  if (typeof v === "number") return v;
+  if (typeof v === "string") { const n = parseInt(v, 10); return Number.isFinite(n) ? n : 0; }
+  return 0;
+}
+
+/**
+ * Batched hop-1 in/out degree aggregate for a set of nodes (one query, not N).
+ * Used to classify each affected node's structural role (D2).
+ */
+async function fetchDegrees(
+  graph: GraphAdapter,
+  ids: readonly string[],
+): Promise<Map<string, { inDegree: number; outDegree: number }>> {
+  const map = new Map<string, { inDegree: number; outDegree: number }>();
+  if (ids.length === 0) return map;
+  const rows = await graph.runCypher<CypherDegreeRow>(
+    `MATCH (s:Symbol) WHERE s.id IN $ids
+     OPTIONAL MATCH (s)<-[inEdge]-(:Symbol)
+     OPTIONAL MATCH (s)-[outEdge]->(:Symbol)
+     RETURN s.id AS id,
+            count(DISTINCT inEdge) AS inDegree,
+            count(DISTINCT outEdge) AS outDegree`,
+    { ids: [...ids] },
+  ) ?? [];
+  for (const row of rows) {
+    if (!row?.id) continue;
+    map.set(row.id, { inDegree: toCount(row.inDegree), outDegree: toCount(row.outDegree) });
+  }
+  return map;
 }
 
 export async function findExternalDependencyByAlias(
@@ -155,7 +260,40 @@ export type ImpactAnalysisResult = {
   resolution: SymbolResolution;
   targetKind: "symbol" | "externalDependency";
   targetName?: string;
+  /**
+   * D2 — optional per-affected-node explanation (role, entry edge, hop
+   * distance, confidence, reasons). Keyed by symbol id, aligned 1:1 with the
+   * dependent `symbols` (excluding the target itself). Only populated on the
+   * resolved-symbol path; absent for the external-dependency path.
+   */
+  explanations?: AffectedNodeExplanation[];
 } & Pick<QueryResult, "symbols" | "relationships" | "clusters" | "processes" | "confidence" | "riskLevel" | "affectedFlows">;
+
+/**
+ * Build per-affected-node explanations (D2). Pure orchestration over the
+ * already-fetched direct-caller map + degree aggregate; the role/confidence
+ * rules live in {@link explainAffectedNode}.
+ */
+function buildExplanations(
+  dependents: readonly Symbol[],
+  directCallers: ReadonlyMap<string, RelationType>,
+  degrees: ReadonlyMap<string, { inDegree: number; outDegree: number }>,
+): AffectedNodeExplanation[] {
+  return dependents.map((dep) => {
+    const direct = directCallers.get(dep.id);
+    const entryEdge: RelationType = direct ?? "calls";
+    // Direct caller → hop 1; otherwise transitive (we know it is reachable but
+    // not the exact depth without a per-node BFS) → report hop 2.
+    const hopDistance = direct ? 1 : 2;
+    const deg = degrees.get(dep.id) ?? { inDegree: 0, outDegree: 0 };
+    const degree: NodeDegree = {
+      inDegree: deg.inDegree,
+      outDegree: deg.outDegree,
+      isExported: dep.visibility === "public",
+    };
+    return explainAffectedNode({ symbolId: dep.id, entryEdge, hopDistance, degree });
+  });
+}
 
 /**
  * Execute an impact analysis query using GraphAdapter.runCypher().
@@ -166,6 +304,7 @@ export async function executeImpactAnalysis(
   target: string,
   maxResults: number,
   graphAdapter: GraphAdapter,
+  maxDepth?: number,
 ): Promise<ImpactAnalysisResult> {
   const exactRows = await graphAdapter.runCypher<CypherNodeRow>(
     `MATCH (n:Symbol) WHERE n.id = $val OR n.name = $val RETURN n LIMIT 1`,
@@ -230,8 +369,9 @@ export async function executeImpactAnalysis(
   const targetNode = resolution.node;
   const targetSymbol = graphNodeToSymbol(targetNode);
 
-  // Req 10.2 — find all direct and transitive dependents
-  const dependentNodes = await findDependents(graphAdapter, target);
+  // Req 10.2 — find all direct and transitive dependents (depth-bounded; D3 fix
+  // for the previously-dead find_dependents.maxDepth).
+  const dependentNodes = await findDependents(graphAdapter, target, clampTraversalDepth(maxDepth));
   const dependentSymbols = dependentNodes.map(graphNodeToSymbol);
 
   // Req 10.3 — identify affected business processes
@@ -258,6 +398,15 @@ export async function executeImpactAnalysis(
   // Confidence: high when target resolved + dependents found
   const confidence = dependentSymbols.length > 0 ? 0.92 : 0.75;
 
+  // ── D2 explainability ──────────────────────────────────────────────────────
+  // Issued AFTER the existing query sequence so the external-dependency path's
+  // call ordering is unaffected. Only explain the dependents actually returned
+  // (post-slice, excluding the target at index 0).
+  const explainedDependents = allSymbols.slice(1);
+  const directCallers = await findDirectCallers(graphAdapter, target);
+  const degrees = await fetchDegrees(graphAdapter, explainedDependents.map((s) => s.id));
+  const explanations = buildExplanations(explainedDependents, directCallers, degrees);
+
   return {
     resolution,
     targetKind: "symbol",
@@ -268,5 +417,6 @@ export async function executeImpactAnalysis(
     confidence,
     riskLevel,
     affectedFlows,
+    explanations,
   };
 }

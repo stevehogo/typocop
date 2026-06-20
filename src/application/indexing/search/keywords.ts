@@ -1,6 +1,15 @@
 // Phase 6: Keyword extraction and index building for symbols
 
 import type { Symbol } from "../../../core/domain.js";
+import { splitIdentifier } from "../../../platform/utils/identifier.js";
+
+/**
+ * Re-exported so existing importers keep `from ".../search/keywords"`; the
+ * implementation lives in `platform/utils/identifier.ts` (a leaf util) so both
+ * indexing and the D1 augment engine (`application/querying`) can share it
+ * without crossing the `app-no-sibling` layering boundary.
+ */
+export { splitIdentifier };
 
 /** Common stop words to filter from keyword extraction */
 const STOP_WORDS = new Set([
@@ -8,25 +17,6 @@ const STOP_WORDS = new Set([
   "is", "it", "on", "at", "by", "be", "as", "do", "if",
   "get", "set", "new", "this", "that", "with", "from",
 ]);
-
-/**
- * Splits a camelCase, PascalCase, or snake_case identifier into words.
- */
-function splitIdentifier(name: string): string[] {
-  // Handle snake_case and kebab-case first
-  const withSpaces = name
-    .replace(/_+/g, " ")
-    .replace(/-+/g, " ")
-    // Insert space before uppercase letters preceded by lowercase (camelCase)
-    .replace(/([a-z])([A-Z])/g, "$1 $2")
-    // Insert space before uppercase letters followed by lowercase (e.g. XMLParser → XML Parser)
-    .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2");
-
-  return withSpaces
-    .split(/\s+/)
-    .map(w => w.toLowerCase())
-    .filter(w => w.length > 1);
-}
 
 /**
  * Extracts keywords from a symbol's name and signature.
