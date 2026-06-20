@@ -86,6 +86,52 @@ describe("parseArgs", () => {
     expect(command).toEqual({ type: "status" });
   });
 
+  it("parses the watch command with explicit --lang", () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    const args = ["node", "typocop", "watch", "-p", "./src", "-l", "typescript", "-v"];
+    const command = parseArgs(args);
+
+    expect(command).toEqual({
+      type: "watch",
+      config: {
+        sourcePath: "./src",
+        language: "typescript",
+        verbose: true,
+        incremental: true,
+      },
+    });
+  });
+
+  it("watch auto-detects language when --lang is omitted", () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(languageModule.detectDirectoryLanguage).mockReturnValue("go");
+
+    const args = ["node", "typocop", "watch", "-p", "./src"];
+    const command = parseArgs(args);
+
+    expect(command).toEqual({
+      type: "watch",
+      config: {
+        sourcePath: "./src",
+        language: "go",
+        verbose: false,
+        incremental: true,
+      },
+    });
+  });
+
+  it("watch throws for unsupported language", () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    const args = ["node", "typocop", "watch", "-p", "./src", "-l", "nope"];
+    expect(() => parseArgs(args)).toThrow("Unsupported language 'nope'");
+  });
+
+  it("watch throws for non-existent source path", () => {
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+    const args = ["node", "typocop", "watch", "-p", "./invalid", "-l", "typescript"];
+    expect(() => parseArgs(args)).toThrow("Source path does not exist: ./invalid");
+  });
+
   it("parses the parse command with --refresh flag", () => {
     vi.mocked(fs.existsSync).mockReturnValue(true);
     const args = ["node", "typocop", "parse", "-p", "./src", "-l", "typescript", "--refresh"];

@@ -117,6 +117,31 @@ const TOOL_DEFINITIONS = [
       required: ["query"],
     },
   },
+  {
+    name: "detect_changes",
+    description:
+      "Detect uncommitted/git changes and analyze their blast radius: affected symbols, business flows, and risk level (elevates to CRITICAL for auth/payment/checkout/security/session/token code).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        scope: {
+          type: "string",
+          enum: ["unstaged", "staged", "all", "compare"],
+          description:
+            "Which diff to analyze: 'unstaged' (working tree vs index, default), 'staged' (index vs HEAD), 'all' (working tree + index vs HEAD), or 'compare' (baseRef...HEAD).",
+        },
+        baseRef: {
+          type: "string",
+          description: "Base ref for scope='compare' (e.g. 'main' or a commit SHA).",
+        },
+        maxResults: {
+          type: "number",
+          description: "Maximum number of results to return (default: 100)",
+        },
+      },
+      required: [],
+    },
+  },
 ];
 
 /**

@@ -35,7 +35,8 @@ export type CLICommand =
   | { type: "status" }
   | { type: "obsidian"; config: ObsidianExportConfig }
   | { type: "hf" }
-  | { type: "ollama"; url?: string };
+  | { type: "ollama"; url?: string }
+  | { type: "watch"; config: CLIConfig };
 
 const supportedLanguages: Language[] = [
   "php", "typescript", "javascript", "python", "java",
@@ -47,6 +48,31 @@ export class CLIValidationError extends Error {
     super(message);
     this.name = "CLIValidationError";
   }
+}
+
+/**
+ * Resolve the target language for a path-based command (`parse`/`watch`):
+ * honour an explicit `--lang` (validated against {@link supportedLanguages}) or
+ * auto-detect from the directory. Throws {@link CLIValidationError} on an
+ * unsupported/undetectable language. Shared so `watch` reuses `parse`'s exact
+ * path/lang validation.
+ */
+function resolveLanguageForPath(sourcePath: string, langOption?: string): Language {
+  if (langOption) {
+    const candidate = langOption.toLowerCase() as Language;
+    if (!supportedLanguages.includes(candidate)) {
+      throw new CLIValidationError(`Unsupported language '${langOption}'. Supported: ${supportedLanguages.join(", ")}`);
+    }
+    return candidate;
+  }
+  const detected = detectDirectoryLanguage(sourcePath);
+  if (!detected) {
+    throw new CLIValidationError(
+      `Could not auto-detect language in '${sourcePath}'. Use --lang to specify one explicitly.`
+    );
+  }
+  console.error(`Auto-detected language: ${detected}`);
+  return detected;
 }
 
 export function parseArgs(rawArgs: string[]): CLICommand {
@@ -74,24 +100,7 @@ export function parseArgs(rawArgs: string[]): CLICommand {
         throw new CLIValidationError(`Source path does not exist: ${options.path}`);
       }
 
-      let lang: Language;
-
-      if (options.lang) {
-        const candidate = options.lang.toLowerCase() as Language;
-        if (!supportedLanguages.includes(candidate)) {
-          throw new CLIValidationError(`Unsupported language '${options.lang}'. Supported: ${supportedLanguages.join(", ")}`);
-        }
-        lang = candidate;
-      } else {
-        const detected = detectDirectoryLanguage(options.path);
-        if (!detected) {
-          throw new CLIValidationError(
-            `Could not auto-detect language in '${options.path}'. Use --lang to specify one explicitly.`
-          );
-        }
-        console.error(`Auto-detected language: ${detected}`);
-        lang = detected;
-      }
+      const lang = resolveLanguageForPath(options.path, options.lang);
 
       // `--full` forces a wholesale re-index; otherwise incremental (default).
       // `--refresh` (clear-then-rebuild) is inherently a full write, so it also
@@ -108,6 +117,31 @@ export function parseArgs(rawArgs: string[]): CLICommand {
           refresh: options.refresh,
           incremental,
         }
+      };
+    });
+
+  program
+    .command("watch")
+    .description("Watch a source tree and incrementally re-index on change (Ctrl+C to stop)")
+    .requiredOption("-p, --path <path>", "Source directory path to watch")
+    .option("-l, --lang <language>", "Programming language (auto-detected if omitted)")
+    .option("-v, --verbose", "Enable verbose logging", false)
+    .action((options) => {
+      if (!fs.existsSync(options.path)) {
+        throw new CLIValidationError(`Source path does not exist: ${options.path}`);
+      }
+
+      const lang = resolveLanguageForPath(options.path, options.lang);
+
+      parsedCommand = {
+        type: "watch",
+        config: {
+          sourcePath: options.path,
+          language: lang,
+          verbose: options.verbose,
+          // Watch always drives delta re-indexing.
+          incremental: true,
+        },
       };
     });
 

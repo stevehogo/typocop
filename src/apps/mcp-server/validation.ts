@@ -125,6 +125,43 @@ export function validateToolParams(
       }
       break;
 
+    case "detect_changes": {
+      if (params.scope !== undefined) {
+        const validScopes = ["unstaged", "staged", "all", "compare"];
+        if (typeof params.scope !== "string" || !validScopes.includes(params.scope)) {
+          throw new MCPValidationError(
+            `detect_changes 'scope' must be one of: ${validScopes.join(", ")}`,
+            "INVALID_PARAMETER_VALUE",
+            { tool: toolName, parameter: "scope", validValues: validScopes },
+          );
+        }
+        if (params.scope === "compare" && (!params.baseRef || typeof params.baseRef !== "string")) {
+          throw new MCPValidationError(
+            "detect_changes 'baseRef' is required (string) when scope is 'compare'",
+            "MISSING_PARAMETER",
+            { tool: toolName, missing: "baseRef" },
+          );
+        }
+      }
+      if (params.baseRef !== undefined && typeof params.baseRef !== "string") {
+        throw new MCPValidationError(
+          "detect_changes 'baseRef' must be a string",
+          "INVALID_PARAMETER_TYPE",
+          { tool: toolName, parameter: "baseRef", expected: "string" },
+        );
+      }
+      if (params.maxResults !== undefined) {
+        if (typeof params.maxResults !== "number" || params.maxResults <= 0) {
+          throw new MCPValidationError(
+            "detect_changes 'maxResults' must be a positive number",
+            "INVALID_PARAMETER_TYPE",
+            { tool: toolName, parameter: "maxResults", expected: "positive number" },
+          );
+        }
+      }
+      break;
+    }
+
     default:
       throw new MCPValidationError(
         `Unknown tool: ${toolName}`,

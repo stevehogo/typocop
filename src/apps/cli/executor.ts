@@ -9,7 +9,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { createDatabaseAdapter } from "../../infrastructure/persistence/database-adapter.js";
 import { createEmbeddingAdapterFromConfig } from "../../infrastructure/embeddings/embedding-factory.js";
-import { runIndexingPipeline, type PipelineConfig } from "../../application/indexing/pipeline.js";
+import { runIndexingPipeline, reindexChangedFiles, type PipelineConfig } from "../../application/indexing/pipeline.js";
 import { configurationManager } from "../../platform/config/index.js";
 import type { DatabaseAdapter } from "../../core/ports/persistence.js";
 import type { IndexCachePort } from "../../core/ports/index-cache.js";
@@ -17,6 +17,7 @@ import type { EmbeddingCachePort } from "../../core/ports/embedding-cache.js";
 import { FileIndexCache } from "../../infrastructure/cache/file-index-cache.js";
 import { FileEmbeddingCache } from "../../infrastructure/cache/embedding-cache.js";
 import { executeObsidianExport } from "../../application/export-render/index.js";
+import { createFileWatcher, type FileWatcher } from "../../infrastructure/watch/file-watcher.js";
 
 /**
  * A5: build the disk-backed parse + embedding caches for a prefix.
@@ -259,6 +260,170 @@ async function readGraphStatus(): Promise<GraphStatus> {
 }
 
 /**
+ * Build a **single-flight** batch scheduler around an async `run` callback. At
+ * most one `run` executes at a time; paths that arrive while a run is in flight
+ * accumulate in a pending Set and trigger exactly one more `run` (with the
+ * deduped union) when the current run drains. Guarantees `run` invocations never
+ * interleave.
+ *
+ * `schedule(paths)` returns immediately (fire-and-forget); `whenIdle()` resolves
+ * once no run is in flight and nothing is queued — used by tests to await
+ * quiescence deterministically.
+ *
+ * Pure (no adapter/filesystem) so the single-flight contract is unit-testable
+ * with a fake `run` + fake timers.
+ */
+export function createSingleFlightScheduler(
+  run: (paths: string[]) => Promise<void>,
+): {
+  schedule: (paths: readonly string[]) => void;
+  whenIdle: () => Promise<void>;
+} {
+  let inFlight = false;
+  const queued = new Set<string>();
+  const idleWaiters: Array<() => void> = [];
+
+  const settleIdle = (): void => {
+    if (!inFlight && queued.size === 0) {
+      for (const w of idleWaiters.splice(0)) w();
+    }
+  };
+
+  const drive = async (firstBatch: string[]): Promise<void> => {
+    inFlight = true;
+    try {
+      let batch = firstBatch;
+      while (batch.length > 0) {
+        await run(batch);
+        if (queued.size === 0) break;
+        batch = [...queued];
+        queued.clear();
+      }
+    } finally {
+      inFlight = false;
+      settleIdle();
+    }
+  };
+
+  return {
+    schedule(paths) {
+      if (inFlight) {
+        for (const p of paths) queued.add(p);
+        return;
+      }
+      if (paths.length === 0) return;
+      void drive([...paths]).catch(() => {
+        /* run is responsible for its own error handling */
+      });
+    },
+    whenIdle() {
+      if (!inFlight && queued.size === 0) return Promise.resolve();
+      return new Promise<void>((resolve) => idleWaiters.push(resolve));
+    },
+  };
+}
+
+/**
+ * C3: Watch a source tree and incrementally re-index on change.
+ *
+ * Builds the {@link DatabaseAdapter} + disk caches once, starts a
+ * {@link FileWatcher} (debounced + coalesced + ignore-filtered), and on each
+ * coalesced batch calls {@link reindexChangedFiles} through a single-flight
+ * scheduler (so reindex calls never interleave). On SIGINT the watcher is closed
+ * and the adapter is closed before exit.
+ */
+export async function executeWatch(
+  sourcePath: string,
+  language: string,
+  verbose: boolean,
+): Promise<void> {
+  const prefix = configurationManager.getPrefix();
+  console.error(chalk.dim(`[typocop] Effective prefix: ${prefix}`));
+
+  const config = configurationManager.getConfiguration();
+  const adapter: DatabaseAdapter = await createDatabaseAdapter(
+    config,
+    createEmbeddingAdapterFromConfig(config),
+  );
+  const { cache, embeddingCache } = buildIndexCaches(prefix);
+
+  const watcher: FileWatcher = createFileWatcher(sourcePath);
+
+  const scheduler = createSingleFlightScheduler(async (batch) => {
+    const start = Date.now();
+    const pipelineConfig: PipelineConfig = {
+      sourcePath,
+      language: language as PipelineConfig["language"],
+      verbose,
+      adapter,
+      incremental: true,
+      cache,
+      embeddingCache,
+    };
+    try {
+      const result = await reindexChangedFiles(batch, pipelineConfig);
+      const ms = Date.now() - start;
+      const filesParsed = result.metrics?.filesParsed ?? 0;
+      console.error(
+        chalk.dim(
+          `[typocop] reindexed ${batch.length} changed path(s) ` +
+            `→ ${filesParsed} parsed, ${result.symbols.length} symbols (${ms}ms)`,
+        ),
+      );
+    } catch (err) {
+      console.error(
+        chalk.red(
+          `[typocop] reindex failed: ${err instanceof Error ? err.message : String(err)}`,
+        ),
+      );
+    }
+  });
+
+  watcher.onBatch((changedPaths) => {
+    scheduler.schedule(changedPaths);
+  });
+
+  console.error(
+    chalk.green(`[typocop] Watching ${sourcePath} (${language}). Press Ctrl+C to stop.`),
+  );
+
+  // Keep the process alive until SIGINT, then tear down cleanly.
+  await new Promise<void>((resolve) => {
+    let shuttingDown = false;
+    const onSigint = async () => {
+      if (shuttingDown) return;
+      shuttingDown = true;
+      console.error(chalk.yellow("\n[typocop] Stopping watcher..."));
+      try {
+        await watcher.close();
+      } catch (err) {
+        if (verbose) {
+          console.error(
+            chalk.dim(
+              `[typocop] watcher close error: ${err instanceof Error ? err.message : String(err)}`,
+            ),
+          );
+        }
+      }
+      try {
+        await adapter.close();
+      } catch (err) {
+        if (verbose) {
+          console.error(
+            chalk.dim(
+              `[typocop] adapter close error: ${err instanceof Error ? err.message : String(err)}`,
+            ),
+          );
+        }
+      }
+      process.removeListener("SIGINT", onSigint);
+      resolve();
+    };
+    process.on("SIGINT", onSigint);
+  });
+}
+
+/**
  * Configure Ollama embeddings.
  */
 async function configureOllamaEmbeddings(url?: string): Promise<void> {
@@ -469,6 +634,13 @@ export async function executeCLI(command: CLICommand): Promise<void> {
         spinner.fail(chalk.red("Indexing failed."));
         throw err;
       }
+      break;
+    }
+
+    case "watch": {
+      const { sourcePath, language, verbose } = command.config;
+      console.error(chalk.blue(`Starting watch mode for ${language} codebase at ${sourcePath}`));
+      await executeWatch(sourcePath, language, verbose);
       break;
     }
 

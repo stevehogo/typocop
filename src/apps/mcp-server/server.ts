@@ -8,6 +8,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { createMCPServer } from "./registration.js";
 import { executeTool } from "./tools.js";
+import { createGitAdapter } from "../../infrastructure/git/git-adapter.js";
 import { createDatabaseAdapter } from "../../infrastructure/persistence/database-adapter.js";
 import { createEmbeddingAdapterFromConfig } from "../../infrastructure/embeddings/embedding-factory.js";
 import { drainAllPools } from "../../infrastructure/persistence/pool-registry.js";
@@ -67,6 +68,9 @@ export async function startMCPServer(): Promise<void> {
   // Create DatabaseAdapter from FullConfig (Req 7.1)
   const adapter: DatabaseAdapter = await createDatabaseAdapter(config, createEmbeddingAdapterFromConfig(config));
 
+  // Git access for the change-driven tools (C2 detect_changes).
+  const git = createGitAdapter();
+
   // Create MCP server
   const server = createMCPServer();
 
@@ -78,6 +82,7 @@ export async function startMCPServer(): Promise<void> {
         request.params.name,
         request.params.arguments || {},
         adapter,
+        git,
       );
 
       // Req 17.2: Strip prefix from response before returning

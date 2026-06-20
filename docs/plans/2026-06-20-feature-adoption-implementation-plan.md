@@ -34,7 +34,13 @@ typecheck:tests, depcruise all clean.
 typecheck:tests/depcruise clean (321 modules). worker_threads parallel parsing with a determinism
 gate, peak-RSS metric, and gated parse bench; A1–A5 core not regressed.
 
-All changes from both waves are uncommitted in the working tree (awaiting review / a per-wave checkpoint).
+**Wave 3 (change-driven C1,C2,C3) landed & independently verified 2026-06-20** (resumed run
+`wf_a4019d6a-2df`): full suite 1536 passed / 5 skipped / 0 failed; typecheck/typecheck:tests/
+depcruise clean (334 modules). Git-diff→changed-symbols layer (`GitPort`), the 6th MCP tool
+`detect_changes` (reuses `executePreCommitCheck`), and watch mode (chokidar) on `reindexChangedFiles`;
+existing 5 MCP tools intact.
+
+Waves 1+2 (A,B) are committed (prior). Wave 3 (C) is committed as its own checkpoint. Waves 4–5 (D,E) remain.
 
 | Task | Feature | Status | Blocked by |
 |---|---|---|---|
@@ -47,9 +53,9 @@ All changes from both waves are uncommitted in the working tree (awaiting review
 | #7 | B1 — Multi-core parsing via `worker_threads` | ✅ done | B2 |
 | #8 | B4 — Benchmark-driven tuning loop | ✅ done | B1 |
 | #9 | B3 — Streaming-emit eval + peak-RSS metric | ✅ done | B4 |
-| #10 | C1 — Git-diff → changed-symbols layer | pending | — |
-| #11 | C2 — `detect_changes` MCP tool | pending | C1 |
-| #12 | C3 — Watch mode + CLI `watch` | pending | A5 |
+| #10 | C1 — Git-diff → changed-symbols layer | ✅ done | — |
+| #11 | C2 — `detect_changes` MCP tool | ✅ done | C1 |
+| #12 | C3 — Watch mode + CLI `watch` | ✅ done | A5 |
 | #13 | D1 — Auto-augmenting Claude Code hook **[FLAGSHIP]** | pending | — |
 | #14 | D2 — Impact-analysis explainability | pending | — |
 | #15 | D3 — `trace` tool + fix dead `maxDepth` | pending | — |
@@ -60,6 +66,16 @@ All changes from both waves are uncommitted in the working tree (awaiting review
 | #20 | E2 — Queryable complexity metrics | pending | — |
 | #21 | E3 — API contract drift (`shape_check`/`api_impact`) | pending | — |
 | #22 | E5 — RFC: PDG + interprocedural taint | pending | E1 |
+
+## Commit policy (RULE)
+Changed files are **committed as a checkpoint per verified wave** — never left to pile up:
+1. **Commit only after a wave passes independent verification** — `pnpm typecheck`, `pnpm typecheck:tests`, `pnpm depcruise src`, and full `pnpm test` all green. Never commit a red or partially-implemented wave.
+2. **Never commit while a wave's workflow is still editing the working tree.** Wait for the run to finish, verify, *then* commit, *then* launch the next wave. (Committing mid-run captures partial state.)
+3. **One checkpoint commit per wave** on `feature/refactor-code-base`. Message: `feat(wave-N <ids>): <summary>` — e.g. `feat(wave-1 A1–A5): incremental indexing core` — ending with the `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>` footer.
+4. **Scope each commit to the wave's files** (`git add` the workflow's reported `filesChanged` + their tests), so unrelated pre-existing dirty files and any in-flight wave stay out.
+5. Do not `git push` or open a PR unless explicitly asked.
+
+**Retroactive backlog:** Waves 1 (A1–A5) and 2 (B2/B1/B4/B3) are verified-green but **not yet committed**. They get their checkpoint commits **once the in-flight Wave 3 (C-stream) finishes and verifies** — committing now would sweep in partial C edits.
 
 ---
 
