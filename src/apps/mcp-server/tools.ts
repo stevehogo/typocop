@@ -15,7 +15,7 @@ import { executeTraceTool } from "./trace-tool.js";
 import { executeFindDeadCode } from "./dead-code-tool.js";
 import { executeFindHotspots } from "./hotspots-tool.js";
 import { executeRenameTool } from "./rename-tool.js";
-import { executeShapeCheck, executeApiImpact } from "./shape-check-tool.js";
+import { executeShapeCheck } from "./shape-check-tool.js";
 import { executeVerifyClaimTool } from "./verify-claim-tool.js";
 import { formatMCPResponse, type SymbolExplanation } from "./format-response.js";
 import type { ImpactAnalysisResult } from "../../application/querying/impact-analysis.js";
@@ -239,8 +239,6 @@ export async function executeTool(
       return executeRenameTool(params, adapter);
     case "shape_check":
       return executeShapeCheck(params, adapter);
-    case "api_impact":
-      return executeApiImpact(params, adapter);
     case "verify_claim":
       return executeVerifyClaimTool(params, adapter);
     case "detect_changes": {

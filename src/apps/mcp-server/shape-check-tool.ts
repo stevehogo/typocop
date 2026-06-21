@@ -1,11 +1,14 @@
 /**
- * `shape_check` + `api_impact` MCP tools (E3).
+ * `shape_check` MCP tool (E3) — one tool, two modes via an optional `route`.
  *
- * `shape_check` queries the graph for route symbols (carrying `responseKeys`)
+ * With NO `route`: queries the graph for route symbols (carrying `responseKeys`)
  * and consumer symbols (carrying `accessedKeys`), pairs them via the pure
  * {@link shapeCheck} engine, and reports keys a consumer reads that no route
- * returns. `api_impact` composes route discovery + shape_check + impact_analysis
- * for a single route into one response.
+ * returns (graph-wide contract drift).
+ *
+ * With a `route`: scopes to that route — overlays the graph-wide drift surface
+ * with an `impact_analysis` of the route symbol (its blast radius). This is the
+ * former standalone `api_impact` tool, folded in as the route mode.
  */
 import type { DatabaseAdapter, GraphAdapter } from "../../core/ports/persistence.js";
 import { prop } from "../../core/ports/persistence.js";
@@ -122,10 +125,11 @@ function emptyResponse(summary: string): MCPToolResponse {
 }
 
 /**
- * Execute `shape_check`: report consumer key reads that no route returns.
+ * Graph-wide contract drift: report consumer key reads that no route returns.
+ * The no-`route` mode of {@link executeShapeCheck}; also reused by the route
+ * mode (called directly, NOT via executeShapeCheck, to avoid recursion).
  */
-export async function executeShapeCheck(
-  _params: Record<string, unknown>,
+async function runWholeGraphShapeCheck(
   adapter: DatabaseAdapter,
 ): Promise<MCPToolResponse> {
   const graph = adapter.getGraphAdapter();
@@ -169,24 +173,28 @@ export async function executeShapeCheck(
 }
 
 /**
- * Execute `api_impact` = route_map + shape_check + impact for a single route.
+ * Execute `shape_check`. With no `route`: graph-wide contract drift. With a
+ * `route`: that route's blast radius (impact analysis) overlaid with the
+ * graph-wide drift surface — the former `api_impact` tool, folded in.
  *
- * Resolves the named route (by symbol name), runs `shape_check` across the
- * graph, and overlays an impact analysis of the route symbol so an agent sees,
- * in one call: who returns what, which consumers read missing keys, and the
- * blast radius of touching the route.
+ * The route mode calls {@link runWholeGraphShapeCheck} directly (NOT this
+ * function) for the drift surface, so there is no recursion.
  */
-export async function executeApiImpact(
+export async function executeShapeCheck(
   params: Record<string, unknown>,
   adapter: DatabaseAdapter,
 ): Promise<MCPToolResponse> {
-  const route = params.route as string;
+  const route = typeof params.route === "string" && params.route.trim() !== ""
+    ? params.route
+    : undefined;
+
+  if (!route) {
+    return runWholeGraphShapeCheck(adapter);
+  }
+
   const graph = adapter.getGraphAdapter();
-
-  // 1) shape_check across the whole graph (the drift surface).
-  const shape = await executeShapeCheck(params, adapter);
-
-  // 2) impact analysis of the named route symbol (blast radius).
+  // Drift surface (whole graph) + blast radius of the named route symbol.
+  const shape = await runWholeGraphShapeCheck(adapter);
   const impact = await executeImpactAnalysis(route, 100, graph);
 
   const driftForRoute = (shape.shapeCheck?.mismatches ?? []).length;
