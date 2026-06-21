@@ -88,6 +88,14 @@ export interface RawRelationshipHint {
    * (`core/ports/index-cache.ts`) or it is dropped on the incremental path.
    */
   readonly callForm?: CallForm;
+  /**
+   * Raw source text of the enclosing `@call` node (e.g. `$this->getTransId(self::TRANS_ID)`).
+   * Used by the self-recursion report's "Buggy call" column. Absent when the call
+   * node can't be located (same fallback path as `argCount`). Recompute-only: NOT
+   * mirrored in `CachedRelationshipHint`, so it is intentionally dropped on the
+   * incremental parse-cache path (the self-recursion command never reads the cache).
+   */
+  readonly callText?: string;
   // ── Wave 1 named-binding carrier (OPTIONAL; additive; `import` hints only) ──
   /**
    * For a named import (`import { User as U } from './models'`): the
@@ -475,6 +483,9 @@ export function extractSymbolsWithQueries(
         const callNode = callCapture?.node ?? findEnclosingCallNode(callNameCapture.node);
         const argCount = countCallArguments(callNode);
         const callForm = callNode ? inferCallForm(callNode, callNameCapture.node) : undefined;
+        // Raw source of the call node for the self-recursion report's "Buggy call"
+        // column. Same fallback path as `argCount`: absent when the node is missing.
+        const callText = callNode ? callNode.text : undefined;
         hints.push({
           kind: "call",
           sourceFile: filePath,
@@ -486,6 +497,7 @@ export function extractSymbolsWithQueries(
           ...(receiverType !== undefined ? { receiverType } : {}),
           ...(argCount !== undefined ? { argCount } : {}),
           ...(callForm !== undefined ? { callForm } : {}),
+          ...(callText !== undefined ? { callText } : {}),
         });
       }
     }
