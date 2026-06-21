@@ -8,7 +8,13 @@
 import { describe, it, expect } from "vitest";
 import * as fc from "fast-check";
 import type { Relationship, Symbol, SymbolKind, Modifier } from "../../../core/domain.js";
+import type { Language } from "../../../core/domain.js";
 import { c3Linearize, parameterTypesMatch, computeMRO } from "./mro.js";
+
+/** Build a `languageOf` accessor that returns the same language for every class. */
+function langAll(language: Language): (id: string) => Language {
+  return () => language;
+}
 
 // ─── helpers ───────────────────────────────────────────────────────────────
 
@@ -186,6 +192,169 @@ describe("computeMRO: Rust qualified trait MRO", () => {
     expect(impls).toHaveLength(1);
     expect(impls[0].source).toBe("S.hello");
     expect(impls[0].target).toBe("Greet.hello");
+  });
+});
+
+// ─── Wave 7 (§3.1, Task 2) per-language collision rules (flag ON) ─────────────
+
+describe("computeMRO: Wave 7 per-language rules (flag ON)", () => {
+  it("C++ leftmost-base diamond: D.foo overrides B.foo (first declared base) when flag on", () => {
+    // A<-B, A<-C, B&C<-D. Both B and A declare foo. Linear order [B,C,A] → B wins.
+    const a = sym("A", "class", { id: "A" });
+    const b = sym("B", "class", { id: "B" });
+    const c = sym("C", "class", { id: "C" });
+    const d = sym("D", "class", { id: "D" });
+    const aFoo = sym("foo", "method", { id: "A.foo", ownerId: "A", parameterCount: 0 });
+    const bFoo = sym("foo", "method", { id: "B.foo", ownerId: "B", parameterCount: 0 });
+    const dFoo = sym("foo", "method", { id: "D.foo", ownerId: "D", parameterCount: 0 });
+    const { relationships, entries } = computeMRO(
+      [a, b, c, d, aFoo, bFoo, dFoo],
+      [
+        heritage("D", "B", "inherits"),
+        heritage("D", "C", "inherits"),
+        heritage("B", "A", "inherits"),
+        heritage("C", "A", "inherits"),
+      ],
+      langAll("cpp"),
+      true,
+    );
+    const overrides = relationships.filter((r) => r.relType === "overrides" && r.source === "D.foo");
+    expect(overrides).toHaveLength(1);
+    expect(overrides[0].target).toBe("B.foo");
+    const dEntry = entries.find((e) => e.classId === "D");
+    expect(dEntry?.language).toBe("cpp");
+    const fooAmb = dEntry?.ambiguities.find((amb) => amb.methodName === "foo");
+    expect(fooAmb?.reason).toContain("C++ leftmost base");
+    expect(fooAmb?.resolvedTo).toBe("B.foo");
+    expect(fooAmb?.definedIn.map((dd) => dd.classId).sort()).toEqual(["A", "B"]);
+  });
+
+  it("C#/Java class-beats-interface: class method wins, no ambiguity-null", () => {
+    // class C extends Base implements I; Base.run() and I.run() both exist.
+    const base = sym("Base", "class", { id: "Base" });
+    const i = sym("I", "interface", { id: "I" });
+    const c = sym("C", "class", { id: "C" });
+    const baseRun = sym("run", "method", { id: "Base.run", ownerId: "Base", parameterCount: 0 });
+    const iRun = sym("run", "method", { id: "I.run", ownerId: "I", parameterCount: 0 });
+    const cRun = sym("run", "method", { id: "C.run", ownerId: "C", parameterCount: 0 });
+    const { relationships, entries } = computeMRO(
+      [base, i, c, baseRun, iRun, cRun],
+      [heritage("C", "Base", "inherits"), heritage("C", "I", "implements")],
+      langAll("csharp"),
+      true,
+    );
+    // The class-beats-interface RULE resolves the collision to the concrete Base
+    // (recorded in the diagnostics). The emission loop walks the linearised
+    // ancestor chain [Base, I]: Base is concrete → emit `overrides` to Base and
+    // stop (single dispatch), exactly as today's loop. The diagnostic confirms
+    // the per-language winner is the class method, not the interface default.
+    const overrides = relationships.filter((r) => r.relType === "overrides" && r.source === "C.run");
+    expect(overrides.map((r) => r.target)).toEqual(["Base.run"]);
+    const cEntry = entries.find((e) => e.classId === "C");
+    const runAmb = cEntry?.ambiguities.find((amb) => amb.methodName === "run");
+    expect(runAmb?.reason).toContain("class method wins");
+    expect(runAmb?.resolvedTo).toBe("Base.run");
+  });
+
+  it("C#/Java two-interfaces-only: ambiguity recorded (resolvedTo null), NO overrides, methodImplements to BOTH", () => {
+    const i1 = sym("I1", "interface", { id: "I1" });
+    const i2 = sym("I2", "interface", { id: "I2" });
+    const c = sym("C", "class", { id: "C" });
+    const i1Run = sym("run", "method", { id: "I1.run", ownerId: "I1", parameterCount: 0 });
+    const i2Run = sym("run", "method", { id: "I2.run", ownerId: "I2", parameterCount: 0 });
+    const cRun = sym("run", "method", { id: "C.run", ownerId: "C", parameterCount: 0 });
+    const { relationships, entries, ambiguityCount } = computeMRO(
+      [i1, i2, c, i1Run, i2Run, cRun],
+      [heritage("C", "I1", "implements"), heritage("C", "I2", "implements")],
+      langAll("java"),
+      true,
+    );
+    expect(relationships.some((r) => r.relType === "overrides")).toBe(false);
+    const impls = relationships.filter((r) => r.relType === "methodImplements" && r.source === "C.run");
+    expect(impls.map((r) => r.target).sort()).toEqual(["I1.run", "I2.run"]);
+    const cEntry = entries.find((e) => e.classId === "C");
+    const runAmb = cEntry?.ambiguities.find((amb) => amb.methodName === "run");
+    expect(runAmb?.resolvedTo).toBeNull();
+    expect(runAmb?.reason).toContain("multiple interfaces");
+    expect(ambiguityCount).toBe(1);
+  });
+
+  it("Rust trait diamond: no overrides, reason = requires qualified syntax", () => {
+    // Two traits define hello(); struct S impls both. Traits are interfaces, so
+    // the satisfaction is methodImplements — but a *collision* across the two
+    // traits records the Rust qualified-syntax reason and emits NO overrides.
+    const t1 = sym("T1", "interface", { id: "T1" });
+    const t2 = sym("T2", "interface", { id: "T2" });
+    const s = sym("S", "class", { id: "S" });
+    const t1Hello = sym("hello", "method", { id: "T1.hello", ownerId: "T1", parameterCount: 0 });
+    const t2Hello = sym("hello", "method", { id: "T2.hello", ownerId: "T2", parameterCount: 0 });
+    const sHello = sym("hello", "method", { id: "S.hello", ownerId: "S", parameterCount: 0 });
+    const { relationships, entries } = computeMRO(
+      [t1, t2, s, t1Hello, t2Hello, sHello],
+      [heritage("S", "T1", "implements"), heritage("S", "T2", "implements")],
+      langAll("rust"),
+      true,
+    );
+    expect(relationships.some((r) => r.relType === "overrides")).toBe(false);
+    const sEntry = entries.find((e) => e.classId === "S");
+    const helloAmb = sEntry?.ambiguities.find((amb) => amb.methodName === "hello");
+    expect(helloAmb?.resolvedTo).toBeNull();
+    expect(helloAmb?.reason).toContain("Rust requires qualified syntax");
+  });
+
+  it("Python C3 order is byte-identical whether the flag is on or off (TRIPWIRE)", () => {
+    const a = sym("A", "class", { id: "A" });
+    const b = sym("B", "class", { id: "B" });
+    const c = sym("C", "class", { id: "C" });
+    const d = sym("D", "class", { id: "D" });
+    const aFoo = sym("foo", "method", { id: "A.foo", ownerId: "A", parameterCount: 0 });
+    const bFoo = sym("foo", "method", { id: "B.foo", ownerId: "B", parameterCount: 0 });
+    const dFoo = sym("foo", "method", { id: "D.foo", ownerId: "D", parameterCount: 0 });
+    const symbols = [a, b, c, d, aFoo, bFoo, dFoo];
+    const edges = [
+      heritage("D", "B", "inherits"),
+      heritage("D", "C", "inherits"),
+      heritage("B", "A", "inherits"),
+      heritage("C", "A", "inherits"),
+    ];
+    const off = new Set(computeMRO(symbols, edges).relationships.map((r) => r.id));
+    const on = new Set(
+      computeMRO(symbols, edges, langAll("python"), true).relationships.map((r) => r.id),
+    );
+    expect([...on].sort()).toEqual([...off].sort());
+    // D.foo still overrides B.foo (C3 order [B,C,A]) under both.
+    expect(on.has("overrides:D.foo->B.foo")).toBe(true);
+  });
+
+  it("entries include the full linearised `mro` NAMES for a class with parents", () => {
+    const a = sym("Animal", "class", { id: "A" });
+    const d = sym("Dog", "class", { id: "D" });
+    const aSpeak = sym("speak", "method", { id: "A.speak", ownerId: "A", parameterCount: 0 });
+    const dSpeak = sym("speak", "method", { id: "D.speak", ownerId: "D", parameterCount: 0 });
+    const { entries } = computeMRO(
+      [a, d, aSpeak, dSpeak],
+      [heritage("D", "A", "inherits")],
+      langAll("python"),
+      true,
+    );
+    const dEntry = entries.find((e) => e.classId === "D");
+    expect(dEntry?.className).toBe("Dog");
+    expect(dEntry?.mro).toEqual(["Animal"]); // linearized ancestor NAMES
+  });
+
+  it("diagnostics do NOT change the emitted edge set (entries are additive)", () => {
+    const base = sym("Base", "class", { id: "Base" });
+    const child = sym("Child", "class", { id: "Child" });
+    const baseFoo = sym("foo", "method", { id: "Base.foo", ownerId: "Base", parameterCount: 1 });
+    const childFoo = sym("foo", "method", { id: "Child.foo", ownerId: "Child", parameterCount: 1 });
+    const symbols = [base, child, baseFoo, childFoo];
+    const edges = [heritage("Child", "Base", "inherits")];
+    const withDiag = computeMRO(symbols, edges, langAll("typescript"), true);
+    const baseline = computeMRO(symbols, edges);
+    expect(withDiag.relationships.map((r) => r.id).sort()).toEqual(
+      baseline.relationships.map((r) => r.id).sort(),
+    );
+    // The default-language (TS) collision still resolves to first-definition.
   });
 });
 

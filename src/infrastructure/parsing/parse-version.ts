@@ -45,6 +45,17 @@
  *          shape-consistent and to pick up framework records once the flag is on
  *          (cross-cutting-checklist §0). When the flag is off this bump is the
  *          only on-the-wire change.
+ *   7 → 8  Wave 7 (§3.1, Task 4): heritage hints may now carry an optional
+ *          `heritageKind` (`embed`/`include`/`extend`/`prepend`) and, when the
+ *          Wave-7 flag (`TYPOCOP_HERITAGE_DISAMBIGUATION`) is on in Phase 2, the
+ *          Go heritage emission skips NAMED struct fields and Ruby
+ *          `include`/`extend`/`prepend` mixins are emitted as `implements`
+ *          heritage. The flag is default-OFF (byte-identical when off), but the
+ *          cached per-file hint SHAPE changed (new optional field) AND the
+ *          Phase-2 emission differs once the flag is on, so a warm cache must
+ *          re-emit to stay shape-consistent and to pick up the new heritage edges
+ *          when the flag is on (cross-cutting-checklist §0–§1). When the flag is
+ *          off this bump is the only on-the-wire change.
  *
  * NOT bumped for Wave 3 Tier A1 (TS-compiler-API receiver types): A1 reuses the
  * existing `receiverType` field and runs as a post-Phase-2, whole-corpus pass on
@@ -53,4 +64,4 @@
  * so it re-runs on warm-cache files every run with no cache plumbing. No new
  * cached/persisted field, so no bump is required (cross-cutting-checklist §0–§1).
  */
-export const PARSE_VERSION = 7;
+export const PARSE_VERSION = 8;

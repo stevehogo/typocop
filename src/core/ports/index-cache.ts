@@ -54,6 +54,14 @@ export interface CachedRelationshipHint {
   // incremental cache would silently DROP named bindings on a cache-reuse run,
   // turning off Tier 2a-named for unchanged files. Kept structurally in sync.
   readonly namedBindings?: { local: string; exported: string }[];
+  // ── Wave 7 (§3.1) heritage-flavor carrier (OPTIONAL; additive; heritage) ────
+  // Mirror of `RawRelationshipHint.heritageKind` (Go embedding / Ruby mixin
+  // flavor). Without this field the incremental cache would silently DROP the
+  // flavor on a cache-reuse run, dropping the `metadata.heritage` edge tag for
+  // unchanged files. The literal union is re-stated here (not imported) so
+  // `core/` stays a leaf; it assigns freely under structural typing. Kept
+  // structurally in sync.
+  readonly heritageKind?: "embed" | "include" | "extend" | "prepend";
 }
 
 /**

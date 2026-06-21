@@ -10,7 +10,7 @@ import { extractNamedBindings } from "./named-bindings.js";
 import { countCallArguments, inferCallForm, type CallForm } from "./call-extractors.js";
 import { extractMethodSignature } from "./signature.js";
 import { isNodeExported } from "./export-detection.js";
-import { isTypeEnvEnabled } from "../../platform/utils/limits.js";
+import { isTypeEnvEnabled, isHeritageDisambiguationEnabled } from "../../platform/utils/limits.js";
 import { buildTypeEnv, type TypeEnvironment } from "./type-env/type-env.js";
 import { typeConfigs } from "./type-env/extractors/index.js";
 
@@ -100,6 +100,21 @@ export interface RawRelationshipHint {
    * (`core/ports/index-cache.ts`) or it is dropped on the incremental path.
    */
   readonly namedBindings?: { local: string; exported: string }[];
+  // ── Wave 7 (§3.1, Task 4) heritage-flavor carrier (OPTIONAL; additive) ──────
+  /**
+   * For a heritage hint produced by Go anonymous struct embedding or a Ruby
+   * `include`/`extend`/`prepend` mixin, the heritage FLAVOR. The hint `kind`
+   * stays the existing `inherits` (Go embedding) / `implements` (Ruby mixins) —
+   * NO new hint kind / relType is introduced. Phase 3 carries this onto the
+   * emitted edge's `metadata.heritage` so the `extend`-vs-`include`/`prepend`
+   * distinction (singleton vs instance methods → different MRO position) is
+   * recorded. Only populated when the Wave-7 heritage flag
+   * (`TYPOCOP_HERITAGE_DISAMBIGUATION`) is on in Phase 2; absent for ordinary
+   * `extends`/`implements` heritage and all non-heritage hints.
+   * MUST stay structurally mirrored in `CachedRelationshipHint`
+   * (`core/ports/index-cache.ts`) or it is dropped on the incremental path.
+   */
+  readonly heritageKind?: "embed" | "include" | "extend" | "prepend";
 }
 
 /** Combined result of query-based extraction */
@@ -301,6 +316,14 @@ export function extractSymbolsWithQueries(
   // cross-file ctor verification is deferred to Phase 3. When the flag is off the
   // env is never built and `receiverType` is never populated → byte-identical.
   const typeEnvEnabled = isTypeEnvEnabled() && typeConfigs[language] !== undefined;
+  // ── Wave 7 (§3.1, Task 4): heritage-disambiguation flag, read IN-WORKER ─────
+  // Parse workers inherit `process.env`, so the worker and in-process paths
+  // agree (precedent: isTypeEnvEnabled / isFrameworkExtractionEnabled). Gates the
+  // Go anonymous-struct-embedding guard (skip NAMED fields) + the Ruby
+  // include/extend/prepend mixin heritage emission. When OFF, Go heritage emission
+  // is byte-identical to today (named fields still emit, as they do now) and Ruby
+  // mixins are never emitted as heritage → BYTE-IDENTICAL golden output.
+  const heritageDisambiguation = isHeritageDisambiguationEnabled();
   let typeEnv: TypeEnvironment | undefined;
   const getTypeEnv = (): TypeEnvironment => {
     if (typeEnv === undefined) typeEnv = buildTypeEnv(tree, language);
@@ -327,6 +350,12 @@ export function extractSymbolsWithQueries(
       (c) => c.name === "heritage.implements" || c.name === "heritage.trait",
     );
     const heritageClassCapture = match.captures.find((c) => c.name === "heritage.class");
+    // Wave 7 (§3.1, Task 4): Ruby include/extend/prepend mixin captures. The
+    // module constant being mixed in (`@heritage.mixin`) + the verb identifier
+    // (`@heritage.mixin_verb`). A mixin call has NO `heritage.class` anchor in the
+    // same match — the enclosing class/module is derived by a parent walk below.
+    const heritageMixinCapture = match.captures.find((c) => c.name === "heritage.mixin");
+    const heritageMixinVerbCapture = match.captures.find((c) => c.name === "heritage.mixin_verb");
 
     // ── Definition symbols ──────────────────────────────────────────────────
     if (nameCapture && defCapture) {
@@ -492,14 +521,34 @@ export function extractSymbolsWithQueries(
 
     // ── Heritage hints ──────────────────────────────────────────────────────
     if (heritageExtendsCapture && heritageClassCapture) {
-      hints.push({
-        kind: "inherits",
-        sourceFile: filePath,
-        targetName: heritageExtendsCapture.node.text.trim(),
-        childSymbolId: heritageClassCapture.node.text.trim(),
-        startLine: heritageExtendsCapture.node.startPosition.row,
-        language,
-      });
+      // Wave 7 (§3.1, Task 4): Go struct embedding is an ANONYMOUS field
+      // (`type Dog struct { Animal }`). A `field_declaration` that HAS a `name`
+      // child (`name string`) is an ordinary field, NOT inheritance — skip it.
+      // Only flag-gated (default OFF) so today's behaviour (named fields also
+      // emit a spurious `inherits`) stays byte-identical when the flag is off.
+      // Non-Go languages are unaffected (their extends captures aren't under a
+      // `field_declaration`). When this is an embedded field, tag the hint with
+      // `heritageKind: "embed"` so Phase 3 records it on the edge metadata.
+      let isGoNamedField = false;
+      let isGoEmbed = false;
+      if (heritageDisambiguation && language === "go") {
+        const fieldDecl = heritageExtendsCapture.node.parent;
+        if (fieldDecl?.type === "field_declaration") {
+          if (fieldDecl.childForFieldName("name")) isGoNamedField = true;
+          else isGoEmbed = true;
+        }
+      }
+      if (!isGoNamedField) {
+        hints.push({
+          kind: "inherits",
+          sourceFile: filePath,
+          targetName: heritageExtendsCapture.node.text.trim(),
+          childSymbolId: heritageClassCapture.node.text.trim(),
+          startLine: heritageExtendsCapture.node.startPosition.row,
+          language,
+          ...(isGoEmbed ? { heritageKind: "embed" as const } : {}),
+        });
+      }
     }
 
     if (heritageImplCapture && heritageClassCapture) {
@@ -511,6 +560,36 @@ export function extractSymbolsWithQueries(
         startLine: heritageImplCapture.node.startPosition.row,
         language,
       });
+    }
+
+    // ── Wave 7 (§3.1, Task 4): Ruby include/extend/prepend mixin heritage ─────
+    // A mixin call (`include M`) has no `heritage.class` anchor in its match, so
+    // the enclosing class/module name is derived by a parent walk. Emitted as an
+    // `implements` hint (mixins are interface/trait-style contracts → their
+    // methods become `methodImplements` targets). The verb (include/extend/
+    // prepend) is recorded as `heritageKind` so the `extend` (singleton) vs
+    // include/prepend (instance) distinction is preserved on the edge metadata.
+    // Flag-gated (default OFF) so today's behaviour (mixins fall through to the
+    // generic `call` capture only) stays byte-identical when the flag is off.
+    if (heritageDisambiguation && heritageMixinCapture && heritageMixinVerbCapture) {
+      const enclosing = enclosingRubyTypeName(heritageMixinCapture.node);
+      const mixinName = heritageMixinCapture.node.text.trim();
+      const verb = heritageMixinVerbCapture.node.text.trim();
+      if (
+        enclosing &&
+        mixinName &&
+        (verb === "include" || verb === "extend" || verb === "prepend")
+      ) {
+        hints.push({
+          kind: "implements",
+          sourceFile: filePath,
+          targetName: mixinName,
+          childSymbolId: enclosing,
+          startLine: heritageMixinCapture.node.startPosition.row,
+          language,
+          heritageKind: verb,
+        });
+      }
     }
   }
 
@@ -685,6 +764,26 @@ function isBareReceiver(receiverText: string): boolean {
   const text = receiverText.trim();
   if (text === "this" || text === "self" || text === "$this") return false;
   return /^\$?[A-Za-z_][\w$]*$/.test(text);
+}
+
+/**
+ * Wave 7 (§3.1, Task 4): walk up from a Ruby mixin-call node to the nearest
+ * enclosing `class`/`module` and return its NAME (the constant). Returns
+ * `undefined` for a top-level mixin (no enclosing type), so it is skipped. Used
+ * to anchor `include`/`extend`/`prepend` heritage to the class that receives it.
+ */
+function enclosingRubyTypeName(node: Parser.SyntaxNode): string | undefined {
+  let cur: Parser.SyntaxNode | null = node.parent;
+  while (cur) {
+    if (cur.type === "class" || cur.type === "module") {
+      const nameNode = cur.childForFieldName("name");
+      const text = nameNode?.text.trim();
+      if (text) return text;
+      return undefined;
+    }
+    cur = cur.parent;
+  }
+  return undefined;
 }
 
 function inferVisibility(node: Parser.SyntaxNode, language: Language): Visibility {

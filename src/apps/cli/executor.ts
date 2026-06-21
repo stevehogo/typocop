@@ -20,7 +20,7 @@ import { executeObsidianExport } from "../../application/export-render/index.js"
 import { createFileWatcher, type FileWatcher } from "../../infrastructure/watch/file-watcher.js";
 import { augment } from "../../application/querying/augment.js";
 import { mergeTypocopHook, type ClaudeSettings } from "./setup.js";
-import { isTypeEnvEnabled, isLspTypesEnabled, isDataTouchEnabled, isDataTouchEventsEnabled, isDataTouchSingleModelFallbackEnabled, isCallRefuseAmbiguousEnabled, isFrameworkExtractionEnabled } from "../../platform/utils/limits.js";
+import { isTypeEnvEnabled, isLspTypesEnabled, isDataTouchEnabled, isDataTouchEventsEnabled, isDataTouchSingleModelFallbackEnabled, isCallRefuseAmbiguousEnabled, isFrameworkExtractionEnabled, isHeritageDisambiguationEnabled } from "../../platform/utils/limits.js";
 
 /**
  * A5: build the disk-backed parse + embedding caches for a prefix.
@@ -201,6 +201,10 @@ export async function executeIndexingPipeline(
       // (DELIBERATE DEVIATION from the plan's default-ON, for program-wide
       // consistency + safety); the wave is byte-identical until enabled.
       frameworkExtraction: isFrameworkExtractionEnabled(),
+      // Wave 7 (§3.1): derive the heritage-disambiguation flag from env. Default
+      // OFF (the wave is byte-identical until enabled); Phase 2 reads the same env
+      // directly in the parse workers for the Go/Ruby heritage emission.
+      heritageDisambiguation: isHeritageDisambiguationEnabled(),
     };
 
     const result = await runIndexingPipeline(pipelineConfig);
@@ -391,6 +395,8 @@ export async function executeWatch(
       callRefuseAmbiguous: isCallRefuseAmbiguousEnabled(),
       // Wave 6: framework-extraction flag (default OFF) on the watch path too.
       frameworkExtraction: isFrameworkExtractionEnabled(),
+      // Wave 7 (§3.1): heritage-disambiguation flag (default OFF) on the watch path too.
+      heritageDisambiguation: isHeritageDisambiguationEnabled(),
     };
     try {
       const result = await reindexChangedFiles(batch, pipelineConfig);

@@ -212,6 +212,23 @@ export interface PipelineConfig {
    * invalidates the warm cache.
    */
   readonly frameworkExtraction?: boolean;
+  /**
+   * Wave 7 (§3.1) heritage / MRO correctness disambiguation. **Default `false`.**
+   * Derived from `TYPOCOP_HERITAGE_DISAMBIGUATION` at the composition root (see
+   * {@link isHeritageDisambiguationEnabled}). When `true`, gates the
+   * edge-changing parts: (a) Phase-3 interface-vs-class disambiguation in the
+   * heritage hint loop (an `inherits` hint may become an `implements` edge — and
+   * vice-versa), (b) the per-language tie-break rules in `computeMRO`, and
+   * (c) the Phase-2 Go anonymous-struct-embedding + Ruby `include`/`extend`/
+   * `prepend` mixin heritage emission (the Phase-2 part is read DIRECTLY from the
+   * env in the parse worker, which inherits `process.env`; this field carries the
+   * Phase-3 half). When off, heritage relTypes trust `hint.kind`, `computeMRO`
+   * runs its language-blind single-loop, and no Go-embed / Ruby-mixin edges are
+   * produced → byte-identical to pre-Wave-7. The additive ambiguity diagnostics
+   * (`MROResult.entries`) are inert/always-on regardless. Linked to
+   * {@link PARSE_VERSION} so toggling invalidates the warm cache.
+   */
+  readonly heritageDisambiguation?: boolean;
 }
 
 /**
@@ -384,10 +401,15 @@ export async function runIndexingPipeline(config: PipelineConfig): Promise<Pipel
   // Wave 4 (Task 5): forward the refuse-on-ambiguity flag to Phase 3. Default OFF
   // → byte-identical pre-Wave-4 selection.
   const callRefuseAmbiguous = config.callRefuseAmbiguous ?? false;
+  // Wave 7 (§3.1): forward the heritage-disambiguation flag to Phase 3 (the
+  // interface-vs-class relType decision + the per-language `computeMRO` rules).
+  // Default OFF → byte-identical pre-Wave-7. The Phase-2 half (Go/Ruby heritage
+  // emission) reads the same env directly in the parse worker.
+  const heritageDisambiguation = config.heritageDisambiguation ?? false;
   // `let` (not `const`): the Wave 5 data-touch pass (below) re-binds both with
   // the additive synthetic Symbols + data-touch edges before clustering/persist.
   const resolution = await metrics.time("resolution", () =>
-    resolveReferences(symbols, hints, sourcePath, fileNodes.map((f) => f.path), consumeReceiverType, callRefuseAmbiguous),
+    resolveReferences(symbols, hints, sourcePath, fileNodes.map((f) => f.path), consumeReceiverType, callRefuseAmbiguous, heritageDisambiguation),
   );
   let relationships = resolution.relationships;
   const { extNodes, dependsOnStats } = resolution;

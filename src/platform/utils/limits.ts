@@ -310,6 +310,38 @@ export function isCallRefuseAmbiguousEnabled(): boolean {
   return isEnvTruthy(CALL_REFUSE_AMBIGUOUS_ENV);
 }
 
+/** Environment opt-in for the Wave 7 heritage interface-vs-class disambiguation ({@link isHeritageDisambiguationEnabled}). */
+export const HERITAGE_DISAMBIGUATION_ENV = "TYPOCOP_HERITAGE_DISAMBIGUATION";
+
+/**
+ * Whether the Wave 7 (§3.1) heritage / MRO correctness disambiguation is enabled.
+ * **OPT-IN — default `false`.** When `true`, gates the EDGE-CHANGING parts:
+ *  (a) Phase-3 interface-vs-class disambiguation in the heritage hint loop
+ *      ({@link resolveHeritageRelType} may upgrade an `inherits` hint to an
+ *      `implements` edge — and vice-versa — via the symbol table first, then a
+ *      C#/Java `^I[A-Z]` / Swift-protocol / others-extends heuristic),
+ *  (b) the per-language tie-break rules in `computeMRO`'s collision loop
+ *      (C++ leftmost-base, C#/Java/Kotlin class-method-beats-interface +
+ *      2+-interface ambiguity, Rust qualified-syntax-null, default first-def),
+ *  (c) the Phase-2 Go anonymous-struct-embedding + Ruby `include`/`extend`/
+ *      `prepend` mixin heritage emission.
+ *
+ * When OFF: today's `hint.kind`-trusted heritage relType + today's
+ * language-blind single-loop `computeMRO` + no Go-embedding / Ruby-mixin edges →
+ * BYTE-IDENTICAL golden output. The ambiguity diagnostics (`MROResult.entries`)
+ * are ADDITIVE/inert (no edge change) and stay ALWAYS-ON regardless of this flag.
+ *
+ * Read in BOTH Phase 2 (inside `extractSymbolsWithQueries` / the parse worker,
+ * which inherit `process.env`, for the Go/Ruby emission) and the composition root
+ * (to derive `PipelineConfig.heritageDisambiguation` for the Phase-3 paths) —
+ * both consult this single env so the two phases agree. Mirrors the
+ * {@link isTypeEnvEnabled} / {@link isFrameworkExtractionEnabled} reader pattern,
+ * and is linked to {@link PARSE_VERSION} so toggling it invalidates the warm cache.
+ */
+export function isHeritageDisambiguationEnabled(): boolean {
+  return isEnvTruthy(HERITAGE_DISAMBIGUATION_ENV);
+}
+
 /**
  * Bounded concurrency for Phase 6 embedding generation (Phase C).
  *

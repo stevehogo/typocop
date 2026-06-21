@@ -27,6 +27,7 @@ import type { CallResolutionDeps } from "./scope-resolver.js";
 // Side-effect import: registers the built-in per-language scope resolvers (E1).
 import "./resolvers/index.js";
 import { computeMRO, c3Linearize, gatherAncestors } from "./mro.js";
+import { resolveHeritageRelType } from "./heritage-type.js";
 import { resolveReceiverType, typeNameToSymbol, type ChainBindingDeps } from "./chain-binding.js";
 
 // ─── Symbol map ───────────────────────────────────────────────────────────────
@@ -260,6 +261,18 @@ export function resolveHints(
    * Wave-4 filters never execute). The zero-code rollback lever.
    */
   callRefuseAmbiguous = false,
+  /**
+   * Wave 7 (§3.1): when `true`, the heritage hint loop disambiguates
+   * interface-vs-class parents (an `inherits` hint may be UPGRADED to an
+   * `implements` edge, and vice-versa) via {@link resolveHeritageRelType}, and
+   * `computeMRO` applies the per-language collision tie-break rules. Default
+   * `false` → the hint's `kind` is trusted verbatim and `computeMRO` runs its
+   * language-blind single-loop → byte-identical pre-Wave-7 edges. The additive
+   * `heritageKind` hint flavor (Go embed / Ruby mixin) is also only populated in
+   * Phase 2 when this flag's env is on, so the new Go/Ruby edges only appear with
+   * the flag on. The zero-code rollback lever.
+   */
+  heritageDisambiguation = false,
 ): ResolveHintsResult {
   const symbolMap = buildSymbolMap(symbols);
   const extNodes = new Map<string, ExternalDependencyNode>();
@@ -482,8 +495,29 @@ export function resolveHints(
           if (!child) break;
           const parent = (symbolMap.get(hint.targetName) ?? []).find((s) => s.id !== child.id);
           if (!parent) break;
-          const relType: RelationType = hint.kind === "inherits" ? "inherits" : "implements";
-          add({ id: relId(relType, child.id, parent.id), source: child.id, target: parent.id, relType, metadata: {} });
+          // Wave 7 (§3.1, Task 1): decide inherits-vs-implements BEFORE building
+          // the relId so the emitted edge AND `computeMRO`'s interfaceParent
+          // classification (relType==="implements" || kind==="interface") agree —
+          // fixing overrides-vs-methodImplements for free. When the flag is off,
+          // trust the hint's `kind` verbatim (byte-identical). When on, the
+          // symbol-table-first / language-gated heuristic may upgrade an
+          // `inherits` hint to `implements` (e.g. external `IDisposable`) or the
+          // reverse when the symbol table proves the parent is a class. EXCEPTION:
+          // Go-embed / Ruby-mixin hints (those carrying a `heritageKind` flavor)
+          // already have their relType DECIDED by the Phase-2 emission
+          // (embed→inherits, mixin→implements) — a Ruby module is extracted as a
+          // `class`-kind symbol, so re-disambiguating would wrongly flip a mixin
+          // back to `inherits`. Trust the hint's kind for those.
+          const relType: RelationType =
+            heritageDisambiguation && !hint.heritageKind
+              ? resolveHeritageRelType(hint.targetName, hint.sourceFile, hint.language, symbolMap)
+              : hint.kind === "inherits" ? "inherits" : "implements";
+          // Carry the Go-embed / Ruby-mixin flavor onto the edge metadata so the
+          // `extend`-vs-`include`/`prepend` distinction is recorded (Task 4).
+          const metadata: Record<string, string> = hint.heritageKind
+            ? { heritage: hint.heritageKind }
+            : {};
+          add({ id: relId(relType, child.id, parent.id), source: child.id, target: parent.id, relType, metadata });
           break;
         }
       }
@@ -498,7 +532,16 @@ export function resolveHints(
   // touches existing edge ids. `add` dedups, so re-emission is a no-op. When no
   // symbol carries method `ownerId` (e.g. synthetic fixtures), it emits nothing —
   // golden output stays byte-identical.
-  const mro = computeMRO(symbols, relationships);
+  //
+  // Wave 7 (§3.1, Task 2): thread a per-class `languageOf` accessor (typocop's
+  // `Symbol` carries no `.language`, so it is derived from each class's heritage
+  // hint language — the child class's language) and the heritage flag. When the
+  // flag is off, the accessor is still passed but `computeMRO` runs its
+  // language-blind single-loop (byte-identical edges); the additive diagnostics
+  // (`entries`) are computed regardless.
+  const classLanguage = buildClassLanguageMap(hints, symbols, symbolMap);
+  const languageOf = (classId: string): Language | undefined => classLanguage.get(classId);
+  const mro = computeMRO(symbols, relationships, languageOf, heritageDisambiguation);
   for (const rel of mro.relationships) add(rel);
 
   return {
@@ -529,6 +572,34 @@ export interface ResolveHintsResult {
 }
 
 // ─── E1 MRO-aware member-call resolution (ADDITIVE helpers) ───────────────────
+
+/**
+ * Wave 7 (§3.1, Task 2): build a `classId → Language` map from the heritage
+ * HINTS. typocop's `Symbol` carries no `.language`, so the per-class language is
+ * derived from the language stamped on each heritage hint (the child class's
+ * language). Resolves the hint's `childSymbolId` NAME to a concrete symbol id
+ * (preferring the same-file candidate) so `computeMRO`'s per-class rules can be
+ * keyed by symbol id. Classes with no heritage hint (no parents) are absent and
+ * default to `undefined` (the single-inheritance/default rule).
+ */
+function buildClassLanguageMap(
+  hints: RawRelationshipHint[],
+  symbols: Symbol[],
+  symbolMap: Map<string, Symbol[]>,
+): Map<string, Language> {
+  void symbols;
+  const out = new Map<string, Language>();
+  for (const hint of hints) {
+    if (hint.kind !== "inherits" && hint.kind !== "implements") continue;
+    if (!hint.childSymbolId) continue;
+    const childCandidates = symbolMap.get(hint.childSymbolId) ?? [];
+    const child =
+      childCandidates.find((s) => s.location.filePath === hint.sourceFile) ?? childCandidates[0];
+    if (!child) continue;
+    if (!out.has(child.id)) out.set(child.id, hint.language);
+  }
+  return out;
+}
 
 /**
  * Build a `classId → C3-linearised ancestor ids` map from the heritage HINTS,
@@ -668,12 +739,19 @@ export async function resolveReferences(
    * pre-Wave-4 behaviour (the zero-code rollback lever).
    */
   callRefuseAmbiguous = false,
+  /**
+   * Wave 7 (§3.1): forwarded to {@link resolveHints} to enable interface-vs-class
+   * heritage disambiguation + the per-language `computeMRO` collision tie-break
+   * rules. Default `false` → byte-identical pre-Wave-7 (the zero-code rollback
+   * lever).
+   */
+  heritageDisambiguation = false,
 ): Promise<ResolveHintsResult> {
   if (hints && hints.length > 0) {
     const languageConfigs = repoRoot
       ? await loadLanguageConfigs(repoRoot)
       : undefined;
-    return resolveHints(hints, symbols, languageConfigs, allFiles, typeEnvResolution, callRefuseAmbiguous);
+    return resolveHints(hints, symbols, languageConfigs, allFiles, typeEnvResolution, callRefuseAmbiguous, heritageDisambiguation);
   }
 
   // Legacy path: derive relationships from symbol kinds and signatures
