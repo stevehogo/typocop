@@ -1,7 +1,7 @@
 /**
  * MRO / C3 linearization (E1 step 3).
  *
- * Ports GitNexus's C3 linearization (`mro-processor.ts` + `model/resolve.ts`) and
+ * C3 linearization (`mro-processor.ts` + `model/resolve.ts`) and
  * `parameterTypesMatch` into typocop's slimmer model:
  *   - input  : the resolved `Symbol[]` + the `inherits`/`implements` edges already
  *              produced by the heritage hints

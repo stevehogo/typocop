@@ -2,7 +2,7 @@
  * ScopeResolver registry (E1 step 2).
  *
  * A deliberately SLIM, ~5-field per-language strategy contract — the opposite of
- * GitNexus's ~50-field scope model. It captures only the knobs that change how a
+ * ~50-field scope model. It captures only the knobs that change how a
  * *call target* is selected once the tiered {@link ResolutionContext} has produced
  * candidates:
  *
