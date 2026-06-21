@@ -19,6 +19,7 @@ import { FileEmbeddingCache } from "../../infrastructure/cache/embedding-cache.j
 import { executeObsidianExport } from "../../application/export-render/index.js";
 import { createFileWatcher, type FileWatcher } from "../../infrastructure/watch/file-watcher.js";
 import { augment } from "../../application/querying/augment.js";
+import { stopConnectionServer } from "../../infrastructure/remote-transport/autostart-runtime.js";
 import { mergeTypocopHook, type ClaudeSettings } from "./setup.js";
 import { isTypeEnvEnabled, isLspTypesEnabled, isDataTouchEnabled, isDataTouchEventsEnabled, isDataTouchSingleModelFallbackEnabled, isCallRefuseAmbiguousEnabled, isFrameworkExtractionEnabled, isHeritageDisambiguationEnabled } from "../../platform/utils/limits.js";
 
@@ -788,6 +789,24 @@ export async function executeCLI(command: CLICommand): Promise<void> {
       console.error(`  Last Indexed:  ${chalk.cyan(status.lastIndexed ?? "never")}`);
       console.error(`  Symbols:       ${chalk.cyan(status.symbolCount)}`);
       console.error(`  Relationships: ${chalk.cyan(status.relationshipCount)}`);
+      break;
+    }
+
+    case "stop-server": {
+      const discoveryPath = configurationManager.getConfiguration().ladybugdb.serverDiscoveryPath;
+      const spinner = ora("Stopping LadybugDB connection server...").start();
+      try {
+        const result = await stopConnectionServer(discoveryPath);
+        if (result.stopped) {
+          spinner.succeed(chalk.green(`Connection server stopped (pid ${result.pid}).`));
+        } else {
+          // Not an error: no live server to stop, or it didn't exit in time.
+          spinner.info(chalk.yellow(result.reason ?? "No running connection server found."));
+        }
+      } catch (err) {
+        spinner.fail(chalk.red("Failed to stop the connection server."));
+        throw err;
+      }
       break;
     }
 

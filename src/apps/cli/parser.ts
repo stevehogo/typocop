@@ -38,7 +38,8 @@ export type CLICommand =
   | { type: "ollama"; url?: string }
   | { type: "watch"; config: CLIConfig }
   | { type: "augment"; pattern: string }
-  | { type: "setup"; settingsPath?: string };
+  | { type: "setup"; settingsPath?: string }
+  | { type: "stop-server" };
 
 const supportedLanguages: Language[] = [
   "php", "typescript", "javascript", "python", "java",
@@ -187,6 +188,13 @@ export function parseArgs(rawArgs: string[]): CLICommand {
       parsedCommand = {
         type: "status"
       };
+    });
+
+  program
+    .command("stop-server")
+    .description("Gracefully stop the running LadybugDB connection server (the one this prefix's discovery file points at)")
+    .action(() => {
+      parsedCommand = { type: "stop-server" };
     });
 
   program

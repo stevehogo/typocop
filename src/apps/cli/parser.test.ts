@@ -28,6 +28,11 @@ describe("parseArgs", () => {
     });
   });
 
+  it("parses the stop-server command", () => {
+    const command = parseArgs(["node", "typocop", "stop-server"]);
+    expect(command).toEqual({ type: "stop-server" });
+  });
+
   it("auto-detects language when --lang is omitted", () => {
     vi.mocked(fs.existsSync).mockReturnValue(true);
     vi.mocked(languageModule.detectDirectoryLanguage).mockReturnValue("python");
