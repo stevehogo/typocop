@@ -6,6 +6,7 @@ import { LANGUAGE_QUERIES } from "./queries.js";
 import { generateSymbolId } from "./symbol-id.js";
 import { generateLogicalKey, OrdinalAllocator } from "./logical-key.js";
 import { computeComplexity } from "./complexity.js";
+import { extractNamedBindings } from "./named-bindings.js";
 
 /**
  * `@definition.*` capture suffixes that denote a callable (function / method /
@@ -46,6 +47,18 @@ export interface RawRelationshipHint {
    * true caller and lets chain-binding thread `returnType` through `a.b().c()`.
    */
   readonly enclosingSymbolId?: string;
+  // ── Wave 1 named-binding carrier (OPTIONAL; additive; `import` hints only) ──
+  /**
+   * For a named import (`import { User as U } from './models'`): the
+   * `{ local, exported }` pairs extracted from the import AST node. `local` is
+   * the name visible in the importing file; `exported` is the original name in
+   * the source file. Lets Phase 3 populate `namedImportMap` so `walkBindingChain`
+   * (Tier 2a-named) fires for aliases + re-export chains. Absent for default /
+   * namespace / wildcard / side-effect imports (and for non-import hints).
+   * MUST stay structurally mirrored in `CachedRelationshipHint`
+   * (`core/ports/index-cache.ts`) or it is dropped on the incremental path.
+   */
+  readonly namedBindings?: { local: string; exported: string }[];
 }
 
 /** Combined result of query-based extraction */
@@ -243,6 +256,10 @@ export function extractSymbolsWithQueries(
     const nameCapture = match.captures.find((c) => c.name === "name");
     const defCapture = match.captures.find((c) => c.name.startsWith("definition."));
     const importSourceCapture = match.captures.find((c) => c.name === "import.source");
+    // Full import statement node (`@import`) — used for named-binding extraction
+    // (Wave 1). Present alongside `@import.source` in every language's import
+    // pattern, so no query change is needed.
+    const importStmtCapture = match.captures.find((c) => c.name === "import");
     const callNameCapture = match.captures.find((c) => c.name === "call.name");
     const memberAccessCapture = match.captures.find((c) => c.name === "member.access");
     const memberObjectCapture = match.captures.find((c) => c.name === "member.object");
@@ -319,12 +336,20 @@ export function extractSymbolsWithQueries(
     if (importSourceCapture) {
       const raw = importSourceCapture.node.text.replace(/['"]/g, "").trim();
       if (raw) {
+        // Wave 1: extract named bindings (`import { User as U }`) from the full
+        // import node so Phase 3 can populate `namedImportMap` (Tier 2a-named).
+        // Only attach when non-empty so default/namespace/wildcard imports keep
+        // the pre-wave hint shape (golden output unchanged).
+        const namedBindings = importStmtCapture
+          ? extractNamedBindings(importStmtCapture.node, language)
+          : undefined;
         hints.push({
           kind: "import",
           sourceFile: filePath,
           targetName: raw,
           startLine: importSourceCapture.node.startPosition.row,
           language,
+          ...(namedBindings !== undefined ? { namedBindings } : {}),
         });
       }
     }

@@ -238,8 +238,13 @@ export async function runIndexingPipeline(config: PipelineConfig): Promise<Pipel
   if (verbose) console.error("[pipeline] Starting Phase 3: Resolution");
 
   // Phase 3: Resolve references (Req 3.3)
+  //
+  // Wave 1: thread the repo file list (relative `fileNode.path`s — the same form
+  // as `hint.sourceFile` and `Symbol.location.filePath`) so Phase 3 can resolve
+  // import specifiers to concrete paths and populate the import/package/named
+  // maps (Tiers 2a / 2a-named / 2b). Omitting this arg is the zero-code rollback.
   const { relationships, extNodes, dependsOnStats } = await metrics.time("resolution", () =>
-    resolveReferences(symbols, hints, sourcePath),
+    resolveReferences(symbols, hints, sourcePath, fileNodes.map((f) => f.path)),
   );
   metrics.set("relationshipCount", relationships.length);
   metrics.set("externalDependencyCount", extNodes.size);

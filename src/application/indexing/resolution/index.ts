@@ -16,6 +16,7 @@ import type { Language } from "../../../core/domain.js";
 import type { RawRelationshipHint } from "../parsing/index.js";
 import { buildSymbolTable, symbolMetadata } from "./symbol-table.js";
 import { createResolutionContext } from "./resolution-context.js";
+import { populateImportMaps } from "./import-resolution-pass.js";
 import { loadLanguageConfigs, type LanguageConfigs } from "../language-config.js";
 import {
   getOrCreateExtNode,
@@ -242,6 +243,7 @@ export function resolveHints(
   hints: RawRelationshipHint[],
   symbols: Symbol[],
   languageConfigs?: LanguageConfigs,
+  allFiles?: readonly string[],
 ): ResolveHintsResult {
   const symbolMap = buildSymbolMap(symbols);
   const extNodes = new Map<string, ExternalDependencyNode>();
@@ -268,6 +270,18 @@ export function resolveHints(
   const ctx = createResolutionContext();
   for (const sym of symbols) {
     ctx.symbols.add(sym.location.filePath, sym.name, sym.id, sym.kind, symbolMetadata(sym));
+  }
+
+  // ─── Wave 1: Activate the import-resolution graph ──────────────────────────
+  // Populate ctx.importMap / packageMap / namedImportMap from the import hints +
+  // the repo file list, BEFORE the hint loop's per-file `ctx.resolve` calls fire.
+  // This turns on the dead Tiers 2a / 2a-named / 2b. When `allFiles` is omitted
+  // (legacy/test call sites) OR no language configs are loaded, the sub-pass is
+  // skipped and the maps stay empty → byte-identical pre-wave Tier-1/3 behaviour
+  // (the built-in rollback lever).
+  if (allFiles && allFiles.length > 0 && languageConfigs) {
+    const importHints = hints.filter((h) => h.kind === "import");
+    populateImportMaps(ctx, importHints, allFiles, languageConfigs);
   }
 
   // ─── E1 MRO / chain support indexes (built once) ───────────────────────────
@@ -578,12 +592,13 @@ export async function resolveReferences(
   symbols: Symbol[],
   hints?: RawRelationshipHint[],
   repoRoot?: string,
+  allFiles?: readonly string[],
 ): Promise<ResolveHintsResult> {
   if (hints && hints.length > 0) {
     const languageConfigs = repoRoot
       ? await loadLanguageConfigs(repoRoot)
       : undefined;
-    return resolveHints(hints, symbols, languageConfigs);
+    return resolveHints(hints, symbols, languageConfigs, allFiles);
   }
 
   // Legacy path: derive relationships from symbol kinds and signatures

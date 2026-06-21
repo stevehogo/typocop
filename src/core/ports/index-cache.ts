@@ -34,6 +34,11 @@ export interface CachedRelationshipHint {
   // are JSON-round-tripped) preserve these fields across the incremental path.
   readonly receiverText?: string;
   readonly enclosingSymbolId?: string;
+  // ── Wave 1 named-binding carrier (OPTIONAL; additive; `import` hints only) ──
+  // Mirror of `RawRelationshipHint.namedBindings`. Without this field the
+  // incremental cache would silently DROP named bindings on a cache-reuse run,
+  // turning off Tier 2a-named for unchanged files. Kept structurally in sync.
+  readonly namedBindings?: { local: string; exported: string }[];
 }
 
 /**
