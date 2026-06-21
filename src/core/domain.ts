@@ -373,6 +373,28 @@ export interface MCPToolResponse {
     /** The actual answer surfaced on a refute (OQ3): caller set, hop path, … */
     trueAnswer?: string;
   };
+  // ── Guarded read-only Cypher (ADDITIVE; only populated by `query_graph`,
+  //    Wave 8 · T9). Absent for all other tools → wire contract unchanged. ────
+  /**
+   * Raw rows from a guarded, read-only, row-capped Cypher query. `ok` is false
+   * when the query was rejected pre-execution (a write/DDL/multi-statement
+   * input never runs); `unsupported` then carries the reason. `labels[]` / rel
+   * `type` strings in rows have the persisted node/edge-label prefix stripped.
+   */
+  queryGraph?: {
+    /** True when the query passed the read-only guardrails and executed. */
+    ok: boolean;
+    /** Returned rows (column-alias → value), capped at `limit`. */
+    rows: ReadonlyArray<Record<string, unknown>>;
+    /** Number of rows returned. */
+    rowCount: number;
+    /** Effective row cap applied. */
+    limit: number;
+    /** True when rows were truncated to the cap. */
+    truncated: boolean;
+    /** Rejection reason when `ok` is false (prefixed `unsupported: …`). */
+    unsupported?: string;
+  };
 }
 
 // ─── Search & Embeddings ──────────────────────────────────────────────────────

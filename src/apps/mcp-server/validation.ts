@@ -359,6 +359,29 @@ export function validateToolParams(
       break;
     }
 
+    case "query_graph": {
+      if (!params.cypher || typeof params.cypher !== "string" || params.cypher.trim() === "") {
+        throw new MCPValidationError(
+          "query_graph requires a non-empty 'cypher' string parameter",
+          "MISSING_PARAMETER",
+          { tool: toolName, missing: "cypher" },
+        );
+      }
+      if (params.limit !== undefined) {
+        if (typeof params.limit !== "number" || params.limit <= 0) {
+          throw new MCPValidationError(
+            "query_graph 'limit' must be a positive number",
+            "INVALID_PARAMETER_TYPE",
+            { tool: toolName, parameter: "limit", expected: "positive number" },
+          );
+        }
+      }
+      // NOTE: read-only / write-rejection enforcement lives in the querying fn
+      // (query-graph.ts) so the guarded path runs even if a caller bypasses this
+      // validator. This case only checks param shape.
+      break;
+    }
+
     default:
       throw new MCPValidationError(
         `Unknown tool: ${toolName}`,

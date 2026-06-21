@@ -7,7 +7,7 @@ Model Context Protocol (MCP) server implementation for the Code Graph Analyzer.
 This module provides MCP integration for AI editors (Kiro, Claude, Cursor, Windsurf, Antigravity) to query the code knowledge graph. It implements:
 
 - **Protocol Handling**: Request validation, error responses, connection state management
-- **Tool Registration**: 11 read-only MCP tools for querying the knowledge graph (including the `verify_claim` grounding / anti-hallucination tool)
+- **Tool Registration**: 12 read-only MCP tools for querying the knowledge graph (including the `verify_claim` grounding / anti-hallucination tool and the guarded `query_graph` Cypher tool)
 - **Prompt Registration**: Pre-defined prompts for common workflows
 - **Authentication**: Token-based authentication for secure connections
 
@@ -47,7 +47,7 @@ Implements requirements:
 
 ## MCP Tools
 
-**11 read-only tools** — none mutate your code or the graph. Every response carries a mandatory human-readable `summary` (see [Response Format](#response-format)).
+**12 read-only tools** — none mutate your code or the graph. Every response carries a mandatory human-readable `summary` (see [Response Format](#response-format)).
 
 ### Context & search
 
@@ -167,6 +167,21 @@ Claim kinds (discriminated by `kind`):
 { "method": "verify_claim", "params": { "kind": "edge", "from": "OrderService", "to": "PaymentGateway", "relation": "calls" } }
 ```
 
+### Ad-hoc graph queries
+
+#### `query_graph`
+
+Run a **guarded, read-only** Cypher query against the knowledge graph for questions the canned tools don't cover. **Strictly read-only:** a single `MATCH`/`OPTIONAL MATCH`/`WITH`/`UNWIND`/`RETURN` statement only — any mutation/DDL/procedure (`CREATE`/`MERGE`/`SET`/`DELETE`/`DETACH`/`REMOVE`/`DROP`/`ALTER`/`CALL`/`LOAD`/`COPY`/…) or a second statement is **rejected before execution** (keywords are matched as whole words after string-literals and comments are stripped). Results are **row-capped** (default 100, hard max 200) and time-bounded; the persisted node/edge-label prefix is stripped from results. Write labels **bare** (`:Symbol`, `[:CALLS]`) — the schema prefix is added/stripped automatically. Node labels: `Symbol`, `Cluster`, `Process`, `Metadata`, `ExternalDependency`; edge types: `CALLS`, `IMPORTS`, `INHERITS`, `IMPLEMENTS`, `CONTAINS`, `HAS_STEP`, `REFERENCES`, `DEFINES`, `DEPENDS_ON`, `OVERRIDES`, `METHODIMPLEMENTS`.
+
+- `cypher` (required) — a single read-only Cypher statement (bare labels)
+- `limit` (optional) — max rows (default 100, hard max 200)
+
+```json
+{ "method": "query_graph", "params": { "cypher": "MATCH (s:Symbol) WHERE NOT (s)<-[:CALLS]-() RETURN s.name", "limit": 50 } }
+```
+
+Rows are returned in the additive `queryGraph` block (`ok` / `rows[]` / `rowCount` / `limit` / `truncated`; `unsupported` carries the rejection reason when `ok` is false).
+
 ## Response Format
 
 All tools return `MCPToolResponse` with the following structure:
@@ -212,6 +227,7 @@ Some tools attach **additive, optional** fields to this base shape (absent for e
 | per-symbol `nodeRole` / `entryEdge` / `hopDistance` | `impact_analysis` |
 | per-symbol `cyclomatic` / `cognitive` / `maxLoopDepth` | `find_hotspots` |
 | `truncationReason` / `estimatedTokens` | `get_symbol_context` (with a `tokenBudget`) |
+| `queryGraph` (ok / rows[] / rowCount / limit / truncated / unsupported) | `query_graph` |
 
 ## Authentication
 

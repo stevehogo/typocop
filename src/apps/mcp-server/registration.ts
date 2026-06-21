@@ -284,6 +284,26 @@ const TOOL_DEFINITIONS = [
       required: ["kind"],
     },
   },
+  {
+    name: "query_graph",
+    description:
+      "Run a GUARDED, READ-ONLY Cypher query against the code knowledge graph for questions the canned tools don't cover (e.g. `MATCH (s:Symbol) WHERE NOT (s)<-[:CALLS]-() RETURN s.name`). Write labels BARE (`:Symbol`, `[:CALLS]`) — the schema prefix is added/stripped automatically. STRICTLY READ-ONLY: a single MATCH/OPTIONAL MATCH/WITH/UNWIND/RETURN statement only; any mutation/DDL/procedure (CREATE/MERGE/SET/DELETE/DETACH/REMOVE/DROP/ALTER/CALL/LOAD/COPY/…) or a second statement is rejected before execution. Results are row-capped (default 100, max 200) and time-bounded. Node labels are: Symbol, Cluster, Process, Metadata, ExternalDependency; edge types: CALLS, IMPORTS, INHERITS, IMPLEMENTS, CONTAINS, HAS_STEP, REFERENCES, DEFINES, DEPENDS_ON, OVERRIDES, METHODIMPLEMENTS.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        cypher: {
+          type: "string",
+          description:
+            "A single read-only Cypher statement using BARE labels/edge-types (no schema prefix). Must start with MATCH/OPTIONAL MATCH/WITH/UNWIND/RETURN.",
+        },
+        limit: {
+          type: "number",
+          description: "Max rows to return (default 100, hard max 200).",
+        },
+      },
+      required: ["cypher"],
+    },
+  },
 ];
 
 /**
