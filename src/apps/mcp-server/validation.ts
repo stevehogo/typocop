@@ -283,15 +283,13 @@ export function validateToolParams(
     }
 
     case "shape_check":
-      // No required params (v1 checks the whole graph; no options).
-      break;
-
-    case "api_impact":
-      if (!params.route || typeof params.route !== "string") {
+      // `route` is optional: omitted → graph-wide drift; provided → that
+      // route's drift + blast radius (the former api_impact).
+      if (params.route !== undefined && typeof params.route !== "string") {
         throw new MCPValidationError(
-          "api_impact requires a 'route' parameter (route symbol name)",
-          "MISSING_PARAMETER",
-          { tool: toolName, missing: "route" },
+          "shape_check 'route' must be a string",
+          "INVALID_PARAMETER_TYPE",
+          { tool: toolName, parameter: "route", expected: "string" },
         );
       }
       break;

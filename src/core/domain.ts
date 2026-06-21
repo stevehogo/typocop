@@ -252,7 +252,7 @@ export interface MCPToolResponse {
     cognitive?: number;
     /** Deepest loop nesting of this symbol (find_hotspots only). */
     maxLoopDepth?: number;
-    // ── E3 contract drift (ADDITIVE; only populated by shape_check/api_impact) ─
+    // ── E3 contract drift (ADDITIVE; only populated by shape_check) ──────────
     /** Route response keys (route symbols, shape_check only). */
     responseKeys?: readonly string[];
     /** Consumer-read keys (consumer symbols, shape_check only). */
@@ -329,8 +329,8 @@ export interface MCPToolResponse {
       confidence: "low";
     };
   };
-  // ── E3 API contract drift (ADDITIVE; only populated by `shape_check` /
-  //    `api_impact`). Absent for all other tools → wire contract unchanged. ───
+  // ── E3 API contract drift (ADDITIVE; only populated by `shape_check`).
+  //    Absent for all other tools → wire contract unchanged. ─────────────────
   /**
    * Result of pairing route response shapes against consumer key reads (E3).
    * Each mismatch is a key a consumer reads that no matching route returns.

@@ -138,6 +138,21 @@ describe("validateToolParams", () => {
     });
   });
 
+  describe("shape_check", () => {
+    it("accepts no params (graph-wide) and an optional string route", () => {
+      expect(() => validateToolParams("shape_check", {})).not.toThrow();
+      expect(() => validateToolParams("shape_check", { route: "GET /users" })).not.toThrow();
+    });
+
+    it("throws for a non-string route", () => {
+      expect(() => validateToolParams("shape_check", { route: 5 })).toThrow(MCPValidationError);
+    });
+
+    it("no longer accepts api_impact (merged into shape_check)", () => {
+      expect(() => validateToolParams("api_impact", { route: "GET /users" })).toThrow(MCPValidationError);
+    });
+  });
+
   describe("trace", () => {
     it("accepts valid params", () => {
       expect(() => validateToolParams("trace", { fromSymbol: "a", toSymbol: "b" })).not.toThrow();

@@ -157,6 +157,10 @@ describe("executeTool", () => {
     it("no longer exposes find_dependents (merged into impact_analysis)", async () => {
       await expect(executeTool("find_dependents", { symbolName: "x" }, adapter)).rejects.toThrow(/Unknown tool/);
     });
+
+    it("no longer exposes api_impact (merged into shape_check route mode)", async () => {
+      await expect(executeTool("api_impact", { route: "x" }, adapter)).rejects.toThrow(/Unknown tool/);
+    });
   });
 
   describe("adapter method calls", () => {
