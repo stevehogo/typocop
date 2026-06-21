@@ -8,7 +8,7 @@
 > MCP server (read path), with an optional gRPC connection server for
 > remote/shared access.
 >
-> For the per-module spec and the old→new migration map, see
+> For the per-module spec, see
 > [`docs/refactoring/TARGET-ARCHITECTURE.md`](refactoring/TARGET-ARCHITECTURE.md).
 
 ---
@@ -100,7 +100,6 @@ sibling-crosser. Run `pnpm depcruise src` to verify.
 
 ## 4. Storage — single embedded LadybugDB (Kùzu)
 
-The previous two-database split (Neo4j graph + PostgreSQL/pgvector) is **gone**.
 A single embedded **LadybugDB (Kùzu-backed)** engine holds both the graph and the
 vectors (`src/infrastructure/persistence/`):
 
@@ -128,7 +127,7 @@ per-file ordinal), so a symbol moving within its file keeps its identity.
 - **Ollama** — local embedding service (e.g. 2560-dim models).
 - **none** — semantic search disabled (faster indexing; `smart_search` degrades gracefully).
 
-Embedding dimensionality is **variable** (provider-dependent), not a fixed 1536.
+Embedding dimensionality is **variable** (provider-dependent).
 
 ## 5. Write path — the 6-phase indexing pipeline
 
@@ -211,8 +210,8 @@ surface over the same query layer.
 
 - **Five-layer dependency inversion** — adapters behind `core/ports` interfaces;
   enforced by dependency-cruiser, keeping the domain pure and swappable.
-- **One embedded store** — LadybugDB for graph *and* vectors removes the
-  Neo4j+pgvector operational split and keeps everything in a single file.
+- **One embedded store** — LadybugDB holds graph *and* vectors in a single
+  file (no separate graph/vector services to operate).
 - **Stable `logicalKey` identity** — survives intra-file moves (A1 keystone).
 - **Honest-uncertainty (grounding)** — `verify_claim` never converts a
   graph-unprovable relationship (dynamic dispatch / callbacks / DI) into a false
@@ -234,6 +233,6 @@ surface over the same query layer.
 
 ## 10. Related documentation
 
-- [`docs/refactoring/TARGET-ARCHITECTURE.md`](refactoring/TARGET-ARCHITECTURE.md) — per-module spec + old→new file map (current & target).
+- [`docs/refactoring/TARGET-ARCHITECTURE.md`](refactoring/TARGET-ARCHITECTURE.md) — per-module spec and file map.
 - [`src/apps/mcp-server/README.md`](../src/apps/mcp-server/README.md) — MCP tool reference.
 - [`README.md`](../README.md) — project overview, setup, and usage.
