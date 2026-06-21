@@ -214,8 +214,11 @@ async function executeImpactAnalysisTool(
   const symbolName = params.symbolName as string;
   const changeType = (params.changeType as string) || "modify";
   const maxResults = (params.maxResults as number) || DEFAULT_MAX_RESULTS;
+  // Optional depth bound for the transitive-dependent traversal (folded in from
+  // the former find_dependents; clamped to MAX_TRAVERSAL_DEPTH inside the engine).
+  const maxDepth = typeof params.maxDepth === "number" ? params.maxDepth : undefined;
   const graphAdapter = adapter.getGraphAdapter();
-  const result = await executeImpactAnalysis(symbolName, maxResults, graphAdapter);
+  const result = await executeImpactAnalysis(symbolName, maxResults, graphAdapter, maxDepth);
 
   const resolution = result.resolution;
 

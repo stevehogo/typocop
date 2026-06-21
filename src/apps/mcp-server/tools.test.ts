@@ -101,6 +101,23 @@ describe("executeTool", () => {
       expect(result.summary).toContain("baz");
     });
 
+    it("threads maxDepth into the impact-analysis traversal (folded in from find_dependents)", async () => {
+      // Resolve 'baz' on the first (exact-match) query so the dependent traversal runs.
+      vi.mocked(adapter._graph.runCypher).mockResolvedValueOnce([{
+        n: {
+          labels: ["Symbol"],
+          properties: {
+            id: "baz", name: "baz", kind: "function",
+            filePath: "/repo/baz.ts", startLine: "1", startColumn: "0",
+            endLine: "5", endColumn: "0", visibility: "public",
+          },
+        },
+      }] as never);
+      await executeTool("impact_analysis", { symbolName: "baz", maxDepth: 2 }, adapter);
+      const queries = vi.mocked(adapter._graph.runCypher).mock.calls.map((c) => c[0] as string);
+      expect(queries.some((q) => q.includes("CALLS*1..2"))).toBe(true);
+    });
+
     it("uses external package summary for dependency impact analysis", async () => {
       vi.mocked(adapter._graph.runCypher)
         .mockResolvedValueOnce([] as never)

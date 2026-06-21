@@ -136,6 +136,8 @@ describe("validateToolParams", () => {
       expect(() => validateToolParams("impact_analysis", { symbolName: "test", changeType: "modify" })).not.toThrow();
       expect(() => validateToolParams("impact_analysis", { symbolName: "test", changeType: "delete" })).not.toThrow();
       expect(() => validateToolParams("impact_analysis", { symbolName: "test", changeType: "rename" })).not.toThrow();
+      // maxDepth folded in from the former find_dependents.
+      expect(() => validateToolParams("impact_analysis", { symbolName: "test", maxDepth: 5 })).not.toThrow();
     });
 
     it("throws for missing symbolName", () => {
@@ -144,6 +146,10 @@ describe("validateToolParams", () => {
 
     it("throws for invalid changeType", () => {
       expect(() => validateToolParams("impact_analysis", { symbolName: "test", changeType: "invalid" })).toThrow(MCPValidationError);
+    });
+
+    it("throws for non-number maxDepth", () => {
+      expect(() => validateToolParams("impact_analysis", { symbolName: "test", maxDepth: "5" })).toThrow(MCPValidationError);
     });
   });
 

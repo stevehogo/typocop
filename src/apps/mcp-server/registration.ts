@@ -97,7 +97,8 @@ const TOOL_DEFINITIONS = [
   },
   {
     name: "impact_analysis",
-    description: "Analyze blast radius: affected symbols, flows, and risk level",
+    description:
+      "Blast-radius analysis for a symbol: all direct AND transitive dependents (callers), affected business flows, and a risk level (CRITICAL for auth/payment/checkout/security/session/token code), with each affected node annotated by its structural role, entry edge, and hop distance. Answers both 'who depends on / calls X?' and 'what breaks if I change X?'.",
     inputSchema: {
       type: "object",
       properties: {
@@ -108,7 +109,11 @@ const TOOL_DEFINITIONS = [
         changeType: {
           type: "string",
           enum: ["modify", "delete", "rename"],
-          description: "Type of change (default: modify)",
+          description: "Type of change framing for the summary (default: modify)",
+        },
+        maxDepth: {
+          type: "number",
+          description: "Maximum traversal depth for transitive dependents (default: unlimited, capped at 20)",
         },
         maxResults: {
           type: "number",

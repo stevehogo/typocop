@@ -130,6 +130,13 @@ export function validateToolParams(
           );
         }
       }
+      if (params.maxDepth !== undefined && typeof params.maxDepth !== "number") {
+        throw new MCPValidationError(
+          "impact_analysis 'maxDepth' must be a number",
+          "INVALID_PARAMETER_TYPE",
+          { tool: toolName, parameter: "maxDepth", expected: "number" },
+        );
+      }
       break;
 
     case "smart_search":
