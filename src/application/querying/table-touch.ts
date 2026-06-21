@@ -13,13 +13,15 @@
  * Distinct from `impact_analysis` / `find_dependents` (keyed on CALLS) — this is
  * keyed on the DATA edges, answering a different question.
  *
- * Strictly READ-ONLY. DEGRADE-TO-EMPTY: the REL tables always exist
- * (`initializeSchema` creates them unconditionally), so when the data-touch pass
- * did not run (`TYPOCOP_DATA_TOUCH` off) the query returns ZERO rows — never a
- * missing-table error. The caller treats empty as a clear empty result.
+ * Strictly READ-ONLY. DEGRADE-TO-EMPTY: when the data-touch pass did not run
+ * (`TYPOCOP_DATA_TOUCH` off) the query returns ZERO rows; and when the DB's
+ * schema predates the data-touch REL tables (so the table is absent, not just
+ * empty) `runCypherTolerant` turns the binder "Table does not exist" error into
+ * an empty result too. Either way the caller gets a clear empty result, never an error.
  */
 import type { GraphAdapter } from "../../core/ports/persistence.js";
 import type { Symbol } from "../../core/domain.js";
+import { runCypherTolerant } from "./graph-helpers.js";
 import { graphNodeToSymbol, rowToNode } from "./graph-helpers.js";
 import type { CypherNodeRow } from "./graph-helpers.js";
 
@@ -88,12 +90,13 @@ export async function findTableTouchers(
   const edgeType = direction === "reads" ? "READS_FROM_DB" : "WRITES_TO_DB";
   // NOTE: the bind param is named `tableName`, NOT `table` — `$table` collides
   // with the reserved TABLE keyword in this engine's parser and is rejected.
-  const rows = await graph.runCypher<TableTouchRow>(
+  const rows = await runCypherTolerant<TableTouchRow>(
+    graph,
     `MATCH (s:Symbol)-[e:${edgeType}]->(m:Symbol)
      WHERE m.id = $modelId OR toLower(m.name) = $tableName
      RETURN DISTINCT s AS n, e.confidence AS confidence, e.reason AS reason`,
     { modelId, tableName: lowered },
-  ) ?? [];
+  );
 
   const touchers: TableToucher[] = [];
   for (const row of rows) {

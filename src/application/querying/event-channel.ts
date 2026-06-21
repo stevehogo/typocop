@@ -11,15 +11,16 @@
  * after the extracted topic, but may key it by `<verb>_from_<src>` when the topic
  * is unknown — name match catches the common accurate case).
  *
- * Strictly READ-ONLY. DEGRADE-TO-EMPTY: the REL tables always exist
- * (`initializeSchema` creates them unconditionally), AND the event SUB-FLAG
+ * Strictly READ-ONLY. DEGRADE-TO-EMPTY: the event SUB-FLAG
  * (`TYPOCOP_DATA_TOUCH_EVENTS`) defaults OFF even when `TYPOCOP_DATA_TOUCH` is on,
- * so these queries can be empty on a fully-indexed graph. Empty rows → a clear
- * empty result, never an error.
+ * so these queries can be empty on a fully-indexed graph; and when the DB's schema
+ * predates the event REL tables (table absent, not just empty), `runCypherTolerant`
+ * turns the binder "Table does not exist" error into an empty result. Either way →
+ * a clear empty result, never an error.
  */
 import type { GraphAdapter } from "../../core/ports/persistence.js";
 import type { Symbol } from "../../core/domain.js";
-import { graphNodeToSymbol, rowToNode } from "./graph-helpers.js";
+import { graphNodeToSymbol, rowToNode, runCypherTolerant } from "./graph-helpers.js";
 import type { CypherNodeRow } from "./graph-helpers.js";
 
 /** Which side of the event channel to enumerate. */
@@ -94,7 +95,7 @@ export async function findEventParticipants(
        WHERE c.id = $channelId OR toLower(c.name) = $topic
        RETURN DISTINCT s AS n, e.confidence AS confidence, e.reason AS reason`;
 
-  const rows = await graph.runCypher<EventRow>(cypher, { channelId, topic: loweredTopic }) ?? [];
+  const rows = await runCypherTolerant<EventRow>(graph, cypher, { channelId, topic: loweredTopic });
 
   const participants: EventParticipant[] = [];
   for (const row of rows) {

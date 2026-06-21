@@ -3,9 +3,53 @@
  * impact-analysis.ts, and data-flow-trace.ts to eliminate duplication.
  * Requirements: 5.5
  */
-import type { GraphNode } from "../../core/ports/persistence.js";
+import type { GraphAdapter, GraphNode } from "../../core/ports/persistence.js";
 import { prop } from "../../core/ports/persistence.js";
 import type { Symbol, SymbolKind, Visibility, EntryPointKind } from "../../core/domain.js";
+
+/**
+ * True when an error is a Kùzu "Table <X> does not exist" binder error — i.e.
+ * the queried REL/NODE table is absent from this DB's schema (e.g. a graph
+ * indexed before the data-touch tables existed, or never re-initialized).
+ * The message arrives wrapped differently across the local vs remote/gRPC
+ * adapters, so match on the stable substrings rather than an exact shape.
+ */
+function isMissingTableError(error: unknown): boolean {
+  const msg =
+    error instanceof Error
+      ? error.message
+      : typeof error === "string"
+        ? error
+        : (() => {
+            try {
+              return JSON.stringify(error);
+            } catch {
+              return String(error);
+            }
+          })();
+  return /does not exist/i.test(msg) && /\btable\b/i.test(msg);
+}
+
+/**
+ * Run a read-only Cypher query, tolerating a MISSING table as an empty result.
+ * For the data-touch read tools (route_map / what_reads_table / event tools) a
+ * DB whose schema predates the data-touch REL tables throws a "Table X does not
+ * exist" binder error instead of returning zero rows — but semantically that is
+ * just "no data-touch data indexed", so it degrades to `[]` (matching each
+ * tool's documented degrade-to-empty contract). Any OTHER error still propagates.
+ */
+export async function runCypherTolerant<T>(
+  graph: GraphAdapter,
+  cypher: string,
+  params: Record<string, unknown> = {},
+): Promise<T[]> {
+  try {
+    return (await graph.runCypher<T>(cypher, params)) ?? [];
+  } catch (error) {
+    if (isMissingTableError(error)) return [];
+    throw error;
+  }
+}
 
 /** Shape returned by Cypher queries that project a single `n` node. */
 export interface CypherNodeRow {

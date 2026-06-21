@@ -9,13 +9,14 @@
  * `HANDLES_ROUTE` edge (not the `apiendpoint:` id prefix), per the route detector
  * contract (`routes.ts ensureEndpoint`).
  *
- * Strictly READ-ONLY. DEGRADE-TO-EMPTY: the `HANDLES_ROUTE` REL table always
- * exists (created unconditionally by `initializeSchema`), so when the data-touch
- * pass did not run at index time (`TYPOCOP_DATA_TOUCH` off) the query simply
- * returns ZERO rows — never a missing-table error. The caller treats an empty
- * set as a clear empty result, not a failure.
+ * Strictly READ-ONLY. DEGRADE-TO-EMPTY: when the data-touch pass did not run at
+ * index time (`TYPOCOP_DATA_TOUCH` off) the query returns ZERO rows; and when the
+ * DB's schema predates the `HANDLES_ROUTE` table (absent, not just empty),
+ * `runCypherTolerant` turns the binder "Table does not exist" error into an empty
+ * result. Either way the caller gets a clear empty result, never a failure.
  */
 import type { GraphAdapter } from "../../core/ports/persistence.js";
+import { runCypherTolerant } from "./graph-helpers.js";
 
 /** One enumerated route: the endpoint + the handler that serves it. */
 export interface RouteEntry {
@@ -76,13 +77,15 @@ export async function findRoutes(
   const maxResults = options.maxResults && options.maxResults > 0 ? options.maxResults : DEFAULT_MAX_RESULTS;
 
   // Bare labels/types — the adapter prefixes `:Symbol` / `[:HANDLES_ROUTE]`.
-  const rows = await graph.runCypher<RouteRow>(
+  // runCypherTolerant degrades a missing HANDLES_ROUTE table (a DB whose schema
+  // predates the data-touch tables) to an empty result, per the tool contract.
+  const rows = await runCypherTolerant<RouteRow>(
+    graph,
     `MATCH (h:Symbol)-[e:HANDLES_ROUTE]->(ep:Symbol)
      RETURN ep.id AS endpointId, ep.name AS endpointName,
             h.id AS handlerId, h.name AS handlerName, h.filePath AS handlerFilePath,
             e.confidence AS confidence, e.reason AS reason`,
-    {},
-  ) ?? [];
+  );
 
   const routes: RouteEntry[] = [];
   for (const row of rows) {
