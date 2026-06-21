@@ -351,6 +351,28 @@ export interface MCPToolResponse {
       confidence: "high" | "low";
     }>;
   };
+  // ── Grounding API verify_claim (ADDITIVE; only populated by `verify_claim`).
+  //    Absent for all other tools → wire contract unchanged. ──────────────────
+  /**
+   * Verdict for a structured claim about the codebase (anti-hallucination).
+   * Honest-uncertainty: a relationship the graph cannot prove (dynamic dispatch,
+   * callbacks, DI) is reported `uncertain`, never a false confirm/refute. On a
+   * refute, `trueAnswer` carries the actual answer (e.g. the real caller set).
+   */
+  verdict?: {
+    /** Which claim class was checked. */
+    claimKind: "usage" | "edge" | "reachability";
+    verdict: "confirmed" | "refuted" | "uncertain";
+    /** Confidence in the verdict, [0.0, 1.0]. */
+    confidence: number;
+    reason: string;
+    /** Supporting facts (caller names, edge types, hop chain, suggestions…). */
+    evidence: string[];
+    /** A concrete counterexample to the claim (only on a refute). */
+    counterexample?: string;
+    /** The actual answer surfaced on a refute (OQ3): caller set, hop path, … */
+    trueAnswer?: string;
+  };
 }
 
 // ─── Search & Embeddings ──────────────────────────────────────────────────────

@@ -272,6 +272,45 @@ const TOOL_DEFINITIONS = [
       required: ["route"],
     },
   },
+  {
+    name: "verify_claim",
+    description:
+      "Verify a structured belief about the codebase and get back verdict (confirmed/refuted/uncertain) + confidence + evidence — so you stop acting on false assumptions. Claim kinds: 'usage' (needs 'symbol'): 'X has no callers / is dead'. 'edge' (needs 'from','to','relation' ∈ calls|imports|inherits|implements|references): 'X {relation} Y'. 'reachability' (needs 'from','to','polarity' ∈ reachable|independent): 'X can reach Y' / 'changing X can't affect Y'. Honest-uncertainty: relationships the graph can't prove (dynamic dispatch/callbacks/DI) return 'uncertain', never a false confirm/refute; a refute includes the true answer. Read-only; never throws.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        kind: {
+          type: "string",
+          enum: ["usage", "edge", "reachability"],
+          description: "Claim class: 'usage' | 'edge' | 'reachability'.",
+        },
+        symbol: {
+          type: "string",
+          description: "Subject symbol for a 'usage' claim (name or id).",
+        },
+        from: {
+          type: "string",
+          description: "Source symbol for an 'edge' or 'reachability' claim (name or id).",
+        },
+        to: {
+          type: "string",
+          description: "Target symbol for an 'edge' or 'reachability' claim (name or id).",
+        },
+        relation: {
+          type: "string",
+          enum: ["calls", "imports", "inherits", "implements", "references"],
+          description: "Edge type for an 'edge' claim.",
+        },
+        polarity: {
+          type: "string",
+          enum: ["reachable", "independent"],
+          description:
+            "For a 'reachability' claim: 'reachable' (X can reach Y) or 'independent' (changing X can't affect Y).",
+        },
+      },
+      required: ["kind"],
+    },
+  },
 ];
 
 /**

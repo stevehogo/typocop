@@ -306,6 +306,71 @@ export function validateToolParams(
       }
       break;
 
+    case "verify_claim": {
+      const validKinds = ["usage", "edge", "reachability"];
+      if (!params.kind || typeof params.kind !== "string" || !validKinds.includes(params.kind)) {
+        throw new MCPValidationError(
+          `verify_claim 'kind' must be one of: ${validKinds.join(", ")}`,
+          "INVALID_PARAMETER_VALUE",
+          { tool: toolName, parameter: "kind", validValues: validKinds },
+        );
+      }
+      if (params.kind === "usage") {
+        if (!params.symbol || typeof params.symbol !== "string") {
+          throw new MCPValidationError(
+            "verify_claim usage claim requires a 'symbol' parameter",
+            "MISSING_PARAMETER",
+            { tool: toolName, missing: "symbol" },
+          );
+        }
+      } else {
+        // edge + reachability both require 'from' and 'to'.
+        if (!params.from || typeof params.from !== "string") {
+          throw new MCPValidationError(
+            `verify_claim ${params.kind} claim requires a 'from' parameter`,
+            "MISSING_PARAMETER",
+            { tool: toolName, missing: "from" },
+          );
+        }
+        if (!params.to || typeof params.to !== "string") {
+          throw new MCPValidationError(
+            `verify_claim ${params.kind} claim requires a 'to' parameter`,
+            "MISSING_PARAMETER",
+            { tool: toolName, missing: "to" },
+          );
+        }
+        if (params.kind === "edge") {
+          const validRelations = ["calls", "imports", "inherits", "implements", "references"];
+          if (
+            !params.relation ||
+            typeof params.relation !== "string" ||
+            !validRelations.includes(params.relation)
+          ) {
+            throw new MCPValidationError(
+              `verify_claim edge claim 'relation' must be one of: ${validRelations.join(", ")}`,
+              "INVALID_PARAMETER_VALUE",
+              { tool: toolName, parameter: "relation", validValues: validRelations },
+            );
+          }
+        }
+        if (params.kind === "reachability") {
+          const validPolarities = ["reachable", "independent"];
+          if (
+            !params.polarity ||
+            typeof params.polarity !== "string" ||
+            !validPolarities.includes(params.polarity)
+          ) {
+            throw new MCPValidationError(
+              `verify_claim reachability claim 'polarity' must be one of: ${validPolarities.join(", ")}`,
+              "INVALID_PARAMETER_VALUE",
+              { tool: toolName, parameter: "polarity", validValues: validPolarities },
+            );
+          }
+        }
+      }
+      break;
+    }
+
     default:
       throw new MCPValidationError(
         `Unknown tool: ${toolName}`,
