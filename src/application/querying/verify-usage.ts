@@ -20,6 +20,11 @@ import { graphNodeToSymbol } from "./graph-helpers.js";
 import { isEntryPointName } from "../../platform/utils/entry-point-names.js";
 import { unresolvedAssessment, type ClaimAssessment } from "./verify-claim-types.js";
 
+/** Max caller names inlined into the human-readable reason/counterexample/trueAnswer. */
+const CALLER_PREVIEW = 10;
+/** Max caller names kept in the structured `evidence` array (bounds response size). */
+const EVIDENCE_CAP = 50;
+
 /** Mirror of dead-code.ts isExported — part of the public surface (no in-repo caller required). */
 function isExported(symbol: Symbol): boolean {
   return symbol.visibility === "public" || symbol.kind === "export";
@@ -56,14 +61,19 @@ export async function verifyUsage(symbol: string, graph: GraphAdapter): Promise<
 
   if (callers.length > 0) {
     const names = callers.map((c) => c.callerName);
+    // Cap the human-readable lists so a heavily-called symbol doesn't dump
+    // hundreds of names into every prose field; `evidence` keeps a bounded
+    // structured sample for the agent.
+    const preview = names.slice(0, CALLER_PREVIEW);
+    const more = names.length - preview.length;
+    const previewStr = preview.join(", ") + (more > 0 ? `, …and ${more} more` : "");
+    const plural = callers.length === 1 ? "" : "s";
     return {
       verdict: "refuted",
-      reason:
-        `'${sym.name}' is NOT dead: it has ${callers.length} in-repo caller` +
-        `${callers.length === 1 ? "" : "s"} via CALLS edges.`,
-      evidence: names,
-      counterexample: `Called by: ${names.join(", ")}.`,
-      trueAnswer: `'${sym.name}' is called by ${callers.length} symbol${callers.length === 1 ? "" : "s"}: ${names.join(", ")}.`,
+      reason: `'${sym.name}' is NOT dead: it has ${callers.length} in-repo caller${plural} via CALLS edges.`,
+      evidence: names.slice(0, EVIDENCE_CAP),
+      counterexample: `Called by: ${previewStr}.`,
+      trueAnswer: `'${sym.name}' is called by ${callers.length} symbol${plural}: ${previewStr}.`,
       basis: "presence",
       dynamicReachable: false,
     };

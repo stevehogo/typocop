@@ -26,7 +26,7 @@ function makeGraph(uncalled: FixtureNode[]): GraphAdapter {
     };
   }
   const runCypher = async <T,>(query: string): Promise<T[]> => {
-    if (query.includes("NOT EXISTS { (s)<-[:CALLS]-() }")) {
+    if (query.includes("NOT (s)<-[:CALLS]-()")) {
       return uncalled.map(nodeRow) as unknown as T[];
     }
     return [] as T[];

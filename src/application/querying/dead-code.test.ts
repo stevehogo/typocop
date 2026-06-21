@@ -3,7 +3,7 @@
  *
  * Uses a query-aware mock GraphAdapter that answers the single query shape
  * findDeadCode issues:
- *   MATCH (s:Symbol) WHERE NOT EXISTS { (s)<-[:CALLS]-() } RETURN s AS n
+ *   MATCH (s:Symbol) WHERE NOT (s)<-[:CALLS]-() RETURN s AS n
  *
  * The fixture supplies the set of UNCALLED symbol nodes (those with no incoming
  * CALLS edge); the mock returns them as `{ n: {...} }` rows.
@@ -42,7 +42,7 @@ function makeGraph(uncalled: FixtureNode[]): GraphAdapter {
   }
 
   const runCypher = async <T,>(query: string): Promise<T[]> => {
-    if (query.includes("NOT EXISTS { (s)<-[:CALLS]-() }")) {
+    if (query.includes("NOT (s)<-[:CALLS]-()")) {
       return uncalled.map(nodeRow) as unknown as T[];
     }
     return [] as T[];

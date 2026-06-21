@@ -72,7 +72,7 @@ async function expandNeighbours(
   const rows = await graph.runCypher<NeighbourRow>(
     `MATCH (n:Symbol)-[e:CALLS|CONTAINS]->(m:Symbol)
      WHERE n.id = $val
-     RETURN DISTINCT m.id AS neighbourId, type(e) AS edgeType`,
+     RETURN DISTINCT m.id AS neighbourId, label(e) AS edgeType`,
     { val: nodeId },
   ) ?? [];
   return rows.filter((r): r is NeighbourRow => Boolean(r?.neighbourId));

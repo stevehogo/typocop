@@ -420,7 +420,10 @@ export class LadybugGraphAdapter implements GraphAdapter {
       q = q.replace(re, `$1${this.prefix}$2`);
     }
     for (const relType of LadybugGraphAdapter.KNOWN_REL_TYPES) {
-      const re = new RegExp(`(:)(?!${this.prefix})(${relType})\\b`, "g");
+      // Match a rel type after `:` OR after `|` so multi-type alternations like
+      // `[:CALLS|CONTAINS]` prefix EVERY type, not just the first (the `|`-led
+      // ones were previously left bare → "Table CONTAINS does not exist").
+      const re = new RegExp(`([:|])(?!${this.prefix})(${relType})\\b`, "g");
       q = q.replace(re, `$1${this.prefix}$2`);
     }
     return q;
@@ -431,7 +434,13 @@ export class LadybugGraphAdapter implements GraphAdapter {
     params: Record<string, unknown> = {},
   ): Promise<T[]> {
     const prefixed = this.prefixQuery(query);
-    const rows = await this.execWithSchemaRetry(prefixed);
+    // When params are provided, bind them via the parameterized (prepare/execute)
+    // path; the previous implementation silently ignored them, so `WHERE x = $p`
+    // predicates never filtered and every parameterized read scanned the whole
+    // graph (mirrors the same fix already applied to runCypherWrite).
+    const rows = Object.keys(params).length > 0
+      ? await this.execWithParamsSchemaRetry(prefixed, params)
+      : await this.execWithSchemaRetry(prefixed);
     // Normalize NodeValue/RelValue objects in each row
     return rows.map((row) => {
       const normalized: Record<string, unknown> = {};

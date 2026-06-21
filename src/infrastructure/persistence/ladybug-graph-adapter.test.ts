@@ -452,13 +452,27 @@ describe("LadybugGraphAdapter", () => {
       expect(mockQuery).toHaveBeenCalledOnce();
     });
 
-    it("should pass query string to connection.query()", async () => {
+    it("binds params via prepare/execute when params are provided (gap fix)", async () => {
       const adapter = createAdapter();
-      await adapter.runCypher("MATCH (n) WHERE n.id = $id RETURN n", { id: "s1" });
+      await adapter.runCypher("MATCH (n:Symbol) WHERE n.id = $id RETURN n", { id: "s1" });
 
-      expect(mockQuery).toHaveBeenCalledWith(
-        "MATCH (n) WHERE n.id = $id RETURN n",
-      );
+      // Previously runCypher silently dropped params and used connection.query(),
+      // so `WHERE x = $p` never filtered. The parameterized path must be taken.
+      expect(mockPrepare).toHaveBeenCalledOnce();
+      expect(mockExecute).toHaveBeenCalledOnce();
+      expect(mockQuery).not.toHaveBeenCalled();
+      // Prefixing is still applied to the query text.
+      expect(mockPrepare.mock.calls[0][0]).toBe("MATCH (n:tpc_Symbol) WHERE n.id = $id RETURN n");
+      // Params are actually bound.
+      expect(mockExecute.mock.calls[0][1]).toEqual({ id: "s1" });
+    });
+
+    it("uses connection.query() (no prepare) when there are no params", async () => {
+      const adapter = createAdapter();
+      await adapter.runCypher("MATCH (n) RETURN n LIMIT 1");
+
+      expect(mockQuery).toHaveBeenCalledOnce();
+      expect(mockPrepare).not.toHaveBeenCalled();
     });
 
     it("should map records to objects (Req 2.6)", async () => {
@@ -481,6 +495,16 @@ describe("LadybugGraphAdapter", () => {
       const results = await adapter.runCypher("MATCH (n) RETURN n");
 
       expect(results).toEqual([]);
+    });
+
+    it("prefixes EVERY rel type in a multi-type alternation, not just the first", async () => {
+      const adapter = createAdapter();
+      await adapter.runCypher("MATCH (n:Symbol)-[e:CALLS|CONTAINS]->(m:Symbol) RETURN m");
+
+      // Both CALLS and CONTAINS (the `|`-led one) must be prefixed.
+      expect(mockQuery.mock.calls[0][0]).toBe(
+        "MATCH (n:tpc_Symbol)-[e:tpc_CALLS|tpc_CONTAINS]->(m:tpc_Symbol) RETURN m",
+      );
     });
   });
 

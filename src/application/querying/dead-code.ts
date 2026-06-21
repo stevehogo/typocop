@@ -67,9 +67,11 @@ export async function findDeadCode(
     : DEFAULT_MAX_RESULTS;
 
   // Symbols that are never the TARGET of a CALLS edge (no in-repo callers).
+  // NOTE: pattern-predicate `NOT (s)<-[:CALLS]-()` rather than the `EXISTS { }`
+  // subquery form — this backend's parser rejects the existential subquery block.
   const rows = await graph.runCypher<CypherNodeRow>(
     `MATCH (s:Symbol)
-     WHERE NOT EXISTS { (s)<-[:CALLS]-() }
+     WHERE NOT (s)<-[:CALLS]-()
      RETURN s AS n`,
     {},
   ) ?? [];

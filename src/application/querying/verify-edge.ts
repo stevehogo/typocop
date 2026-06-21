@@ -45,10 +45,12 @@ async function edgesBetween(
   fromId: string,
   toId: string,
 ): Promise<Set<RelationType>> {
+  // NOTE: `label(e)` (not `type(e)`) — this backend has no `type()` function and
+  // returns the (prefixed) relationship label, which edgeLabelToRelType strips.
   const rows = await graph.runCypher<{ edgeType: string }>(
     `MATCH (a:Symbol)-[e]->(b:Symbol)
      WHERE a.id = $from AND b.id = $to
-     RETURN DISTINCT type(e) AS edgeType`,
+     RETURN DISTINCT label(e) AS edgeType`,
     { from: fromId, to: toId },
   ) ?? [];
   return new Set(rows.filter((r) => r?.edgeType).map((r) => edgeLabelToRelType(r.edgeType)));

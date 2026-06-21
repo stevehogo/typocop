@@ -112,7 +112,7 @@ async function findDirectCallers(
   const rows = await graph.runCypher<CypherDirectCallerRow>(
     `MATCH (n:Symbol)-[e]->(t:Symbol)
      WHERE t.id = $val OR t.name = $val
-     RETURN DISTINCT n.id AS callerId, type(e) AS edgeType`,
+     RETURN DISTINCT n.id AS callerId, label(e) AS edgeType`,
     { val: symbolId },
   ) ?? [];
   const map = new Map<string, RelationType>();
