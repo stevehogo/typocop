@@ -39,7 +39,8 @@ export type CLICommand =
   | { type: "watch"; config: CLIConfig }
   | { type: "augment"; pattern: string }
   | { type: "setup"; settingsPath?: string }
-  | { type: "stop-server" };
+  | { type: "stop-server" }
+  | { type: "check-recursion"; sourcePath: string; json: boolean };
 
 const supportedLanguages: Language[] = [
   "php", "typescript", "javascript", "python", "java",
@@ -195,6 +196,18 @@ export function parseArgs(rawArgs: string[]): CLICommand {
     .description("Gracefully stop the running LadybugDB connection server (the one this prefix's discovery file points at)")
     .action(() => {
       parsedCommand = { type: "stop-server" };
+    });
+
+  program
+    .command("check-recursion")
+    .description("Report self-shadowing recursion (this.X()/$this->X() that recurses into itself instead of super / a different X). Exits 1 if any found.")
+    .requiredOption("-p, --path <path>", "Source directory path to scan")
+    .option("--json", "Emit findings as JSON", false)
+    .action((options) => {
+      if (!fs.existsSync(options.path)) {
+        throw new CLIValidationError(`Source path does not exist: ${options.path}`);
+      }
+      parsedCommand = { type: "check-recursion", sourcePath: options.path, json: options.json };
     });
 
   program

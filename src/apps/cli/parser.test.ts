@@ -33,6 +33,25 @@ describe("parseArgs", () => {
     expect(command).toEqual({ type: "stop-server" });
   });
 
+  it("parses the check-recursion command (default json false)", () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    const command = parseArgs(["node", "typocop", "check-recursion", "-p", "./src"]);
+    expect(command).toEqual({ type: "check-recursion", sourcePath: "./src", json: false });
+  });
+
+  it("parses the check-recursion command with --json", () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    const command = parseArgs(["node", "typocop", "check-recursion", "-p", "./src", "--json"]);
+    expect(command).toEqual({ type: "check-recursion", sourcePath: "./src", json: true });
+  });
+
+  it("rejects check-recursion when the path does not exist", () => {
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+    expect(() => parseArgs(["node", "typocop", "check-recursion", "-p", "./nope"])).toThrow(
+      "Source path does not exist: ./nope",
+    );
+  });
+
   it("auto-detects language when --lang is omitted", () => {
     vi.mocked(fs.existsSync).mockReturnValue(true);
     vi.mocked(languageModule.detectDirectoryLanguage).mockReturnValue("python");

@@ -19,6 +19,7 @@ import { FileEmbeddingCache } from "../../infrastructure/cache/embedding-cache.j
 import { executeObsidianExport } from "../../application/export-render/index.js";
 import { createFileWatcher, type FileWatcher } from "../../infrastructure/watch/file-watcher.js";
 import { augment } from "../../application/querying/augment.js";
+import { scanRecursionSuspects, formatRecursionReport } from "../../application/querying/recursion-report.js";
 import { stopConnectionServer } from "../../infrastructure/remote-transport/autostart-runtime.js";
 import { mergeTypocopHook, type ClaudeSettings } from "./setup.js";
 import { isTypeEnvEnabled, isLspTypesEnabled, isDataTouchEnabled, isDataTouchEventsEnabled, isDataTouchSingleModelFallbackEnabled, isCallRefuseAmbiguousEnabled, isFrameworkExtractionEnabled, isHeritageDisambiguationEnabled } from "../../platform/utils/limits.js";
@@ -619,6 +620,13 @@ export const TYPOCOP_AUGMENT_MARKER = "[typocop]";
  * any failure as "no context"; this function therefore swallows EVERY error so
  * the CLI exits 0 even when the DB is unavailable, locked, or empty.
  */
+/** `check-recursion` — report self-shadowing recursion (no DB). Returns exit code 0/1. */
+export async function executeCheckRecursion(rootPath: string, json: boolean): Promise<number> {
+  const findings = await scanRecursionSuspects(rootPath);
+  console.log(formatRecursionReport(findings, { json }));
+  return findings.length > 0 ? 1 : 0;
+}
+
 export async function executeAugment(pattern: string): Promise<void> {
   if (!pattern || pattern.trim().length < 3) return;
   let adapter: DatabaseAdapter | undefined;
@@ -763,6 +771,11 @@ export async function executeCLI(command: CLICommand): Promise<void> {
     case "augment": {
       // D1: emit graph context to stderr; never throws (always exit 0).
       await executeAugment(command.pattern);
+      break;
+    }
+
+    case "check-recursion": {
+      process.exitCode = await executeCheckRecursion(command.sourcePath, command.json);
       break;
     }
 
