@@ -43,12 +43,18 @@ function ensureChannel(
  * Heuristic event-channel detection. Two passes: subscribe decorators on
  * method/function signatures, then emit/publish `calls` edges. Mutates `sink`.
  * Caller MUST gate this behind the `events` sub-flag (default OFF).
+ *
+ * @param alreadySubscribed defer set seeded by the Wave 6 structured-record pass
+ *   (`processExtractedEvents`). Any subscriber Symbol id in it is SKIPPED by the
+ *   decorator pass below so a structured `subscribesTo` is never double-emitted by
+ *   the heuristic. Defaults to an empty set ⇒ byte-identical pre-Wave-6 behaviour.
  */
 export function detectEventChannels(
   symbols: readonly Symbol[],
   symbolsById: ReadonlyMap<string, Symbol>,
   relationships: readonly Relationship[],
   sink: DataTouchSink,
+  alreadySubscribed: ReadonlySet<string> = new Set(),
 ): void {
   const channelsByKey = new Map<string, string>();
 
@@ -56,6 +62,7 @@ export function detectEventChannels(
   for (const sym of symbols) {
     if (sym.kind !== "method" && sym.kind !== "function") continue;
     if (sym.synthetic) continue;
+    if (alreadySubscribed.has(sym.id)) continue; // defer to structured extractor.
     const desc = sym.signature ?? "";
 
     for (const pattern of EVENT_SUBSCRIBE_PATTERNS) {

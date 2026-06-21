@@ -13,3 +13,27 @@ export { parseDjangoFile, DJANGO_SUPPORT } from "./django.js";
 export { parseORMModels } from "./orm.js";
 export { validateFrameworkSupport, assertValidFrameworkSupport } from "./framework-support.js";
 export type { ValidationResult, ValidationError } from "./framework-support.js";
+
+// ─── Wave 6: framework extraction (records + detection + dispatcher) ──────────
+export type { ExtractedRoute, ExtractedEventSubscriber } from "./extracted-records.js";
+export {
+  detectFrameworkFromPath,
+  detectFrameworkFromAST,
+  FRAMEWORK_AST_PATTERNS,
+  type FrameworkHint,
+} from "./framework-detection.js";
+export { extractLaravelRoutes } from "./laravel-routes.js";
+export { extractNestJSRoutes, NESTJS_ROUTE_DECORATORS } from "./nestjs-routes.js";
+export { extractNestJSEvents } from "./nestjs-events.js";
+export {
+  extractPhpPropertyDescription,
+  extractEloquentRelationDescription,
+  extractEloquentModels,
+  type ExtractedEloquentModel,
+} from "./php-eloquent.js";
+export {
+  extractFrameworkRecords,
+  type FrameworkRecords,
+  type SymbolEnrichment,
+  type DocumentationEnrichment,
+} from "./extract-framework-records.js";

@@ -36,6 +36,15 @@
  *          cache (cross-cutting-checklist §0–§1). The fields are additive and the
  *          Task-5 refuse-on-ambiguity behaviour is flag-gated default-OFF, so when
  *          the flag is off this bump is the only on-the-wire change.
+ *   6 → 7  Wave 6 (framework extraction): the cached per-file entry now carries
+ *          optional `routes` / `eventSubscribers` arrays, route-handler Symbols
+ *          may carry `responseKeys`, and Magento2 XML symbols are folded in.
+ *          The framework pass is flag-gated default-OFF
+ *          (`TYPOCOP_FRAMEWORK_EXTRACTION`), but the cached entry SHAPE changed
+ *          (new optional cache fields), so a warm cache must re-emit to stay
+ *          shape-consistent and to pick up framework records once the flag is on
+ *          (cross-cutting-checklist §0). When the flag is off this bump is the
+ *          only on-the-wire change.
  *
  * NOT bumped for Wave 3 Tier A1 (TS-compiler-API receiver types): A1 reuses the
  * existing `receiverType` field and runs as a post-Phase-2, whole-corpus pass on
@@ -44,4 +53,4 @@
  * so it re-runs on warm-cache files every run with no cache plumbing. No new
  * cached/persisted field, so no bump is required (cross-cutting-checklist §0–§1).
  */
-export const PARSE_VERSION = 6;
+export const PARSE_VERSION = 7;

@@ -192,6 +192,26 @@ export interface PipelineConfig {
    * exactly.
    */
   readonly callRefuseAmbiguous?: boolean;
+  /**
+   * Wave 6 framework-extraction pass. **Default `false`.** Derived from
+   * `TYPOCOP_FRAMEWORK_EXTRACTION` at the composition root (see
+   * {@link isFrameworkExtractionEnabled}).
+   *
+   * DELIBERATE DEVIATION from the wave plan's default-ON: ships default-OFF for
+   * program-wide consistency + safety (like {@link dataTouch} /
+   * {@link callRefuseAmbiguous}). When `true`, the per-file Phase-2 framework
+   * pass extracts routes / event subscribers (and Magento2 / `responseKeys`)
+   * over the already-parsed tree, gated PER FILE by a cheap path/text probe.
+   * When `false`, the pass never runs and Phase-2 output is byte-identical to
+   * pre-Wave-6 for ALL files; non-framework files are byte-identical even when
+   * it is `true` (the gate skips them).
+   *
+   * The flag is read DIRECTLY in the parse worker (which inherits `process.env`),
+   * so the worker and in-process paths agree; this `PipelineConfig` field exists
+   * for per-run testability and is linked to {@link PARSE_VERSION} so toggling it
+   * invalidates the warm cache.
+   */
+  readonly frameworkExtraction?: boolean;
 }
 
 /**
@@ -313,6 +333,13 @@ export async function runIndexingPipeline(config: PipelineConfig): Promise<Pipel
   metrics.set("hintCount", hints.length);
   if (verbose) {
     console.error(`[pipeline] Phase 2 complete: ${symbols.length} symbols extracted, ${hints.length} relationship hints`);
+    // Wave 6: surface the framework records threaded out of Phase 2 (shared with
+    // the data-touch pass). Empty unless `frameworkExtraction` is on.
+    if (phase2.routes.length > 0 || phase2.eventSubscribers.length > 0) {
+      console.error(
+        `[pipeline] Framework extraction: ${phase2.routes.length} route(s), ${phase2.eventSubscribers.length} event subscriber(s)`,
+      );
+    }
     if (phase2.classification) {
       const c = phase2.classification;
       console.error(
@@ -386,6 +413,13 @@ export async function runIndexingPipeline(config: PipelineConfig): Promise<Pipel
       runDataTouchPass(symbols, relationships, {
         events: config.dataTouchEvents,
         singleModelFallback: config.dataTouchSingleModelFallback,
+        // Wave 6 → Wave 5 feed: thread the Phase-2 structured records so the
+        // data-touch pass emits HIGH-confidence `handlesRoute`/`subscribesTo`
+        // edges from them (Step 0) and the heuristics defer. Empty unless
+        // framework extraction also ran (records only flow when BOTH flags are
+        // on), so this is additive and default-unchanged.
+        extractedRoutes: phase2.routes,
+        extractedEvents: phase2.eventSubscribers,
       }),
     );
     if (pass.newSymbols.length > 0) symbols = [...symbols, ...pass.newSymbols];
@@ -727,6 +761,14 @@ interface Phase2Output {
   readonly symbols: Symbol[];
   readonly hints: RawRelationshipHintLike[];
   readonly skippedFiles: number;
+  /**
+   * Wave 6 framework records, surfaced from Phase 2 in original walk order
+   * (shared with Wave 5; consumed by the data-touch pass). Empty unless the
+   * framework pass ran. On the incremental path these are merged from
+   * freshly-parsed AND warm-cache (unchanged) files so they round-trip.
+   */
+  readonly routes: ExtractedRouteLike[];
+  readonly eventSubscribers: ExtractedEventSubscriberLike[];
   /** Files actually re-parsed this run (changed+added minus skips on the full path). */
   readonly filesParsed: number;
   /** A4 delta plan derived from the classify buckets (undefined on a full run). */
@@ -747,6 +789,14 @@ interface Phase2Output {
  *  Both the freshly-parsed `RawRelationshipHint` and the cached
  *  `CachedRelationshipHint` assign to this under structural typing. */
 type RawRelationshipHintLike = CachedFileEntry["hints"][number];
+
+/** Structural aliases for the Wave 6 framework records as they flow through the
+ *  pipeline. Both the freshly-parsed `ExtractedRoute`/`ExtractedEventSubscriber`
+ *  and the cached `CachedExtractedRoute`/`CachedExtractedEventSubscriber` assign
+ *  to these under structural typing, so freshly-parsed and warm-cache records
+ *  merge into the same array without conversion. */
+type ExtractedRouteLike = NonNullable<CachedFileEntry["routes"]>[number];
+type ExtractedEventSubscriberLike = NonNullable<CachedFileEntry["eventSubscribers"]>[number];
 
 /**
  * Phase 2 with A5 incremental orchestration.
@@ -777,10 +827,21 @@ async function runPhase2(
 
   // Full path: no cache wired or incremental explicitly disabled (--full/--refresh).
   if (cache === undefined || !incremental) {
-    const { symbols, hints, skippedFiles } = await extractAllSymbols(fileNodes, sourcePath, {
-      onProgress,
-    });
-    return { symbols, hints, skippedFiles, filesParsed: fileNodes.length - skippedFiles };
+    const { symbols, hints, skippedFiles, routes, eventSubscribers } = await extractAllSymbols(
+      fileNodes,
+      sourcePath,
+      { onProgress },
+    );
+    return {
+      symbols,
+      hints,
+      skippedFiles,
+      // Coalesce: `ParsingResult` declares these required, but defend against a
+      // partial mock so the orchestrator's consumers always see arrays.
+      routes: routes ?? [],
+      eventSubscribers: eventSubscribers ?? [],
+      filesParsed: fileNodes.length - skippedFiles,
+    };
   }
 
   // ── Incremental path ────────────────────────────────────────────────────────
@@ -835,6 +896,10 @@ async function runPhase2(
   // cached entry for this run, so they contribute nothing — exactly as a full run.
   const mergedSymbols: Symbol[] = [];
   const mergedHints: RawRelationshipHintLike[] = [];
+  // Wave 6 framework records, merged in the same walk order so the incremental
+  // output is byte-identical to a full parse (slot-by-original-index guarantee).
+  const mergedRoutes: ExtractedRouteLike[] = [];
+  const mergedEventSubscribers: ExtractedEventSubscriberLike[] = [];
   // Next cache snapshot, also built in walk order (insertion order is irrelevant
   // to correctness but keeps the manifest stable across no-edit runs).
   const nextCache = new Map<string, CachedFileEntry>();
@@ -844,12 +909,19 @@ async function runPhase2(
     if (fresh !== undefined) {
       mergedSymbols.push(...fresh.symbols);
       mergedHints.push(...fresh.hints);
+      if (fresh.routes !== undefined) mergedRoutes.push(...fresh.routes);
+      if (fresh.eventSubscribers !== undefined) mergedEventSubscribers.push(...fresh.eventSubscribers);
       nextCache.set(fileNode.path, {
         contentHash: fresh.contentHash,
         mtimeMs: fileNode.mtimeMs,
         parseVersion: PARSE_VERSION,
         symbols: fresh.symbols,
         hints: fresh.hints,
+        // Round-trip framework records per file (only present when non-empty).
+        ...(fresh.routes !== undefined && fresh.routes.length > 0 ? { routes: fresh.routes } : {}),
+        ...(fresh.eventSubscribers !== undefined && fresh.eventSubscribers.length > 0
+          ? { eventSubscribers: fresh.eventSubscribers }
+          : {}),
       });
       continue;
     }
@@ -860,6 +932,10 @@ async function runPhase2(
     if (cached !== undefined && cached.parseVersion === PARSE_VERSION) {
       mergedSymbols.push(...cached.symbols);
       mergedHints.push(...cached.hints);
+      // Warm-cache framework records re-emit here (PARSE_VERSION bump guarantees
+      // a pre-Wave-6 entry is stale and re-parsed, so these are Wave-6-shaped).
+      if (cached.routes !== undefined) mergedRoutes.push(...cached.routes);
+      if (cached.eventSubscribers !== undefined) mergedEventSubscribers.push(...cached.eventSubscribers);
       nextCache.set(fileNode.path, cached);
     }
   }
@@ -882,6 +958,8 @@ async function runPhase2(
     symbols: dedupedSymbols,
     hints: mergedHints,
     skippedFiles: parsed.skippedFiles,
+    routes: mergedRoutes,
+    eventSubscribers: mergedEventSubscribers,
     filesParsed: toParse.length - parsed.skippedFiles,
     delta,
     saveCache,

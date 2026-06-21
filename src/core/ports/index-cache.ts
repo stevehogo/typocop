@@ -57,6 +57,39 @@ export interface CachedRelationshipHint {
 }
 
 /**
+ * A cached extracted HTTP route (Wave 6). Pure JSON — structurally identical to
+ * `ExtractedRoute` (`infrastructure/parsing/frameworks/extracted-records.ts`);
+ * re-stated here so `core/` stays a leaf. Kept structurally in sync. Without
+ * round-tripping these through the cache, a warm-cache (unchanged) file would
+ * silently DROP its framework routes on the incremental path.
+ */
+export interface CachedExtractedRoute {
+  readonly filePath: string;
+  readonly httpMethod: string;
+  readonly routePath: string | null;
+  readonly controllerName: string | null;
+  readonly methodName: string | null;
+  readonly middleware: string[];
+  readonly prefix: string | null;
+  readonly lineNumber: number;
+  readonly handlerNodeId?: string;
+}
+
+/**
+ * A cached extracted event subscriber (Wave 6). Pure JSON — structurally
+ * identical to `ExtractedEventSubscriber`; re-stated here so `core/` stays a
+ * leaf. Kept structurally in sync.
+ */
+export interface CachedExtractedEventSubscriber {
+  readonly filePath: string;
+  readonly topicName: string;
+  readonly className: string | null;
+  readonly methodName: string | null;
+  readonly framework: string;
+  readonly lineNumber: number;
+}
+
+/**
  * One cache entry per source file, keyed by its cwd-relative path.
  *
  * Two-tier staleness: a cheap `mtimeMs` compare gates a `sha256(content)`
@@ -75,6 +108,14 @@ export interface CachedFileEntry {
   readonly symbols: Symbol[];
   /** Raw relationship hints extracted from the file (re-resolved globally each run). */
   readonly hints: CachedRelationshipHint[];
+  /**
+   * Wave 6 framework routes for this file (OPTIONAL; additive). Present only when
+   * the framework pass ran and produced records, so warm-cache (unchanged) files
+   * re-emit them on the incremental path instead of dropping them.
+   */
+  readonly routes?: CachedExtractedRoute[];
+  /** Wave 6 framework event subscribers for this file (OPTIONAL; additive). */
+  readonly eventSubscribers?: CachedExtractedEventSubscriber[];
 }
 
 /**

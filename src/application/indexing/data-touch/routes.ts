@@ -47,8 +47,13 @@ export function collectAlreadyLinked(relationships: readonly Relationship[]): Se
  * Return the endpoint Symbol id for `<httpMethod> <fullPath>`, reusing an existing
  * framework route Symbol with that identity when present (Wave 6), else minting a
  * synthetic `apiendpoint:<METHOD>:<path>` Symbol.
+ *
+ * Exported so the Wave 6 structured-record consumer (`processExtractedRoutes`)
+ * mints endpoints through the SAME dedup table (`endpointMapCarrier`), so an
+ * endpoint anchored by a structured route is reused — not duplicated — when the
+ * heuristic passes later look at the same `<METHOD>:<path>`.
  */
-function ensureEndpoint(
+export function ensureEndpoint(
   httpMethod: string,
   fullPath: string,
   filePath: string,
@@ -239,7 +244,8 @@ export function detectExpressStyleRoutes(
 }
 
 /**
- * Per-sink scratch map sharing the endpoint dedup table between the decorator and
- * express passes (a `WeakMap` so it is GC'd with the sink — no global state).
+ * Per-sink scratch map sharing the endpoint dedup table between the structured
+ * (Wave 6) pass and the decorator + express passes (a `WeakMap` so it is GC'd with
+ * the sink — no global state).
  */
-const endpointMapCarrier = new WeakMap<DataTouchSink, Map<string, string>>();
+export const endpointMapCarrier = new WeakMap<DataTouchSink, Map<string, string>>();

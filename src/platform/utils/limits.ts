@@ -191,6 +191,15 @@ function isEnvTruthy(name: string): boolean {
   return v === "1" || v === "true" || v === "yes" || v === "on";
 }
 
+/** Shared falsy-env parser (`0`/`false`/`no`/`off`, default `false` — i.e. unset
+ *  is NOT falsy). Used for opt-OUT flags that default ON. */
+function isEnvFalsy(name: string): boolean {
+  const raw = process.env[name];
+  if (raw === undefined) return false;
+  const v = raw.trim().toLowerCase();
+  return v === "0" || v === "false" || v === "no" || v === "off";
+}
+
 /** Environment opt-in for the Wave 5 data-touch detection pass ({@link isDataTouchEnabled}). */
 export const DATA_TOUCH_ENV = "TYPOCOP_DATA_TOUCH";
 /** Environment opt-in for the Wave 5 heuristic event detector ({@link isDataTouchEventsEnabled}). */
@@ -232,6 +241,55 @@ export function isDataTouchEventsEnabled(): boolean {
  */
 export function isDataTouchSingleModelFallbackEnabled(): boolean {
   return isEnvTruthy(DATA_TOUCH_SINGLE_MODEL_FALLBACK_ENV);
+}
+
+/** Environment opt-in for the Wave 6 framework-extraction pass ({@link isFrameworkExtractionEnabled}). */
+export const FRAMEWORK_EXTRACTION_ENV = "TYPOCOP_FRAMEWORK_EXTRACTION";
+
+/**
+ * Whether the Wave 6 framework-extraction pass is enabled. **OPT-IN — default
+ * `false`.**
+ *
+ * NOTE — DELIBERATE DEVIATION from the wave plan's default-ON: for program-wide
+ * consistency and safety this flag ships **default-OFF**, like the other gated
+ * waves ({@link isDataTouchEnabled} / {@link isCallRefuseAmbiguousEnabled}).
+ * Tests enable it explicitly; the operator flips it on alongside data-touch.
+ *
+ * When OFF, the per-file framework pass never runs and Phase-2 output
+ * (symbols/hints/records) is byte-identical to pre-Wave-6 for ALL files. When ON,
+ * the pass is gated PER FILE by a cheap path + source-text probe, so
+ * non-framework files still produce byte-identical output. Read directly inside
+ * the parse worker (`runParseTask`), which inherits `process.env`, so the worker
+ * and in-process paths agree — and also derived at the composition root into
+ * `PipelineConfig.frameworkExtraction` for per-run testability. Mirrors the
+ * {@link isParseWorkersEnabled} / {@link isTypeEnvEnabled} reader pattern.
+ */
+export function isFrameworkExtractionEnabled(): boolean {
+  return isEnvTruthy(FRAMEWORK_EXTRACTION_ENV);
+}
+
+/** Environment flag for the short-lived Laravel AST-vs-regex routing A/B ({@link isLaravelAstRoutesEnabled}). */
+export const LARAVEL_AST_ROUTES_ENV = "TYPOCOP_LARAVEL_AST_ROUTES";
+
+/**
+ * Whether the Wave 6 (Task 8) AST Laravel route extractor REPLACES the legacy
+ * regex `parseRouteDefinitions` route emission. **Default `true` (ON).**
+ *
+ * SHORT-LIVED A/B flag (Task 8): the AST extractor (`extractLaravelRoutes`) is a
+ * strict superset of the regex (it captures everything the regex did plus
+ * handlers/groups/resources), so it ships ON by default and is the only Laravel
+ * route producer the live pipeline uses (the dispatcher calls `extractLaravelRoutes`
+ * directly; the regex `parseRouteDefinitions` is dead scaffolding). This flag exists
+ * for ONE release so an operator can fall back to the regex route emission while
+ * route-count parity is confirmed on a real Laravel repo, then it is removed.
+ *
+ * Set `TYPOCOP_LARAVEL_AST_ROUTES=0`/`false` to restore the regex route emission in
+ * the (dead) `parseRouteDefinitions` path. Mirrors the {@link isFrameworkExtractionEnabled}
+ * reader pattern but defaults ON (opt-OUT) because the AST extractor is the
+ * confirmed superset.
+ */
+export function isLaravelAstRoutesEnabled(): boolean {
+  return !isEnvFalsy(LARAVEL_AST_ROUTES_ENV);
 }
 
 /** Environment opt-in for the Wave 4 refuse-on-ambiguity call discipline ({@link isCallRefuseAmbiguousEnabled}). */

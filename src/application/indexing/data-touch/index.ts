@@ -11,16 +11,24 @@
  * the flag is off the pass never runs and the graph is byte-identical to
  * pre-Wave-5.
  *
- * Wave-6 coupling seam (documented, not yet active): `runDataTouchDetection`
- * already separates the heuristic regex fallback (decorator/express) from the
- * `alreadyLinked` defer set. When Wave 6 wires the framework extractors and adds
- * `extractedRoutes`/`extractedEvents`, those structured edges are emitted FIRST
- * (raising confidence to ~1.0) and seed `alreadyLinked`, so the heuristic passes
- * here skip any handler already linked — no signature change to this function,
- * only new optional inputs populated upstream.
+ * Wave-6 coupling seam (NOW ACTIVE): `runDataTouchDetection` accepts optional
+ * `extractedRoutes`/`extractedEvents` (the framework extractors' structured
+ * records). When present, a new Step 0 emits HIGH-confidence (1.0)
+ * `handlesRoute`/`subscribesTo` edges FIRST and seeds the `alreadyLinked` /
+ * `alreadySubscribed` defer sets, so the heuristic passes here skip any
+ * handler/subscriber already linked. Empty/absent inputs ⇒ Step 0 is a no-op and
+ * detection is byte-identical pre-Wave-6 (records only flow when BOTH framework
+ * extraction AND data-touch are on — both default OFF).
  */
 import type { Symbol, Relationship, Process } from "../../../core/domain.js";
-import { emptyCounters, indexById, type DataTouchSink, type DataTouchCounters } from "./types.js";
+import {
+  emptyCounters,
+  indexById,
+  type DataTouchSink,
+  type DataTouchCounters,
+  type ExtractedRouteInput,
+  type ExtractedEventSubscriberInput,
+} from "./types.js";
 import { detectDBModels, detectPrismaModels, type DbModelMap } from "./db-models.js";
 import { linkDBOperations } from "./db-operations.js";
 import {
@@ -29,6 +37,7 @@ import {
   collectAlreadyLinked,
 } from "./routes.js";
 import { detectEventChannels } from "./events.js";
+import { processExtractedRoutes, processExtractedEvents } from "./extracted-records.js";
 import { assembleDataFlows, type DataFlowConfig } from "./data-flow-assembly.js";
 import { annotateEntryPoints } from "../processes/index.js";
 
@@ -37,6 +46,19 @@ export interface DataTouchOptions {
   readonly events?: boolean;
   /** Enable the single-model DB fallback (strategy 5). Default OFF. */
   readonly singleModelFallback?: boolean;
+  /**
+   * Wave 6 structured routes (from the framework extractors). When present, a NEW
+   * Step 0 emits HIGH-confidence `handlesRoute` edges from them FIRST and seeds the
+   * `alreadyLinked` defer set, so the heuristic route passes defer to them. Empty/
+   * absent ⇒ Step 0 is a no-op and detection is byte-identical pre-Wave-6.
+   */
+  readonly extractedRoutes?: readonly ExtractedRouteInput[];
+  /**
+   * Wave 6 structured event subscribers. When present, Step 0 emits HIGH-confidence
+   * `subscribesTo` edges and seeds the `alreadySubscribed` defer set the heuristic
+   * event pass now consults. Empty/absent ⇒ no-op.
+   */
+  readonly extractedEvents?: readonly ExtractedEventSubscriberInput[];
 }
 
 export interface DataTouchResult {
@@ -73,9 +95,28 @@ export function runDataTouchDetection(
     symbolsById.set(sym.id, sym);
   };
 
-  // ── Step 1: Routes ────────────────────────────────────────────────────────
-  // Seed alreadyLinked from any pre-existing handlesRoute edges (Wave-6 seam).
+  // ── Step 0: Structured records (Wave 6) ───────────────────────────────────
+  // Consume the framework extractors' ground-truth records FIRST: emit HIGH-
+  // confidence `handlesRoute`/`subscribesTo` edges and seed the defer sets so the
+  // heuristic passes below skip any handler/subscriber already linked. Empty when
+  // framework extraction is off (records only flow when BOTH flags are on), so the
+  // default graph is byte-identical pre-Wave-6.
   const alreadyLinked = collectAlreadyLinked(relationships);
+  const alreadySubscribed = new Set<string>();
+  if (options.extractedRoutes && options.extractedRoutes.length > 0) {
+    const beforeStructuredRouteSymbols = sink.newSymbols.length;
+    processExtractedRoutes(options.extractedRoutes, symbols, symbolsById, alreadyLinked, sink);
+    for (let i = beforeStructuredRouteSymbols; i < sink.newSymbols.length; i++) registerNew(sink.newSymbols[i]);
+  }
+  if (options.extractedEvents && options.extractedEvents.length > 0) {
+    const beforeStructuredEventSymbols = sink.newSymbols.length;
+    processExtractedEvents(options.extractedEvents, symbols, symbolsById, alreadySubscribed, sink);
+    for (let i = beforeStructuredEventSymbols; i < sink.newSymbols.length; i++) registerNew(sink.newSymbols[i]);
+  }
+
+  // ── Step 1: Routes ────────────────────────────────────────────────────────
+  // `alreadyLinked` is seeded by Step 0's structured routes + any pre-existing
+  // handlesRoute edges, so these heuristic passes defer to the structured links.
   const beforeRouteSymbols = sink.newSymbols.length;
   detectAPIEndpointsFromNodes(symbols, symbolsById, alreadyLinked, sink);
   detectExpressStyleRoutes(symbolsById, relationships, alreadyLinked, sink);
@@ -91,7 +132,7 @@ export function runDataTouchDetection(
   // ── Step 3: Events (DARK by default) ─────────────────────────────────────────
   if (options.events) {
     const beforeEventSymbols = sink.newSymbols.length;
-    detectEventChannels(symbols, symbolsById, relationships, sink);
+    detectEventChannels(symbols, symbolsById, relationships, sink, alreadySubscribed);
     for (let i = beforeEventSymbols; i < sink.newSymbols.length; i++) registerNew(sink.newSymbols[i]);
   }
 
@@ -170,4 +211,8 @@ export function runDataTouchPass(
 
 export { assembleDataFlows, DEFAULT_CONFIG, MIN_CONFIDENCE } from "./data-flow-assembly.js";
 export type { DataFlowConfig, FlowAssemblyResult } from "./data-flow-assembly.js";
-export type { DataTouchCounters } from "./types.js";
+export type {
+  DataTouchCounters,
+  ExtractedRouteInput,
+  ExtractedEventSubscriberInput,
+} from "./types.js";

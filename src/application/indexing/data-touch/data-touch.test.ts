@@ -346,3 +346,98 @@ describe("flag-OFF parity", () => {
     expect(graph.edgeCount).toBe(1);
   });
 });
+
+// ─── Wave 6 structured-record consumption (Step 0) ───────────────────────────
+
+describe("Wave 6 → Wave 5 structured-record consumption", () => {
+  const ctrl = sym({ id: "id:C", name: "UsersController", kind: "class", signature: "@Controller('users')" });
+  const handler = sym({
+    id: "id:findOne",
+    name: "findOne",
+    kind: "method",
+    ownerId: "id:C",
+    signature: "@Get(':id') findOne()",
+    location: { filePath: "users.controller.ts", startLine: 4, endLine: 4 } as Symbol["location"],
+  });
+
+  const route = {
+    httpMethod: "GET",
+    routePath: ":id",
+    controllerName: "UsersController",
+    methodName: "findOne",
+    prefix: "users",
+    lineNumber: 4,
+    filePath: "users.controller.ts",
+  };
+
+  it("emits a HIGH-confidence handlesRoute edge from a structured ExtractedRoute", () => {
+    const res = runDataTouchDetection([ctrl, handler], [], { extractedRoutes: [route] });
+    const edge = res.newRelationships.find((r) => r.relType === "handlesRoute" && r.source === "id:findOne");
+    expect(edge).toBeDefined();
+    expect(edge!.metadata.reason).toBe("ast-extracted-route");
+    expect(edge!.metadata.confidence).toBe("1");
+    // The endpoint anchor is minted for GET /users/:id.
+    const endpoint = res.newSymbols.find((s) => s.id === edge!.target);
+    expect(endpoint!.name).toBe("GET /users/:id");
+  });
+
+  it("deferral: the heuristic decorator pass does NOT also link a structured handler (no double-count)", () => {
+    const res = runDataTouchDetection([ctrl, handler], [], { extractedRoutes: [route] });
+    // Exactly ONE handlesRoute edge from id:findOne — the structured one, not a
+    // second `decorator-Get` heuristic edge.
+    const fromHandler = res.newRelationships.filter((r) => r.relType === "handlesRoute" && r.source === "id:findOne");
+    expect(fromHandler).toHaveLength(1);
+    expect(fromHandler[0].metadata.reason).toBe("ast-extracted-route");
+    // And exactly one endpoint anchor for that <METHOD>:<path> (shared dedup table).
+    const endpoints = res.newSymbols.filter((s) => s.id.startsWith("apiendpoint:"));
+    expect(endpoints).toHaveLength(1);
+  });
+
+  it("resolves the handler by handlerNodeId (logicalKey) when present", () => {
+    const linked = sym({
+      id: "id:proc",
+      logicalKey: "lk-handler-123",
+      name: "process",
+      kind: "method",
+      location: { filePath: "ingestion.processor.ts", startLine: 2, endLine: 2 } as Symbol["location"],
+    });
+    const r = { ...route, methodName: "process", controllerName: null, handlerNodeId: "lk-handler-123", filePath: "ingestion.processor.ts", routePath: "/x", prefix: null };
+    const res = runDataTouchDetection([linked], [], { extractedRoutes: [r] });
+    const edge = res.newRelationships.find((e) => e.relType === "handlesRoute");
+    expect(edge!.source).toBe("id:proc");
+  });
+
+  it("emits a subscribesTo edge from a structured ExtractedEventSubscriber and defers the heuristic", () => {
+    const subscriber = sym({
+      id: "id:sub",
+      name: "onSignup",
+      kind: "method",
+      signature: "@EventPattern('user.signup') onSignup()",
+      location: { filePath: "events.controller.ts", startLine: 3, endLine: 3 } as Symbol["location"],
+    });
+    const ev = {
+      topicName: "user.signup",
+      className: null,
+      methodName: "onSignup",
+      framework: "nestjs-event",
+      lineNumber: 3,
+      filePath: "events.controller.ts",
+    };
+    // events ON so the heuristic pass also runs — assert it defers (no double-edge).
+    const res = runDataTouchDetection([subscriber], [], { extractedEvents: [ev], events: true });
+    const subs = res.newRelationships.filter((r) => r.relType === "subscribesTo" && r.target === "id:sub");
+    expect(subs).toHaveLength(1);
+    expect(subs[0].metadata.reason).toBe("ast-extracted-subscriber-nestjs-event");
+    expect(subs[0].metadata.confidence).toBe("1");
+    // The channel anchor is eventchannel:user.signup.
+    const channel = res.newSymbols.find((s) => s.id === subs[0].source);
+    expect(channel!.id).toBe("eventchannel:user.signup");
+  });
+
+  it("no records ⇒ Step 0 is a no-op (byte-identical to pre-Wave-6 detection)", () => {
+    const withEmpty = runDataTouchDetection([ctrl, handler], [], { extractedRoutes: [], extractedEvents: [] });
+    const without = runDataTouchDetection([ctrl, handler], []);
+    expect(withEmpty.newRelationships).toEqual(without.newRelationships);
+    expect(withEmpty.newSymbols).toEqual(without.newSymbols);
+  });
+});

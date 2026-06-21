@@ -5,6 +5,7 @@
 import type { Symbol, FrameworkSupport } from "../../../core/domain.js";
 import { extractSymbols } from "../extract-symbols.js";
 import { fromSyntaxNode } from "../ast-node.js";
+import { isLaravelAstRoutesEnabled } from "../../../platform/utils/limits.js";
 import path from "path";
 import fs from "fs/promises";
 import Parser from "tree-sitter";
@@ -21,15 +22,33 @@ export const LARAVEL_SUPPORT: FrameworkSupport = {
 };
 
 /**
- * Parse Laravel route definitions from routes files.
+ * Parse Laravel route definitions from routes files (LEGACY regex extractor).
+ *
+ * Task 8 disposition — REPLACED by the AST extractor. The live Phase-2 path emits
+ * Laravel routes via `extractLaravelRoutes` (`laravel-routes.ts`, called from the
+ * framework dispatcher), which is a strict superset of this regex (it adds
+ * handler linkage, `Route::group` prefix/middleware stacks, fluent chains, and
+ * `resource`/`apiResource` expansion). This function is dead scaffolding (only the
+ * dead `parseLaravelFile` calls it) — and is additionally gated behind
+ * `TYPOCOP_LARAVEL_AST_ROUTES` (default ON): when AST routing is on it emits NO
+ * route Symbols, so even if some legacy caller were re-activated it could never
+ * double-count a route the AST extractor already produced. Set the flag to
+ * `0`/`false` to restore the regex emission for one-release A/B parity.
+ *
  * Requirement: 14.3
  */
 export async function parseRouteDefinitions(filePath: string): Promise<Symbol[]> {
+  // Task 8: the AST extractor is the live, superset producer; suppress this
+  // regex emission when AST routing is on so a route is never double-counted.
+  if (isLaravelAstRoutesEnabled()) {
+    return [];
+  }
+
   const basename = path.basename(filePath);
   if (!basename.startsWith("web.") && !basename.startsWith("api.") && basename !== "routes.php") {
     return [];
   }
-  
+
   try {
     const content = await fs.readFile(filePath, "utf-8");
     const symbols: Symbol[] = [];

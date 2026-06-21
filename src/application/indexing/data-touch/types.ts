@@ -105,6 +105,41 @@ export const EVENT_SUBSCRIBE_PATTERNS = new Set([
  */
 export const PRISMA_MODEL_PATTERN = /\bprisma\.(\w+)\.(find\w*|create\w*|update\w*|delete\w*|upsert|count|aggregate|groupBy)\b/gi;
 
+// ─── Wave 6 structured-record inputs (consumed by Step 0) ───────────────────────
+
+/**
+ * A structured route the framework extractors emitted (Wave 6). Re-stated here as
+ * a STRUCTURAL leaf — it is intentionally compatible with both
+ * `ExtractedRoute` (`infrastructure/parsing/frameworks/extracted-records.ts`) and
+ * the cached `CachedExtractedRoute` (`core/ports/index-cache.ts`), so the pipeline
+ * threads the Phase-2 records straight into `runDataTouchPass` with no conversion.
+ * Only the fields this module reads are required.
+ */
+export interface ExtractedRouteInput {
+  readonly httpMethod: string;
+  readonly routePath: string | null;
+  readonly controllerName: string | null;
+  readonly methodName: string | null;
+  readonly prefix: string | null;
+  readonly lineNumber: number;
+  /** Persisted Method-node key for the handler (Wave 6 sets this for NestJS). */
+  readonly handlerNodeId?: string;
+  readonly filePath: string;
+}
+
+/**
+ * A structured event subscriber the framework extractors emitted (Wave 6).
+ * Structurally compatible with `ExtractedEventSubscriber` / the cached mirror.
+ */
+export interface ExtractedEventSubscriberInput {
+  readonly topicName: string;
+  readonly className: string | null;
+  readonly methodName: string | null;
+  readonly framework: string;
+  readonly lineNumber: number;
+  readonly filePath: string;
+}
+
 // ─── Shared result / mutation types ─────────────────────────────────────────────
 
 /** Counters returned by the detection helpers (parity with the legacy result). */
