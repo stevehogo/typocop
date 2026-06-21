@@ -14,10 +14,34 @@
  * Pure: consumes resolved symbols, `call` hints, and Phase-3 relationships
  * (for `overrides` edges). No DB, no tree.
  */
-import type { Symbol, Relationship, Language } from "../../../core/domain.js";
+import type { Symbol, SymbolKind, Relationship, Language } from "../../../core/domain.js";
 import type { RawRelationshipHint } from "../../../infrastructure/parsing/extract-symbols.js";
 
 export type RecursionSuspectKind = "shadows-super" | "arity-mismatch";
+
+// The kinds a self-call's enclosing caller can be. Used to exclude the enclosing
+// CLASS, whose range covers the same line(s) as its single-line methods (a naive
+// line-range lookup would otherwise resolve the call to the class, not the method).
+const CALLABLE_KINDS = new Set<SymbolKind>(["function", "method"]);
+
+/**
+ * Narrowest enclosing CALLABLE symbol containing `line` — the line-range fallback
+ * used only when a hint carries no `enclosingSymbolId` (synthetic/unit hints).
+ * Real parser hints carry `enclosingSymbolId` (the parser's enclosing-def answer),
+ * which is preferred and resolves the caller without any range ambiguity.
+ */
+function enclosingCallable(fileSyms: readonly Symbol[] | undefined, line: number): Symbol | undefined {
+  if (!fileSyms) return undefined;
+  let best: Symbol | undefined;
+  for (const s of fileSyms) {
+    if (!CALLABLE_KINDS.has(s.kind)) continue;
+    if (s.location.startLine > line || s.location.endLine < line) continue;
+    if (!best || s.location.endLine - s.location.startLine < best.location.endLine - best.location.startLine) {
+      best = s; // keep the narrowest enclosing callable
+    }
+  }
+  return best;
+}
 
 export interface RecursionSuspect {
   readonly callerId: string;
@@ -50,8 +74,10 @@ export function detectRecursionSuspects(
     if (rel.relType === "overrides") overridingSources.add(rel.source);
   }
 
+  const byId = new Map<string, Symbol>();
   const symbolsByFile = new Map<string, Symbol[]>();
   for (const s of symbols) {
+    byId.set(s.id, s);
     const list = symbolsByFile.get(s.location.filePath);
     if (list) list.push(s);
     else symbolsByFile.set(s.location.filePath, [s]);
@@ -66,11 +92,11 @@ export function detectRecursionSuspects(
     const receiver = normaliseReceiver(rawReceiver);
     if (!SELF_RECEIVERS.has(receiver)) continue;
 
-    const fileSyms = symbolsByFile.get(hint.sourceFile);
-    if (!fileSyms) continue;
-    const caller = fileSyms.find(
-      (s) => s.location.startLine <= hint.startLine && s.location.endLine >= hint.startLine,
-    );
+    // Prefer the parser's enclosing-def answer; fall back to the narrowest
+    // enclosing callable on the line (synthetic hints carry no enclosingSymbolId).
+    const caller =
+      (hint.enclosingSymbolId ? byId.get(hint.enclosingSymbolId) : undefined) ??
+      enclosingCallable(symbolsByFile.get(hint.sourceFile), hint.startLine);
     if (!caller) continue;
     if (hint.targetName !== caller.name) continue;     // self-NAMED call
     if (byCaller.has(caller.id)) continue;             // one finding per caller
