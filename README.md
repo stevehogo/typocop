@@ -11,7 +11,7 @@ Typocop is a high-performance indexing and query engine that avoids the slow, mu
 - **Hybrid Search**: Semantic search with LadybugDB vector storage combined with keyword indexing.
 - **Multi-Phase Indexing**: A robust 6-phase pipeline that walks, parses, resolves, clusters, traces, and indexes your code.
 - **Polyglot Support**: Native parsing for 12 languages including TypeScript, PHP (Magento 2 / Laravel), Python (FastAPI / Django), Java (Spring Boot), Go, Rust, and more.
-- **MCP Integration**: First-class Model Context Protocol (MCP) server for deep integration with AI-powered editors like Kiro, Claude, Cursor, and Windsurf.
+- **MCP Integration**: First-class Model Context Protocol (MCP) server exposing **11 read-only tools** — context, dependency/impact, tracing, dead-code, complexity hotspots, API-contract drift, rename preview, change blast-radius, and a **`verify_claim` grounding tool** that returns verdict + confidence + evidence so agents stop acting on false assumptions. Works with Kiro, Claude, Cursor, Windsurf, and Antigravity.
 - **Obsidian Export**: Export your knowledge graph as an interactive markdown vault with visual diagrams and bidirectional links.
 - **Remote Database Access**: Distributed architecture with gRPC connection server for multi-client access to the same knowledge graph.
 
@@ -49,6 +49,24 @@ graph TD
 - **Connection Server** — gRPC server for remote database access
 - **MCP Server** — Model Context Protocol integration for AI editors
 - **Obsidian Export** — Knowledge graph visualization as markdown vault
+
+## 🔌 MCP Tools
+
+The MCP server exposes **11 read-only tools** (none mutate your code or the graph). Each returns a structured result plus a mandatory human-readable `summary`. See [`src/apps/mcp-server/README.md`](src/apps/mcp-server/README.md) for full parameters, response shape, and examples.
+
+| Tool | What it answers |
+|------|-----------------|
+| `get_symbol_context` | 360° context for a symbol (callers, callees, clusters, processes); optional token-budgeted slicing |
+| `smart_search` | Find symbols by natural-language query (semantic/vector similarity) |
+| `impact_analysis` | Blast radius of a symbol — direct **and transitive** dependents, affected flows, risk, per-node role/edge/hop |
+| `trace` | Shortest call/containment path between two symbols (per-hop chain) |
+| `trace_data_flow` | Data flow from an API entry point through services to DB models |
+| `find_dead_code` | Uncalled, non-exported, non-entry-point candidates (verify before deleting) |
+| `find_hotspots` | Most complex symbols (cyclomatic / cognitive / max loop depth) |
+| `shape_check` | API contract drift — graph-wide, or scoped to one `route` (drift + blast radius) |
+| `rename` | **Preview** a coordinated rename (edge-backed edits + low-confidence regex); never writes |
+| `detect_changes` | Blast radius of uncommitted/git changes (CRITICAL for auth/payment/etc.) |
+| `verify_claim` | **Grounding / anti-hallucination** — verify a usage / edge / reachability claim → verdict + confidence + evidence; unprovable (dynamic dispatch / DI) → honest `uncertain`, never a false confirm/refute; a refute carries the true answer |
 
 ## 🛠️ Usage
 

@@ -7,7 +7,7 @@ Model Context Protocol (MCP) server implementation for the Code Graph Analyzer.
 This module provides MCP integration for AI editors (Kiro, Claude, Cursor, Windsurf, Antigravity) to query the code knowledge graph. It implements:
 
 - **Protocol Handling**: Request validation, error responses, connection state management
-- **Tool Registration**: 4 MCP tools for querying the knowledge graph
+- **Tool Registration**: 11 read-only MCP tools for querying the knowledge graph (including the `verify_claim` grounding / anti-hallucination tool)
 - **Prompt Registration**: Pre-defined prompts for common workflows
 - **Authentication**: Token-based authentication for secure connections
 
@@ -47,65 +47,124 @@ Implements requirements:
 
 ## MCP Tools
 
-### 1. get_symbol_context
+**11 read-only tools** — none mutate your code or the graph. Every response carries a mandatory human-readable `summary` (see [Response Format](#response-format)).
 
-Get 360° context for a symbol: callers, callees, clusters, and processes.
+### Context & search
 
-**Parameters:**
-- `symbolName` (required): Name of the symbol to analyze
-- `filePath` (optional): File path to narrow down the symbol
-- `maxResults` (optional): Maximum number of results (default: 100)
+#### `get_symbol_context`
 
-**Example:**
+360° context for a symbol: callers, callees, clusters, and processes.
+
+- `symbolName` (required) — symbol to analyze
+- `filePath` (optional) — narrow an ambiguous name
+- `maxResults` (optional, default 100)
+- `tokenBudget` (optional) — cap estimated tokens; slices target + direct neighbours in BFS order to fit (`pin`ned ids are always kept). `0` = unlimited
+- `pin` (optional, `string[]`) — symbol ids to always include in the slice
+- `maxDepth` (optional) — slice hop distance (default 1 = target + direct neighbours)
+
 ```json
-{
-  "method": "get_symbol_context",
-  "params": {
-    "symbolName": "CustomerRepository",
-    "filePath": "src/repositories/customer.ts"
-  }
-}
+{ "method": "get_symbol_context", "params": { "symbolName": "CustomerRepository", "filePath": "src/repositories/customer.ts" } }
 ```
 
-### 2. trace_data_flow
+#### `smart_search`
 
-Trace data flow from API endpoint through services to database models.
+Find symbols by **natural-language query** using semantic (vector) similarity. Use when you don't know the exact name.
 
-**Parameters:**
-- `entryPoint` (required): Entry point symbol (API endpoint, controller, etc.)
-- `framework` (optional): Framework hint (NestJS, Laravel, Express, etc.)
-- `maxResults` (optional): Maximum number of results (default: 100)
+- `query` (required) — natural-language description
+- `maxResults` (optional, default 100)
 
-**Example:**
+### Dependencies, impact & tracing
+
+#### `impact_analysis`
+
+Blast radius of a symbol: all direct **and transitive** dependents (callers), affected business flows, and a risk level (CRITICAL for auth/payment/checkout/security/session/token code), with each affected node annotated by its structural role, entry edge, and hop distance. Answers both *"who depends on / calls X?"* and *"what breaks if I change X?"*.
+
+- `symbolName` (required)
+- `changeType` (optional) — `modify` | `delete` | `rename` (default `modify`); affects the summary framing only
+- `maxDepth` (optional) — max transitive depth (default unlimited, capped at 20)
+- `maxResults` (optional, default 100)
+
+> Subsumes the former `find_dependents` tool — pass `maxDepth` to bound the caller traversal.
+
 ```json
-{
-  "method": "trace_data_flow",
-  "params": {
-    "entryPoint": "POST /api/users",
-    "framework": "NestJS"
-  }
-}
+{ "method": "impact_analysis", "params": { "symbolName": "PaymentService::processPayment", "changeType": "modify", "maxDepth": 3 } }
 ```
 
-### 3. impact_analysis
+#### `trace`
 
-Blast-radius analysis: all direct and transitive dependents (callers) of a symbol, affected flows, and risk level. (Answers both "who depends on / calls X?" and "what breaks if I change X?".)
+Shortest call/containment path between two symbols over `CALLS`|`CONTAINS` edges — the per-hop chain (symbol, file:line, edge type).
 
-**Parameters:**
-- `symbolName` (required): Name of the symbol to analyze
-- `changeType` (optional): Type of change - "modify", "delete", or "rename" (default: "modify")
-- `maxDepth` (optional): Maximum traversal depth for transitive dependents (default: unlimited, capped at 20)
-- `maxResults` (optional): Maximum number of results (default: 100)
+- `fromSymbol` (required), `toSymbol` (required)
+- `maxDepth` (optional, default + cap 20)
 
-**Example:**
+#### `trace_data_flow`
+
+Trace data flow from an API entry point through services to database models.
+
+- `entryPoint` (required) — API endpoint, controller, etc.
+- `framework` (optional) — NestJS / Laravel / Express / …
+- `maxResults` (optional, default 100)
+
+### Code quality
+
+#### `find_dead_code`
+
+Likely-dead-code candidates: symbols with no incoming `CALLS` edge that are neither exported nor entry-point-named (main/handlers/REST verbs/controllers). **Read-only — never deletes;** candidates must be verified (dynamic/reflective calls aren't tracked).
+
+- `kind` (optional) — restrict to a `SymbolKind` (function/class/method/…)
+- `maxResults` (optional, default 100)
+
+#### `find_hotspots`
+
+Complexity hotspots: the most cyclomatically-complex symbols, ranked highest-first and paged. Each result carries `cyclomatic`, `cognitive` (nesting-weighted), and `maxLoopDepth`.
+
+- `minComplexity` (optional, exclusive, default 10)
+- `maxResults` (optional, default 50)
+- `offset` (optional, default 0)
+
+### API contracts
+
+#### `shape_check`
+
+Detect API contract drift. With **no args**: graph-wide — compares each route's top-level response keys (`res.json`/`res.send`/`return {...}`) against the keys consumers read, and reports every key a consumer reads that no route returns. With **`route`**: scopes to that route — its blast radius (affected symbols, flows, risk) **plus** the consumer mismatches. v1: top-level keys only.
+
+- `route` (optional) — route symbol name (e.g. `GET /users` or the handler name). Omit for graph-wide drift.
+
+> The `route` mode subsumes the former `api_impact` tool.
+
+### Refactoring
+
+#### `rename`
+
+**PREVIEW** a coordinated rename: the definition + edge-backed reference sites (CALLS/IMPORTS/REFERENCES) as high-confidence file:line edits, plus a word-boundary regex for the low-confidence text tail. **Preview only — never writes files or the graph.**
+
+- `symbolName` (required), `newName` (required — a valid identifier)
+- `filePath` (optional) — disambiguate an ambiguous name
+
+### Change-driven
+
+#### `detect_changes`
+
+Detect uncommitted/git changes and analyze their blast radius (affected symbols, flows, risk; elevates to CRITICAL for auth/payment/checkout/security/session/token code).
+
+- `scope` (optional) — `unstaged` (default) | `staged` | `all` | `compare`
+- `baseRef` (required when `scope` = `compare`) — e.g. `main` or a commit SHA
+- `maxResults` (optional, default 100)
+
+### Grounding / anti-hallucination
+
+#### `verify_claim`
+
+Verify a **structured belief** about the codebase and get back **verdict (`confirmed` / `refuted` / `uncertain`) + confidence + evidence** — so an agent stops acting on false assumptions ("nothing calls X, safe to delete"). **Honest-uncertainty is mandatory:** any relationship the graph can't prove (dynamic dispatch / callbacks / DI) is reported `uncertain`, never a false confirm/refute; a refute includes the **true answer** (e.g. the real caller set). Read-only; never throws — parse errors, unresolved symbols, and timeouts all degrade to a graceful `uncertain`.
+
+Claim kinds (discriminated by `kind`):
+
+- `usage` — *"X has no callers / is dead"*. Needs `symbol`.
+- `edge` — *"X {relation} Y"*. Needs `from`, `to`, and `relation` ∈ `calls` | `imports` | `inherits` | `implements` | `references`.
+- `reachability` — *"X can reach Y"* / *"changing X can't affect Y"*. Needs `from`, `to`, and `polarity` ∈ `reachable` | `independent`.
+
 ```json
-{
-  "method": "impact_analysis",
-  "params": {
-    "symbolName": "PaymentService::processPayment",
-    "changeType": "modify"
-  }
-}
+{ "method": "verify_claim", "params": { "kind": "edge", "from": "OrderService", "to": "PaymentGateway", "relation": "calls" } }
 ```
 
 ## Response Format
@@ -141,6 +200,18 @@ All tools return `MCPToolResponse` with the following structure:
 ```
 
 The `summary` field is **mandatory** and provides a human-readable description of the results, designed for direct use by AI editors.
+
+Some tools attach **additive, optional** fields to this base shape (absent for every other tool, so the wire contract stays backward-compatible):
+
+| Field | Populated by |
+|-------|--------------|
+| `verdict` (verdict / confidence / reason / evidence / counterexample / trueAnswer) | `verify_claim` |
+| `trace` (found / length / hops[]) | `trace` |
+| `rename` (preview plan: edits[] + low-confidence regex) | `rename` |
+| `shapeCheck` (pairsChecked / mismatches[]) | `shape_check` |
+| per-symbol `nodeRole` / `entryEdge` / `hopDistance` | `impact_analysis` |
+| per-symbol `cyclomatic` / `cognitive` / `maxLoopDepth` | `find_hotspots` |
+| `truncationReason` / `estimatedTokens` | `get_symbol_context` (with a `tokenBudget`) |
 
 ## Authentication
 
@@ -248,8 +319,7 @@ import type { MCPContext } from "./mcp/index.js";
 
 // Create context
 const context: MCPContext = {
-  vectorPool,      // PostgreSQL connection pool
-  graphSession,    // Neo4j session
+  adapter,         // DatabaseAdapter (LadybugDB graph + vector + embeddings)
   authConfig: createAuthConfig(["secret-token"], true),
   connectionStates: new Map(),
 };
@@ -288,7 +358,7 @@ The module includes comprehensive tests:
 
 Run tests:
 ```bash
-pnpm test src/mcp/
+pnpm test src/apps/mcp-server/
 ```
 
 All tests verify:
