@@ -34,6 +34,12 @@ export interface CachedRelationshipHint {
   // are JSON-round-tripped) preserve these fields across the incremental path.
   readonly receiverText?: string;
   readonly enclosingSymbolId?: string;
+  // ── Wave 3 Tier-B receiver-type carrier (OPTIONAL; additive; `call` hints) ──
+  // Mirror of `RawRelationshipHint.receiverType` (the AST type-env's resolved
+  // receiver type NAME). Without this field the incremental cache would silently
+  // DROP it on a cache-reuse run, disabling Tier-B member-call resolution for
+  // unchanged files. Kept structurally in sync.
+  readonly receiverType?: string;
   // ── Wave 1 named-binding carrier (OPTIONAL; additive; `import` hints only) ──
   // Mirror of `RawRelationshipHint.namedBindings`. Without this field the
   // incremental cache would silently DROP named bindings on a cache-reuse run,

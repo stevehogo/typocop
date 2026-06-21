@@ -20,6 +20,7 @@ import { executeObsidianExport } from "../../application/export-render/index.js"
 import { createFileWatcher, type FileWatcher } from "../../infrastructure/watch/file-watcher.js";
 import { augment } from "../../application/querying/augment.js";
 import { mergeTypocopHook, type ClaudeSettings } from "./setup.js";
+import { isTypeEnvEnabled, isLspTypesEnabled } from "../../platform/utils/limits.js";
 
 /**
  * A5: build the disk-backed parse + embedding caches for a prefix.
@@ -181,6 +182,13 @@ export async function executeIndexingPipeline(
       incremental,
       cache,
       embeddingCache,
+      // Wave 3 (Tier B): derive the type-env flag from env at the composition
+      // root. Default OFF; Phase 2 reads the same env directly in the workers.
+      typeEnvResolution: isTypeEnvEnabled(),
+      // Wave 3 (Tier A1): derive the TS-compiler-API flag from env. Default OFF;
+      // when on, a post-Phase-2 pass lazy-imports `typescript` and overrides
+      // `receiverType` for TS/JS hints (precedence over Tier B).
+      lspTypes: isLspTypesEnabled(),
     };
 
     const result = await runIndexingPipeline(pipelineConfig);
@@ -361,6 +369,8 @@ export async function executeWatch(
       incremental: true,
       cache,
       embeddingCache,
+      typeEnvResolution: isTypeEnvEnabled(),
+      lspTypes: isLspTypesEnabled(),
     };
     try {
       const result = await reindexChangedFiles(batch, pipelineConfig);

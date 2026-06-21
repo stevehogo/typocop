@@ -28,6 +28,7 @@ import { extractAllSymbols, extractAllSymbolsWithPerFile } from "./parsing/index
 import { classifyFiles } from "./cache/classify.js";
 import { PARSE_VERSION } from "../../infrastructure/parsing/parse-version.js";
 import { sha256Hex } from "../../platform/utils/hash.js";
+import { enrichHintsWithTsTypes } from "../../infrastructure/parsing/ts-types/ts-compiler.js";
 import { resolveReferences } from "./resolution/index.js";
 import { clusterSymbols, type AIClient } from "./clustering/index.js";
 import { traceProcesses, annotateEntryPoints } from "./processes/index.js";
@@ -121,6 +122,33 @@ export interface PipelineConfig {
    */
   readonly cache?: IndexCachePort;
   readonly delta?: PipelineDelta;
+  /**
+   * Wave 3 (Tier B) AST type-env resolution. **Default `false`.** Derived from
+   * `TYPOCOP_TYPE_ENV` at the composition root (see {@link isTypeEnvEnabled}).
+   * When `true`, Phase 3 consumes the `receiverType` the type-env stamped on call
+   * hints (receiverType-first member-call resolution) and enables the ported
+   * return-type unwrap in chain binding. Phase 2 reads the SAME env directly
+   * (inside `extractSymbolsWithQueries`, which runs in parse workers that inherit
+   * `process.env`), so the two phases agree. Only affects TS/JS/Python/Go/Java/PHP.
+   * When off, hints carry no `receiverType` and resolution is byte-identical to
+   * pre-Wave-3.
+   */
+  readonly typeEnvResolution?: boolean;
+  /**
+   * Wave 3 (Tier A1) TypeScript-compiler-API receiver-type resolution.
+   * **Default `false`.** Derived from `TYPOCOP_LSP_TYPES` at the composition root
+   * (see {@link isLspTypesEnabled}). When `true`, a post-Phase-2 whole-corpus pass
+   * builds ONE TS `Program` per project (via a LAZY `import("typescript")` — the
+   * compiler is NEVER loaded when this is off) and, for TS/JS `call` hints,
+   * resolves the receiver's nominal type from the real type checker, stamping it
+   * onto `hint.receiverType` with PRECEDENCE over the Tier-B AST answer. Phase 3
+   * consumes `hint.receiverType` uniformly (no extra Phase-3 change). Only affects
+   * TS/JS; other languages are untouched (the A2 seam will add real language
+   * servers behind the same merge interface later). Heavy + measurement-gated
+   * (plan §8) — stays OFF by default. When off, the compiler is never imported and
+   * the emitted graph is byte-identical to a Tier-A-absent run.
+   */
+  readonly lspTypes?: boolean;
 }
 
 /**
@@ -197,7 +225,38 @@ export async function runIndexingPipeline(config: PipelineConfig): Promise<Pipel
     runPhase2(config, fileNodes, progress.onProgress),
   );
   progress.done();
-  const { symbols: phase2Symbols, hints, skippedFiles } = phase2;
+  const { symbols: phase2Symbols, skippedFiles } = phase2;
+  // `let` (not `const`): Wave 3 Tier-A1 re-binds `hints` below with the
+  // compiler-API-enriched set (precedence over the Tier-B `receiverType`).
+  let hints = phase2.hints;
+
+  // ── Wave 3 Tier-A1: TS-compiler-API receiver-type enrichment ────────────────
+  // A whole-corpus, post-Phase-2 pass (Phase 2 is per-file and may run in worker
+  // threads that cannot share a TS `Program`, so the type-checker cannot live
+  // there). Builds ONE `Program` per project via a LAZY `import("typescript")`
+  // and, for TS/JS `call` hints, overrides `hint.receiverType` with the real
+  // type checker's answer (PRECEDENCE over Tier B; on a miss the Tier-B answer
+  // survives). Timed under the `typeEnv` phase. Gated on `config.lspTypes` —
+  // when off, `enrichHintsWithTsTypes` is never called, `typescript` is never
+  // imported, and `hints` is byte-identical to today. Covers both the full run
+  // and the watch path (`reindexChangedFiles` delegates to this function).
+  if (config.lspTypes) {
+    let tsTypedReceivers = 0;
+    hints = await metrics.time("typeEnv", () =>
+      enrichHintsWithTsTypes(hints, {
+        sourcePath,
+        onResolved: () => {
+          tsTypedReceivers += 1;
+        },
+      }),
+    );
+    if (verbose) {
+      console.error(
+        `[pipeline] Tier-A1 (TS compiler API): ${tsTypedReceivers} receiver type(s) resolved`,
+      );
+    }
+  }
+
   // E3: fold `member.access` hints into each consumer symbol's `accessedKeys`
   // (purely additive — see {@link attachAccessedKeys}). All later phases see the
   // augmented list; the added optional prop is ignored by resolution/clustering,
@@ -245,8 +304,15 @@ export async function runIndexingPipeline(config: PipelineConfig): Promise<Pipel
   // as `hint.sourceFile` and `Symbol.location.filePath`) so Phase 3 can resolve
   // import specifiers to concrete paths and populate the import/package/named
   // maps (Tiers 2a / 2a-named / 2b). Omitting this arg is the zero-code rollback.
+  // Wave 3: Phase 3 consumes `hint.receiverType` (receiverType-first member-call
+  // resolution) when EITHER type tier is on — Tier B (`typeEnvResolution`, the AST
+  // env that populates `receiverType` in Phase 2) OR Tier A1 (`lspTypes`, the
+  // compiler-API pass that just overrode it above). Both produce the SAME field,
+  // so Phase 3 stays tier-agnostic (no extra Phase-3 change beyond Tier B). When
+  // both are off, no hint carries `receiverType` and this is a no-op.
+  const consumeReceiverType = (config.typeEnvResolution ?? false) || (config.lspTypes ?? false);
   const { relationships, extNodes, dependsOnStats } = await metrics.time("resolution", () =>
-    resolveReferences(symbols, hints, sourcePath, fileNodes.map((f) => f.path)),
+    resolveReferences(symbols, hints, sourcePath, fileNodes.map((f) => f.path), consumeReceiverType),
   );
   metrics.set("relationshipCount", relationships.length);
   metrics.set("externalDependencyCount", extNodes.size);

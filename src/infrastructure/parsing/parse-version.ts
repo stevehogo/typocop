@@ -16,5 +16,17 @@
  *          export detection) and the parameter-count now uses variadic-aware
  *          signature extraction. Unchanged files must re-emit so the new field /
  *          corrected arity populate on a warm cache.
+ *   3 → 4  Wave 3 (Tier B): `call` hints may now carry an optional `receiverType`
+ *          (the AST type-env's resolved receiver type name). Unchanged files must
+ *          re-emit so warm-cache hints carry it when the Tier-B flag is on
+ *          (cross-cutting-checklist §0–§1). When the flag is OFF the field is
+ *          never populated, so this bump is the only on-the-wire change.
+ *
+ * NOT bumped for Wave 3 Tier A1 (TS-compiler-API receiver types): A1 reuses the
+ * existing `receiverType` field and runs as a post-Phase-2, whole-corpus pass on
+ * the MERGED hints in `pipeline.ts` — it overrides `receiverType` AFTER the
+ * per-file cache snapshot is built (`runPhase2` caches the pre-enrichment hints),
+ * so it re-runs on warm-cache files every run with no cache plumbing. No new
+ * cached/persisted field, so no bump is required (cross-cutting-checklist §0–§1).
  */
-export const PARSE_VERSION = 3;
+export const PARSE_VERSION = 4;

@@ -27,7 +27,7 @@ import type { CallResolutionDeps } from "./scope-resolver.js";
 // Side-effect import: registers the built-in per-language scope resolvers (E1).
 import "./resolvers/index.js";
 import { computeMRO, c3Linearize, gatherAncestors } from "./mro.js";
-import { resolveReceiverType, type ChainBindingDeps } from "./chain-binding.js";
+import { resolveReceiverType, typeNameToSymbol, type ChainBindingDeps } from "./chain-binding.js";
 
 // ─── Symbol map ───────────────────────────────────────────────────────────────
 
@@ -244,6 +244,14 @@ export function resolveHints(
   symbols: Symbol[],
   languageConfigs?: LanguageConfigs,
   allFiles?: readonly string[],
+  /**
+   * Wave 3 (Tier B): when `true`, consume the type-env's `hint.receiverType`
+   * (receiverType-FIRST member-call resolution) and enable the ported
+   * return-type unwrap in chain binding. Default `false` → byte-identical
+   * pre-Wave-3 behaviour (the field is also never populated when the flag is off
+   * in Phase 2, so this is doubly safe — the zero-code rollback lever).
+   */
+  typeEnvResolution = false,
 ): ResolveHintsResult {
   const symbolMap = buildSymbolMap(symbols);
   const extNodes = new Map<string, ExternalDependencyNode>();
@@ -415,13 +423,20 @@ export function resolveHints(
           // same-file precise hit. If it yields nothing, we fall through to the
           // byte-identical parity selector below.
           let target: Symbol | undefined;
-          if (resolver.strategy === "mro" && hint.receiverText) {
+          // Wave 3 (Tier B): the type-env may have resolved a bare receiver to a
+          // type name even when the resolver doesn't propagate return types (e.g.
+          // a `new User()` local), so attempt member-call resolution when EITHER
+          // a receiverText OR a flag-supplied receiverType is present.
+          const teReceiverType = typeEnvResolution ? hint.receiverType : undefined;
+          if (resolver.strategy === "mro" && (hint.receiverText || teReceiverType)) {
             target = resolveMemberCallTarget(
               hint.targetName,
-              hint.receiverText,
+              hint.receiverText ?? "",
               caller,
               { symbolById, symbolMap, methodsByOwner, mroLinear },
               resolver.propagatesReturnTypes,
+              teReceiverType,
+              typeEnvResolution,
             );
           }
 
@@ -547,31 +562,55 @@ function resolveMemberCallTarget(
     mroLinear: Map<string, string[]>;
   },
   propagatesReturnTypes: boolean,
+  /** Wave 3 (Tier B): the type-env's resolved receiver type NAME for a bare local. */
+  receiverTypeName?: string,
+  /** Wave 3 (Tier B): enable the ported return-type unwrap in chain binding. */
+  useReturnTypeUnwrap = false,
 ): Symbol | undefined {
-  // Resolve the receiver type. `this`/`self` always work; chained receivers only
-  // when the resolver propagates return types.
-  const text = receiverText.trim();
-  const isSelf = text === "this" || text === "self";
-  if (!isSelf && !propagatesReturnTypes) return undefined;
-
   const chainDeps: ChainBindingDeps = {
     symbolById: deps.symbolById,
     symbolMap: deps.symbolMap,
     methodsByOwner: deps.methodsByOwner,
   };
-  const receiverType = resolveReceiverType(receiverText, caller, chainDeps);
+
+  // Search a resolved receiver TYPE symbol's own methods, then its linearised
+  // ancestors, for the method. PRECISION GUARDRAIL: returns `undefined` (→ caller
+  // tries the next tier / parity) rather than emitting a guessed edge.
+  const searchType = (receiverType: Symbol): Symbol | undefined => {
+    const ownMethod = (deps.methodsByOwner.get(receiverType.id) ?? []).find((m) => m.name === calleeName);
+    if (ownMethod && ownMethod.id !== caller.id) return ownMethod;
+    const linear = deps.mroLinear.get(receiverType.id) ?? [];
+    for (const ancestorId of linear) {
+      const m = (deps.methodsByOwner.get(ancestorId) ?? []).find((mm) => mm.name === calleeName);
+      if (m && m.id !== caller.id) return m;
+    }
+    return undefined;
+  };
+
+  // ── Wave 3 (Tier B): receiverType-FIRST. When the per-file type-env resolved
+  // the bare receiver to a type NAME, resolve THAT to a class symbol and search
+  // it directly — this is the branch that turns `u.save()`→`User.save`. Only
+  // fires when the type name resolves to a real class symbol; otherwise we fall
+  // through to the existing receiver-text path (and then to parity), never
+  // emitting an edge from a type name with no class. ─────────────────────────
+  if (receiverTypeName) {
+    const typeSym = typeNameToSymbol(receiverTypeName, chainDeps);
+    if (typeSym) {
+      const hit = searchType(typeSym);
+      if (hit) return hit;
+    }
+  }
+
+  // Resolve the receiver type from its raw text. `this`/`self` always work;
+  // chained receivers only when the resolver propagates return types.
+  const text = receiverText.trim();
+  const isSelf = text === "this" || text === "self";
+  if (!isSelf && !propagatesReturnTypes) return undefined;
+
+  const receiverType = resolveReceiverType(receiverText, caller, chainDeps, useReturnTypeUnwrap);
   if (!receiverType) return undefined;
 
-  // Search the receiver type's own methods first, then its linearised ancestors.
-  const ownMethod = (deps.methodsByOwner.get(receiverType.id) ?? []).find((m) => m.name === calleeName);
-  if (ownMethod && ownMethod.id !== caller.id) return ownMethod;
-
-  const linear = deps.mroLinear.get(receiverType.id) ?? [];
-  for (const ancestorId of linear) {
-    const m = (deps.methodsByOwner.get(ancestorId) ?? []).find((mm) => mm.name === calleeName);
-    if (m && m.id !== caller.id) return m;
-  }
-  return undefined;
+  return searchType(receiverType);
 }
 
 // ─── Phase 3 entry point ─────────────────────────────────────────────────────
@@ -593,12 +632,18 @@ export async function resolveReferences(
   hints?: RawRelationshipHint[],
   repoRoot?: string,
   allFiles?: readonly string[],
+  /**
+   * Wave 3 (Tier B): forwarded to {@link resolveHints} to enable receiverType-
+   * first member-call resolution + the chain-binding return-type unwrap. Default
+   * `false` → byte-identical pre-Wave-3 (the zero-code rollback lever).
+   */
+  typeEnvResolution = false,
 ): Promise<ResolveHintsResult> {
   if (hints && hints.length > 0) {
     const languageConfigs = repoRoot
       ? await loadLanguageConfigs(repoRoot)
       : undefined;
-    return resolveHints(hints, symbols, languageConfigs, allFiles);
+    return resolveHints(hints, symbols, languageConfigs, allFiles, typeEnvResolution);
   }
 
   // Legacy path: derive relationships from symbol kinds and signatures

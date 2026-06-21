@@ -15,6 +15,11 @@
 export type PhaseName =
   | "structure"
   | "parsing"
+  // Wave 3 (Tier B): the per-file AST type-env walk. It currently runs INSIDE the
+  // `parsing` phase (within `extractSymbolsWithQueries`, reusing the live tree),
+  // so this slot stays 0 until/unless the env is hoisted into a top-level pass.
+  // Declared here so the phase exists in the closed `Record<PhaseName,...>` enum.
+  | "typeEnv"
   | "resolution"
   | "clustering"
   | "processes"
@@ -164,6 +169,7 @@ type ElapsedField = "embeddingElapsedMs";
 const PHASE_NAMES: readonly PhaseName[] = [
   "structure",
   "parsing",
+  "typeEnv",
   "resolution",
   "clustering",
   "processes",
@@ -179,6 +185,7 @@ export function createMetricsCollector(): MetricsCollector {
   const phases: Record<PhaseName, number> = {
     structure: 0,
     parsing: 0,
+    typeEnv: 0,
     resolution: 0,
     clustering: 0,
     processes: 0,
@@ -193,6 +200,7 @@ export function createMetricsCollector(): MetricsCollector {
   const phaseRss: Record<PhaseName, number> = {
     structure: 0,
     parsing: 0,
+    typeEnv: 0,
     resolution: 0,
     clustering: 0,
     processes: 0,

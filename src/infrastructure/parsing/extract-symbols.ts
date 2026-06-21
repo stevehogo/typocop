@@ -9,6 +9,9 @@ import { computeComplexity } from "./complexity.js";
 import { extractNamedBindings } from "./named-bindings.js";
 import { extractMethodSignature } from "./signature.js";
 import { isNodeExported } from "./export-detection.js";
+import { isTypeEnvEnabled } from "../../platform/utils/limits.js";
+import { buildTypeEnv, type TypeEnvironment } from "./type-env/type-env.js";
+import { typeConfigs } from "./type-env/extractors/index.js";
 
 /**
  * `@definition.*` capture suffixes that denote a callable (function / method /
@@ -49,6 +52,19 @@ export interface RawRelationshipHint {
    * true caller and lets chain-binding thread `returnType` through `a.b().c()`.
    */
   readonly enclosingSymbolId?: string;
+  /**
+   * Wave 3 (Tier B): for a member call `recv.method(...)` whose `recv` is a BARE
+   * local identifier (not `this`/`self`/a chain — those are handled by
+   * `resolveReceiverType`), the receiver variable's resolved type NAME from the
+   * per-file AST type-env (`typeEnv.lookup`). Phase 3 resolves it via
+   * `typeNameToSymbol` and searches `methodsByOwner`+`mroLinear` BEFORE the
+   * receiver-text path. Only populated when the Tier-B flag (`TYPOCOP_TYPE_ENV`)
+   * is on AND the language has a registered type-extractor config. Transient —
+   * NEVER persisted on a Symbol/Relationship.
+   * MUST stay structurally mirrored in `CachedRelationshipHint`
+   * (`core/ports/index-cache.ts`) or it is dropped on the incremental path.
+   */
+  readonly receiverType?: string;
   // ── Wave 1 named-binding carrier (OPTIONAL; additive; `import` hints only) ──
   /**
    * For a named import (`import { User as U } from './models'`): the
@@ -254,6 +270,20 @@ export function extractSymbolsWithQueries(
   const symbols: Symbol[] = [];
   const hints: RawRelationshipHint[] = [];
 
+  // ── Wave 3 (Tier B): per-file AST type-env ──────────────────────────────────
+  // Built ONCE per file, lazily, ONLY when the Tier-B flag is on AND the language
+  // has a registered type-extractor config. Reuses the already-parsed tree (NO
+  // re-parse). Phase 2 has no global symbol index, so it passes localClassNames
+  // only (no cross-file source) — the common `new User()` case resolves locally;
+  // cross-file ctor verification is deferred to Phase 3. When the flag is off the
+  // env is never built and `receiverType` is never populated → byte-identical.
+  const typeEnvEnabled = isTypeEnvEnabled() && typeConfigs[language] !== undefined;
+  let typeEnv: TypeEnvironment | undefined;
+  const getTypeEnv = (): TypeEnvironment => {
+    if (typeEnv === undefined) typeEnv = buildTypeEnv(tree, language);
+    return typeEnv;
+  };
+
   for (const match of matches) {
     const nameCapture = match.captures.find((c) => c.name === "name");
     const defCapture = match.captures.find((c) => c.name.startsWith("definition."));
@@ -374,6 +404,13 @@ export function extractSymbolsWithQueries(
         // and chain binding. Both optional — bare `fn()` carries no receiver.
         const receiverText = extractReceiverText(callNameCapture.node);
         const enclosingSymbolId = extractEnclosingSymbolId(callNameCapture.node, filePath);
+        // Wave 3 (Tier B): for a BARE local receiver (not this/self/chained —
+        // those are handled by resolveReceiverType), resolve its type via the
+        // per-file type-env so Phase 3 can target the right owning method.
+        const receiverType =
+          typeEnvEnabled && receiverText !== undefined && isBareReceiver(receiverText)
+            ? getTypeEnv().lookup(receiverText, callNameCapture.node)
+            : undefined;
         hints.push({
           kind: "call",
           sourceFile: filePath,
@@ -382,6 +419,7 @@ export function extractSymbolsWithQueries(
           language,
           ...(receiverText !== undefined ? { receiverText } : {}),
           ...(enclosingSymbolId !== undefined ? { enclosingSymbolId } : {}),
+          ...(receiverType !== undefined ? { receiverType } : {}),
         });
       }
     }
@@ -574,6 +612,19 @@ function extractEnclosingSymbolId(callNameNode: Parser.SyntaxNode, filePath: str
     cur = cur.parent;
   }
   return undefined;
+}
+
+/**
+ * Whether a receiver expression is a BARE local-variable identifier — the only
+ * form the Wave-3 type-env fallback handles in Phase 2. Excludes `this`/`self`/
+ * `$this` and chained/`this.field` forms (those are covered by
+ * `resolveReceiverType` in Phase 3 — avoid double-handling, per the precision
+ * guardrail). Allows a leading `$` for PHP variables (`$repo`).
+ */
+function isBareReceiver(receiverText: string): boolean {
+  const text = receiverText.trim();
+  if (text === "this" || text === "self" || text === "$this") return false;
+  return /^\$?[A-Za-z_][\w$]*$/.test(text);
 }
 
 function inferVisibility(node: Parser.SyntaxNode, language: Language): Visibility {

@@ -132,6 +132,57 @@ export function isParseWorkersEnabled(): boolean {
   return v === "1" || v === "true" || v === "yes" || v === "on";
 }
 
+/** Environment opt-in for the Wave 3 Tier-B AST type-env ({@link isTypeEnvEnabled}). */
+export const TYPE_ENV_ENV = "TYPOCOP_TYPE_ENV";
+
+/**
+ * Whether the Wave 3 Tier-B AST type-environment resolution is enabled. **OPT-IN
+ * — default `false`.** Gates (a) building the per-file type-env in Phase 2,
+ * (b) populating `RawRelationshipHint.receiverType`, (c) the `receiverType`-first
+ * branch in `resolveMemberCallTarget` (Phase 3), and (d) the ported
+ * `extractReturnTypeName` swap in chain-binding. When unset, none of those fire
+ * and the emitted graph is byte-identical to pre-Wave-3.
+ *
+ * Read in BOTH Phase 2 (inside `extractSymbolsWithQueries`, which runs in parse
+ * workers that inherit `process.env`) and the composition root (to derive
+ * `PipelineConfig.typeEnvResolution` for Phase 3) — both consult this single env
+ * so the two phases agree. Mirrors the {@link isParseWorkersEnabled} pattern.
+ */
+export function isTypeEnvEnabled(): boolean {
+  const raw = process.env[TYPE_ENV_ENV];
+  if (raw === undefined) return false;
+  const v = raw.trim().toLowerCase();
+  return v === "1" || v === "true" || v === "yes" || v === "on";
+}
+
+/** Environment opt-in for the Wave 3 Tier-A LSP / TS-compiler-API type tier ({@link isLspTypesEnabled}). */
+export const LSP_TYPES_ENV = "TYPOCOP_LSP_TYPES";
+
+/**
+ * Whether the Wave 3 Tier-A (A1) compiler-API receiver-type resolution is
+ * enabled. **OPT-IN — default `false`.** When `true`, a post-Phase-2,
+ * whole-corpus pass builds ONE TypeScript `Program` per project (via a LAZY
+ * `await import("typescript")` — the ~tens-of-MB compiler is NEVER loaded when
+ * this is off) and, for TS/JS `call` hints, resolves the receiver's nominal type
+ * from the real type checker. That answer is stamped onto `hint.receiverType`
+ * with PRECEDENCE over the Tier-B (`TYPOCOP_TYPE_ENV`) AST answer; Phase 3 then
+ * consumes `hint.receiverType` uniformly (no Phase-3 change beyond Tier B).
+ *
+ * The two tiers are independent flags (plan §10): Tier A (this) → Tier B → the
+ * parity selector. When this is off the compiler is never imported and the
+ * emitted graph is byte-identical to a Tier-A-absent run.
+ *
+ * Heavy + new + measurement-gated (plan §8): the default stays OFF until a
+ * large-repo perf measurement justifies flipping it. Mirrors the
+ * {@link isParseWorkersEnabled} / {@link isTypeEnvEnabled} reader pattern.
+ */
+export function isLspTypesEnabled(): boolean {
+  const raw = process.env[LSP_TYPES_ENV];
+  if (raw === undefined) return false;
+  const v = raw.trim().toLowerCase();
+  return v === "1" || v === "true" || v === "yes" || v === "on";
+}
+
 /**
  * Bounded concurrency for Phase 6 embedding generation (Phase C).
  *
