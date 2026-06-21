@@ -102,6 +102,19 @@ export interface Symbol {
    * `entryPointReason` node prop.
    */
   readonly entryPointReason?: string;
+  // ── Wave 5 synthetic-Symbol tag (OPTIONAL; additive) ─────────────────────
+  /**
+   * `true` for Symbols MINTED by the data-touch pass to stand in for entities
+   * that have no source-code Symbol of their own — a DB table reached only via
+   * an ORM call (id `dbmodel:<table>`, `kind:"class"`) or an HTTP endpoint with
+   * no framework route Symbol (id `apiendpoint:<METHOD>:<path>`, `kind:"function"`).
+   * They exist purely as edge anchors for the graph; they are EXCLUDED from
+   * clustering (`clustering/graph.ts`) and from the embed/keyword search loop
+   * (`search/index.ts`) so they never pollute community membership or vectors.
+   * Persisted as a STRING node prop (`"true"`/absent). Absent ⇒ a real,
+   * source-derived Symbol; the shape stays pre-Wave-5 identical.
+   */
+  readonly synthetic?: boolean;
 }
 
 /**
@@ -148,7 +161,17 @@ export type RelationType =
   //   via the linearised (C3/MRO) ancestor chain. NEVER replaces `inherits`.
   // `methodImplements`: a concrete method satisfies an interface/trait method
   //   contract. NEVER replaces `implements`.
-  | "overrides" | "methodImplements";
+  | "overrides" | "methodImplements"
+  // ── Wave 5 data-touch / route / event edges (ADDITIVE) ───────────────────
+  // Emitted by the post-resolution data-touch pass (heuristic detection over the
+  // resolved `calls` graph). Each carries `metadata.confidence` (stringified
+  // float) + `metadata.reason`. They map to snake_case Cypher REL tables via an
+  // explicit relType→label map (camelCase does NOT round-trip through
+  // `toUpperCase()`), and each needs a `CREATE REL TABLE` + allow-list entry in
+  // the persistence DDL (the graph schema is fixed, not flexible — arbitrary
+  // edge props are dropped). `publishesEvent`/`subscribesTo` are declared so the
+  // flow BFS can traverse them, but their heuristic detector is flag-gated OFF.
+  | "readsFromDb" | "writesToDb" | "handlesRoute" | "publishesEvent" | "subscribesTo";
 
 export interface Relationship {
   readonly id: string;

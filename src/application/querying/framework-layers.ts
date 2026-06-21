@@ -76,6 +76,14 @@ export function detectFramework(filePath: string): string | null {
  * Accepts an optional framework hint; auto-detects from file path if not provided.
  * Falls back to generic patterns when no framework is detected.
  *
+ * Wave 5 note: this name/path/signature regex is now the SECOND-TIER fallback in
+ * `trace_data_flow`. When a node has a real data-touch edge (`HANDLES_ROUTE` →
+ * `api`, `READS_FROM_DB`/`WRITES_TO_DB` → `model`), `executeDataFlowTrace`
+ * classifies it from that ground-truth edge and never calls this function for it.
+ * This regex still handles `controller`/`service`/`repository` (no dedicated edge
+ * type) and the degraded no-edge case for `api`/`model` (graphs indexed before
+ * the data-touch pass ran). It is intentionally unchanged.
+ *
  * Requirements: 4.2, 4.4, 4.6
  */
 export function classifyLayer(node: GraphNode, frameworkHint?: string): TraceLayer {

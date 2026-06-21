@@ -14,6 +14,7 @@ import type {
   Language,
   Process,
   Relationship,
+  RelationType,
   Symbol,
 } from "../../core/domain.js";
 import { persistedKey } from "../../core/domain.js";
@@ -32,6 +33,7 @@ import { enrichHintsWithTsTypes } from "../../infrastructure/parsing/ts-types/ts
 import { resolveReferences } from "./resolution/index.js";
 import { clusterSymbols, type AIClient } from "./clustering/index.js";
 import { traceProcesses, annotateEntryPoints } from "./processes/index.js";
+import { runDataTouchPass } from "./data-touch/index.js";
 import { buildSearchIndex, type EmbeddingResult } from "./search/index.js";
 import { EMBEDDING_CONCURRENCY } from "../../platform/utils/limits.js";
 import { createMetricsCollector, formatMetrics, type IndexingMetrics } from "./metrics.js";
@@ -149,6 +151,33 @@ export interface PipelineConfig {
    * the emitted graph is byte-identical to a Tier-A-absent run.
    */
   readonly lspTypes?: boolean;
+  /**
+   * Wave 5 data-touch detection pass. **Default `false`.** Derived from
+   * `TYPOCOP_DATA_TOUCH` at the composition root (see {@link isDataTouchEnabled}).
+   * When `true`, a post-resolution whole-corpus pass detects DB models / route
+   * handlers over the resolved `calls` graph and emits
+   * `readsFromDb`/`writesToDb`/`handlesRoute` edges (plus synthetic anchor
+   * Symbols). When off, the pass never runs and the emitted graph is
+   * byte-identical to pre-Wave-5. (The pass is wired into the pipeline in a later
+   * stage; this flag is the gate.)
+   */
+  readonly dataTouch?: boolean;
+  /**
+   * Wave 5 sub-flag (`dataTouch.events`). **Default `false`.** Enables the
+   * heuristic event-channel detector (`publishesEvent`/`subscribesTo`). Noisy
+   * until Wave 6 supplies extracted channel args, so it stays OFF; only
+   * meaningful when {@link dataTouch} is on. Derived from
+   * `TYPOCOP_DATA_TOUCH_EVENTS`.
+   */
+  readonly dataTouchEvents?: boolean;
+  /**
+   * Wave 5 sub-flag (`dataTouch.singleModelFallback`). **Default `false`.**
+   * Enables the noisiest DB-resolution strategy (link a DB call to the sole model
+   * when exactly one exists). OFF by default for precision-over-recall; only
+   * meaningful when {@link dataTouch} is on. Derived from
+   * `TYPOCOP_DATA_TOUCH_SINGLE_MODEL_FALLBACK`.
+   */
+  readonly dataTouchSingleModelFallback?: boolean;
 }
 
 /**
@@ -311,13 +340,51 @@ export async function runIndexingPipeline(config: PipelineConfig): Promise<Pipel
   // so Phase 3 stays tier-agnostic (no extra Phase-3 change beyond Tier B). When
   // both are off, no hint carries `receiverType` and this is a no-op.
   const consumeReceiverType = (config.typeEnvResolution ?? false) || (config.lspTypes ?? false);
-  const { relationships, extNodes, dependsOnStats } = await metrics.time("resolution", () =>
+  // `let` (not `const`): the Wave 5 data-touch pass (below) re-binds both with
+  // the additive synthetic Symbols + data-touch edges before clustering/persist.
+  const resolution = await metrics.time("resolution", () =>
     resolveReferences(symbols, hints, sourcePath, fileNodes.map((f) => f.path), consumeReceiverType),
   );
+  let relationships = resolution.relationships;
+  const { extNodes, dependsOnStats } = resolution;
   metrics.set("relationshipCount", relationships.length);
   metrics.set("externalDependencyCount", extNodes.size);
   if (verbose) console.error(`[pipeline] Phase 3 complete: ${relationships.length} relationships resolved`);
   if (verbose && dependsOnStats) console.error(`[pipeline] Phase 3 DEPENDS_ON fan-out: ${dependsOnStats.edgeCount} edges (max ${dependsOnStats.maxFanOutPerImport} per external import)`);
+
+  // ── Phase 3.5: Data-touch detection + flow assembly (Wave 5) ────────────────
+  // GLOBAL post-resolution pass, gated behind `config.dataTouch` (default OFF —
+  // byte-identical when off). Detects DB models / route handlers over the
+  // resolved `calls` graph and emits `readsFromDb`/`writesToDb`/`handlesRoute`
+  // edges (plus synthetic anchor Symbols), then assembles end-to-end flows
+  // (`GET /users -> users`) as additive `Process` records. The augmented
+  // `symbols`/`relationships` flow into clustering/persist unchanged (the new
+  // edges are global aggregates rewritten wholesale, like DEPENDS_ON; the new
+  // synthetic Symbols are excluded from clustering + search). The flows are
+  // APPENDED to the Phase-5 `Process[]` below. This is a whole-graph re-run on
+  // every full/delta index (no per-file delta bookkeeping).
+  let dataTouchFlows: Process[] = [];
+  if (config.dataTouch) {
+    const pass = await metrics.time("dataTouch", async () =>
+      runDataTouchPass(symbols, relationships, {
+        events: config.dataTouchEvents,
+        singleModelFallback: config.dataTouchSingleModelFallback,
+      }),
+    );
+    if (pass.newSymbols.length > 0) symbols = [...symbols, ...pass.newSymbols];
+    if (pass.newRelationships.length > 0) relationships = [...relationships, ...pass.newRelationships];
+    dataTouchFlows = pass.flows;
+    metrics.set("dataTouchEdgeCount", pass.newRelationships.length);
+    metrics.set("syntheticSymbolCount", pass.newSymbols.length);
+    metrics.set("relationshipCount", relationships.length);
+    metrics.set("symbolCount", symbols.length);
+    if (verbose) {
+      console.error(
+        `[pipeline] Phase 3.5 (data-touch): ${pass.newRelationships.length} edge(s), ` +
+          `${pass.newSymbols.length} synthetic Symbol(s), ${pass.flows.length} flow(s) assembled`,
+      );
+    }
+  }
 
   if (verbose) console.error("[pipeline] Starting Phase 4: Clustering");
 
@@ -332,7 +399,15 @@ export async function runIndexingPipeline(config: PipelineConfig): Promise<Pipel
 
   // Phase 5: Trace processes (Req 3.5)
   metrics.startPhase("processes");
-  const processes = traceProcesses(symbols, relationships);
+  const callFlowProcesses = traceProcesses(symbols, relationships);
+  // Wave 5: APPEND the assembled data-touch flows (computed in Phase 3.5) to the
+  // call-flow Processes — additive, not a replacement. Both ride the same
+  // `Process`/`HAS_STEP` persistence; data-flow Processes are distinguished by
+  // their name convention (`GET /users -> users`) and `dataflow_*` id. Empty when
+  // `config.dataTouch` is off, so `processes` stays byte-identical pre-Wave-5.
+  const processes = dataTouchFlows.length > 0
+    ? [...callFlowProcesses, ...dataTouchFlows]
+    : callFlowProcesses;
   // Wave 2 (1.1): annotate entry-point symbols with `entryPointKind` /
   // `entryPointReason` so the persisted Symbol node carries them. Purely
   // additive — symbols below the entry-point threshold are returned unchanged,
@@ -465,7 +540,12 @@ export async function runIndexingPipeline(config: PipelineConfig): Promise<Pipel
     : null;
   const symbolsToInsert = insertScope === null
     ? symbols
-    : symbols.filter((s) => insertScope.has(s.location.filePath));
+    // Wave 5: synthetic data-touch anchors (`dbmodel:`/`apiendpoint:`/`eventchannel:`)
+    // are GLOBAL aggregates, like clusters/processes — the data-touch pass
+    // re-derives them whole-graph each run. Always (re)insert them regardless of
+    // the changed-file scope so the wholesale-rewritten data-touch edges never
+    // dangle on a delta write (keeps delta == full).
+    : symbols.filter((s) => s.synthetic || insertScope.has(s.location.filePath));
 
   // B3 (vector streaming): an embedding is in-scope for this run's vector write
   // when no delta is active (full write) OR its file is in the changed+added
@@ -916,6 +996,26 @@ function attachAccessedKeys(
   });
 }
 
+/**
+ * Maps a {@link RelationType} to its Cypher REL-table label where the default
+ * `relType.toUpperCase()` would NOT produce the intended snake_case table name.
+ *
+ * Most relTypes (`calls` → `CALLS`, `inherits` → `INHERITS`) round-trip cleanly,
+ * but `dependsOn` and the Wave 5 camelCase data-touch types collapse their word
+ * boundaries under `toUpperCase()` (`readsFromDb` → `READSFROMDB`, NOT
+ * `READS_FROM_DB`). Listing them here keeps the persisted edge label in lock-step
+ * with the `CREATE REL TABLE` / `REL_LABEL_MAP` / `KNOWN_REL_TYPES` entries in the
+ * Ladybug adapter. Any relType NOT in this map falls back to `toUpperCase()`.
+ */
+export const RELTYPE_EDGE_LABEL: Partial<Record<RelationType, string>> = {
+  dependsOn: "DEPENDS_ON",
+  readsFromDb: "READS_FROM_DB",
+  writesToDb: "WRITES_TO_DB",
+  handlesRoute: "HANDLES_ROUTE",
+  publishesEvent: "PUBLISHES_EVENT",
+  subscribesTo: "SUBSCRIBES_TO",
+};
+
 export function countPersistRows(
   vectorEntries: number,
   symbols: readonly Symbol[],
@@ -1016,6 +1116,10 @@ async function storeInDatabases(
       isExported: s.isExported === undefined ? "" : s.isExported ? "true" : "false",
       entryPointKind: s.entryPointKind ?? "",
       entryPointReason: s.entryPointReason ?? "",
+      // Wave 5: synthetic-Symbol tag (data-touch DB-model / API-endpoint anchors).
+      // Persisted as "true"/"" so the read side leaves it undefined for real
+      // symbols. countPersistRows is unaffected (prop, not row).
+      synthetic: s.synthetic ? "true" : "",
     })),
     countNodes,
     nodeEvents,
@@ -1063,11 +1167,14 @@ async function storeInDatabases(
 
   // ── Relationship groups (one type each) ─────────────────────────────────────
   // Resolved relationships carry mixed relTypes; group by the SAME mapping used
-  // by the per-row path ("dependsOn" → "DEPENDS_ON", else relType.toUpperCase())
-  // so each batch call sees a single type, preserving insertion order per type.
+  // by the per-row path so each batch call sees a single type, preserving
+  // insertion order per type. Most relTypes round-trip through `toUpperCase()`,
+  // but the camelCase data-touch types (Wave 5) do NOT collapse to the snake_case
+  // REL table names (`readsFromDb` → `READSFROMDB` ≠ `READS_FROM_DB`), so they are
+  // mapped explicitly via RELTYPE_EDGE_LABEL alongside the existing dependsOn case.
   const edgesByType = new Map<string, RelationshipRow[]>();
   for (const r of relationships) {
-    const type = r.relType === "dependsOn" ? "DEPENDS_ON" : r.relType.toUpperCase();
+    const type = RELTYPE_EDGE_LABEL[r.relType] ?? r.relType.toUpperCase();
     const rows = edgesByType.get(type) ?? [];
     rows.push({ fromId: keyOf(r.source), toId: keyOf(r.target), properties: r.metadata });
     edgesByType.set(type, rows);

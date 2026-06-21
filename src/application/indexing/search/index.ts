@@ -135,12 +135,19 @@ export async function buildSearchIndex(
   embeddingCache: EmbeddingCachePort | null = null,
   expectedDimensions: number | null = null,
 ): Promise<SearchIndex> {
-  const keywords = buildKeywordIndex(symbols);
+  // Wave 5: synthetic Symbols (data-touch DB-model / API-endpoint anchors) carry
+  // no real source content; keyword-indexing or embedding them would produce
+  // noisy entries (e.g. `class: dbmodel:users`). Exclude them from BOTH the
+  // keyword index and the embed loop here, before either is built — they stay
+  // graph nodes (edge anchors), not searchable content. When no synthetics are
+  // present this is the identity filter, so the index is byte-identical.
+  const searchableSymbols = symbols.filter((s) => !s.synthetic);
+  const keywords = buildKeywordIndex(searchableSymbols);
 
   if (embedFn === null) {
     return {
       keywords,
-      symbolCount: symbols.length,
+      symbolCount: searchableSymbols.length,
       embeddings: [],
       embeddingStats: { attempts: 0, successes: 0, failures: 0 },
     };
@@ -151,7 +158,7 @@ export async function buildSearchIndex(
   // here, before any concurrency.
   const jobs: EmbedJob[] = [];
 
-  for (const symbol of symbols) {
+  for (const symbol of searchableSymbols) {
     jobs.push({
       text: formatSymbolForEmbedding(symbol),
       toResult: (embedding) => ({

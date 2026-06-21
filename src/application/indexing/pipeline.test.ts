@@ -812,6 +812,137 @@ describe("runIndexingPipeline — persist progress drift guard (Phase A)", () =>
   });
 });
 
+// ─── Wave 5: data-touch pass wiring (drift guard ON + flag-OFF parity) ──────────
+
+import { runDataTouchPass } from "./data-touch/index.js";
+
+describe("runIndexingPipeline — Wave 5 data-touch pass", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    setupDefaultMocks();
+  });
+
+  // A symbol set that drives the heuristic detectors WITHOUT a populated
+  // signature: a `users` model class under an `entities/` path (file-path model
+  // detection) and a caller `findManyUsers` (name contains the table) calling a
+  // read-named method `find` (curated DB-read set) → one `readsFromDb` edge to
+  // the `users` model, and an entry-point-classified handler so a flow assembles.
+  function dataTouchFixture(): { symbols: Symbol[]; relationships: Relationship[] } {
+    const model: Symbol = {
+      ...STUB_SYMBOL, id: "id:users", logicalKey: "lk-users", name: "users", kind: "class",
+      location: { filePath: "src/entities/users.ts", startLine: 0, startColumn: 0, endLine: 0, endColumn: 0 },
+    };
+    const handler: Symbol = {
+      ...STUB_SYMBOL, id: "id:listUsers", logicalKey: "lk-listUsers", name: "listUsers", kind: "function",
+      entryPointKind: "route",
+      location: { filePath: "src/users.ts", startLine: 0, startColumn: 0, endLine: 0, endColumn: 0 },
+    };
+    const repo: Symbol = {
+      ...STUB_SYMBOL, id: "id:findManyUsers", logicalKey: "lk-findManyUsers", name: "findManyUsers", kind: "function",
+      location: { filePath: "src/users.repo.ts", startLine: 0, startColumn: 0, endLine: 0, endColumn: 0 },
+    };
+    const find: Symbol = {
+      ...STUB_SYMBOL, id: "id:find", logicalKey: "lk-find", name: "find", kind: "method",
+      location: { filePath: "src/db.ts", startLine: 0, startColumn: 0, endLine: 0, endColumn: 0 },
+    };
+    const relationships: Relationship[] = [
+      { id: "c1", source: "id:listUsers", target: "id:findManyUsers", relType: "calls", metadata: {} },
+      { id: "c2", source: "id:findManyUsers", target: "id:find", relType: "calls", metadata: {} },
+    ];
+    return { symbols: [model, handler, repo, find], relationships };
+  }
+
+  it("drift guard with dataTouch ON: sum(onRows) === countPersistRows over the AUGMENTED arrays", async () => {
+    const { adapter } = makeMockAdapter(true);
+    const { symbols, relationships } = dataTouchFixture();
+    const clusters: Cluster[] = [];
+    const processes: Process[] = []; // traceProcesses returns none; the flow comes from the pass.
+    const extNodes = new Map<string, ExternalDependencyNode>();
+    const embeddings = symbols.map((s) => ({ symbolId: s.id, embedding: STUB_EMBEDDING, metadata: {} }));
+
+    mockExtractAllSymbols.mockResolvedValue({ symbols, hints: [], skippedFiles: 0 });
+    mockResolveReferences.mockReturnValue({ relationships, extNodes });
+    mockClusterSymbols.mockResolvedValue(clusters);
+    mockTraceProcesses.mockReturnValue(processes);
+    mockBuildSearchIndex.mockResolvedValue({
+      keywords: new Map(), symbolCount: symbols.length, embeddings,
+      embeddingStats: { attempts: embeddings.length, successes: embeddings.length, failures: 0 },
+    });
+
+    const result = await runIndexingPipeline({
+      sourcePath: ".", language: "typescript", verbose: false, adapter,
+      dataTouch: true, dataTouchSingleModelFallback: true,
+    });
+
+    // Re-derive the augmented arrays the pipeline built (same pass, same inputs).
+    const pass = runDataTouchPass(symbols, relationships, { singleModelFallback: true });
+    expect(pass.newRelationships.length, "fixture should emit data-touch edges").toBeGreaterThan(0);
+    expect(pass.flows.length, "fixture should assemble at least one flow").toBeGreaterThan(0);
+
+    const augSymbols = [...symbols, ...pass.newSymbols];
+    const augRels = [...relationships, ...pass.newRelationships];
+    const augProcs = [...processes, ...pass.flows];
+    const expectedTotal = countPersistRows(embeddings.length, augSymbols, augRels, clusters, augProcs, extNodes);
+
+    const summed =
+      result.metrics.vectorWrites + result.metrics.graphNodeWrites + result.metrics.graphEdgeWrites;
+    expect(summed).toBe(expectedTotal);
+
+    // The data-touch counters were recorded.
+    expect(result.metrics.dataTouchEdgeCount).toBe(pass.newRelationships.length);
+    expect(result.metrics.syntheticSymbolCount).toBe(pass.newSymbols.length);
+    // Node writes account for the synthetic anchors + flow Processes.
+    expect(result.metrics.graphNodeWrites).toBe(
+      augSymbols.length + clusters.length + augProcs.length + extNodes.size,
+    );
+  });
+
+  it("flag OFF is byte-identical: no synthetic symbols, no data-touch edges, no extra processes", async () => {
+    const { symbols, relationships } = dataTouchFixture();
+    const clusters: Cluster[] = [];
+    const processes: Process[] = [];
+    const extNodes = new Map<string, ExternalDependencyNode>();
+    const embeddings = symbols.map((s) => ({ symbolId: s.id, embedding: STUB_EMBEDDING, metadata: {} }));
+
+    function prime(): void {
+      mockExtractAllSymbols.mockResolvedValue({ symbols, hints: [], skippedFiles: 0 });
+      mockResolveReferences.mockReturnValue({ relationships, extNodes });
+      mockClusterSymbols.mockResolvedValue(clusters);
+      mockTraceProcesses.mockReturnValue(processes);
+      mockBuildSearchIndex.mockResolvedValue({
+        keywords: new Map(), symbolCount: symbols.length, embeddings,
+        embeddingStats: { attempts: embeddings.length, successes: embeddings.length, failures: 0 },
+      });
+    }
+
+    // Run with the flag OFF (omitted).
+    prime();
+    const off = await runIndexingPipeline({ sourcePath: ".", language: "typescript", verbose: false, adapter: makeMockAdapter(true).adapter });
+
+    // The OFF run wrote exactly the pre-Wave-5 row counts: no synthetics, edges,
+    // or flow processes were added.
+    expect(off.metrics.dataTouchEdgeCount).toBe(0);
+    expect(off.metrics.syntheticSymbolCount).toBe(0);
+    expect(off.symbols).toHaveLength(symbols.length);
+    expect(off.symbols.some((s) => s.synthetic)).toBe(false);
+    expect(off.relationships).toHaveLength(relationships.length);
+    expect(off.relationships.some((r) => r.relType === "readsFromDb" || r.relType === "handlesRoute")).toBe(false);
+    expect(off.processes).toHaveLength(0);
+    expect(off.metrics.graphNodeWrites).toBe(symbols.length + clusters.length + extNodes.size);
+
+    // Sanity: the SAME fixture with the flag ON DOES produce data-touch artifacts,
+    // so the OFF result is a true byte-identical baseline (not an empty fixture).
+    prime();
+    const on = await runIndexingPipeline({ sourcePath: ".", language: "typescript", verbose: false, adapter: makeMockAdapter(true).adapter, dataTouch: true, dataTouchSingleModelFallback: true });
+    expect(on.metrics.dataTouchEdgeCount).toBeGreaterThan(0);
+    // The ON run added data-touch edges + at least one flow Process the OFF run
+    // never produced — so OFF is a genuine pre-Wave-5 baseline.
+    expect(on.relationships.length).toBeGreaterThan(off.relationships.length);
+    expect(on.processes.length).toBeGreaterThan(off.processes.length);
+    expect(on.relationships.some((r) => r.relType === "readsFromDb")).toBe(true);
+  });
+});
+
 // ─── A4: diff-based persistence (delta write) ───────────────────────────────────
 //
 // These tests drive the pipeline's DELTA branch with a mock adapter that exposes

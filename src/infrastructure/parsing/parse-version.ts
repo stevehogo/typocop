@@ -21,6 +21,13 @@
  *          re-emit so warm-cache hints carry it when the Tier-B flag is on
  *          (cross-cutting-checklist §0–§1). When the flag is OFF the field is
  *          never populated, so this bump is the only on-the-wire change.
+ *   4 → 5  Wave 5 (data-touch): `Symbol` now carries an optional `synthetic`
+ *          boolean (set on the data-touch pass's minted DB-model / API-endpoint
+ *          anchor Symbols). Although the data-touch pass itself is a
+ *          post-Phase-2 whole-corpus mutation (not parse-cached, like Tier A1),
+ *          the new `Symbol` field is part of the cached per-file `Symbol[]` shape
+ *          (`CachedFileEntry.symbols` stores Symbols as JSON), so a warm cache
+ *          must re-emit to stay shape-consistent (cross-cutting-checklist §0).
  *
  * NOT bumped for Wave 3 Tier A1 (TS-compiler-API receiver types): A1 reuses the
  * existing `receiverType` field and runs as a post-Phase-2, whole-corpus pass on
@@ -29,4 +36,4 @@
  * so it re-runs on warm-cache files every run with no cache plumbing. No new
  * cached/persisted field, so no bump is required (cross-cutting-checklist §0–§1).
  */
-export const PARSE_VERSION = 4;
+export const PARSE_VERSION = 5;

@@ -183,6 +183,57 @@ export function isLspTypesEnabled(): boolean {
   return v === "1" || v === "true" || v === "yes" || v === "on";
 }
 
+/** Shared truthy-env parser (`1`/`true`/`yes`/`on`, default `false`). */
+function isEnvTruthy(name: string): boolean {
+  const raw = process.env[name];
+  if (raw === undefined) return false;
+  const v = raw.trim().toLowerCase();
+  return v === "1" || v === "true" || v === "yes" || v === "on";
+}
+
+/** Environment opt-in for the Wave 5 data-touch detection pass ({@link isDataTouchEnabled}). */
+export const DATA_TOUCH_ENV = "TYPOCOP_DATA_TOUCH";
+/** Environment opt-in for the Wave 5 heuristic event detector ({@link isDataTouchEventsEnabled}). */
+export const DATA_TOUCH_EVENTS_ENV = "TYPOCOP_DATA_TOUCH_EVENTS";
+/** Environment opt-in for the Wave 5 single-model DB fallback ({@link isDataTouchSingleModelFallbackEnabled}). */
+export const DATA_TOUCH_SINGLE_MODEL_FALLBACK_ENV = "TYPOCOP_DATA_TOUCH_SINGLE_MODEL_FALLBACK";
+
+/**
+ * Whether the Wave 5 data-touch detection pass is enabled. **OPT-IN — default
+ * `false`.** Gates the whole post-resolution pass that detects DB models /
+ * route handlers and emits `readsFromDb`/`writesToDb`/`handlesRoute` edges (plus
+ * synthetic anchor Symbols). When unset the pass never runs and the emitted graph
+ * is byte-identical to pre-Wave-5. Derived at the composition root into
+ * `PipelineConfig.dataTouch`; mirrors the {@link isTypeEnvEnabled} reader pattern.
+ */
+export function isDataTouchEnabled(): boolean {
+  return isEnvTruthy(DATA_TOUCH_ENV);
+}
+
+/**
+ * Whether the Wave 5 heuristic event detector is enabled (sub-flag of the
+ * data-touch pass — conceptually `dataTouch.events`). **OPT-IN — default
+ * `false`.** Pure-heuristic `emit`/`publish`/`send` detection is noisy (the
+ * publish verbs are wildly overloaded), so the event detector stays dark until
+ * Wave 6 supplies extracted channel args. Only meaningful when
+ * {@link isDataTouchEnabled} is also on.
+ */
+export function isDataTouchEventsEnabled(): boolean {
+  return isEnvTruthy(DATA_TOUCH_EVENTS_ENV);
+}
+
+/**
+ * Whether the Wave 5 single-model DB fallback (strategy 5) is enabled (sub-flag
+ * of the data-touch pass — conceptually `dataTouch.singleModelFallback`).
+ * **OPT-IN — default `false`.** This is the noisiest DB-resolution strategy
+ * (links any DB call to the sole model when exactly one exists), so it is gated
+ * off by default to favour precision over recall. Only meaningful when
+ * {@link isDataTouchEnabled} is also on.
+ */
+export function isDataTouchSingleModelFallbackEnabled(): boolean {
+  return isEnvTruthy(DATA_TOUCH_SINGLE_MODEL_FALLBACK_ENV);
+}
+
 /**
  * Bounded concurrency for Phase 6 embedding generation (Phase C).
  *

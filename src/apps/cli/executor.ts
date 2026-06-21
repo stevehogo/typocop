@@ -20,7 +20,7 @@ import { executeObsidianExport } from "../../application/export-render/index.js"
 import { createFileWatcher, type FileWatcher } from "../../infrastructure/watch/file-watcher.js";
 import { augment } from "../../application/querying/augment.js";
 import { mergeTypocopHook, type ClaudeSettings } from "./setup.js";
-import { isTypeEnvEnabled, isLspTypesEnabled } from "../../platform/utils/limits.js";
+import { isTypeEnvEnabled, isLspTypesEnabled, isDataTouchEnabled, isDataTouchEventsEnabled, isDataTouchSingleModelFallbackEnabled } from "../../platform/utils/limits.js";
 
 /**
  * A5: build the disk-backed parse + embedding caches for a prefix.
@@ -189,6 +189,11 @@ export async function executeIndexingPipeline(
       // when on, a post-Phase-2 pass lazy-imports `typescript` and overrides
       // `receiverType` for TS/JS hints (precedence over Tier B).
       lspTypes: isLspTypesEnabled(),
+      // Wave 5: derive the data-touch flag + sub-flags from env. All default OFF
+      // (the wave is byte-identical until enabled).
+      dataTouch: isDataTouchEnabled(),
+      dataTouchEvents: isDataTouchEventsEnabled(),
+      dataTouchSingleModelFallback: isDataTouchSingleModelFallbackEnabled(),
     };
 
     const result = await runIndexingPipeline(pipelineConfig);
@@ -371,6 +376,10 @@ export async function executeWatch(
       embeddingCache,
       typeEnvResolution: isTypeEnvEnabled(),
       lspTypes: isLspTypesEnabled(),
+      // Wave 5: data-touch flag + sub-flags (default OFF) on the watch path too.
+      dataTouch: isDataTouchEnabled(),
+      dataTouchEvents: isDataTouchEventsEnabled(),
+      dataTouchSingleModelFallback: isDataTouchSingleModelFallbackEnabled(),
     };
     try {
       const result = await reindexChangedFiles(batch, pipelineConfig);

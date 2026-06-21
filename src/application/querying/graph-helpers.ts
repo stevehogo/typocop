@@ -18,6 +18,50 @@ export function rowToNode(row: CypherNodeRow): GraphNode {
   return { id: n.properties["id"] ?? "", labels: n.labels, properties: n.properties };
 }
 
+/**
+ * Wave 5: row for the data-flow trace query that ALSO projects, per reachable
+ * node, whether it is a route handler (outbound `HANDLES_ROUTE` to an endpoint)
+ * and/or a data-access symbol (outbound `READS_FROM_DB`/`WRITES_TO_DB` to a
+ * model), plus the touch-edge's `confidence` prop (a STRING, since all Kùzu
+ * columns are STRING). `hasRoute`/`hasDb` come back as boolean-ish values from
+ * Cypher (`true`/`false`); `edgeConfidence` is the coalesced confidence STRING or
+ * null when the node has no touch edge.
+ */
+export interface DataFlowTraceRow {
+  n: { labels: string[]; properties: Record<string, string> };
+  hasRoute: boolean | null;
+  hasDb: boolean | null;
+  edgeConfidence: string | number | null;
+}
+
+/** Edge-resolved per-node touch evidence carried alongside its GraphNode. */
+export interface TouchedNode {
+  node: GraphNode;
+  /** `"api"` if the node has an outbound HANDLES_ROUTE, `"model"` if READS/WRITES_TO_DB, else undefined. */
+  touchLayer?: "api" | "model";
+  /** Parsed `[0,1]` confidence of the touch edge, when present. */
+  edgeConfidence?: number;
+}
+
+/** Map a {@link DataFlowTraceRow} into a {@link TouchedNode} (edge-resolved layer + confidence). */
+export function rowToTouchedNode(row: DataFlowTraceRow): TouchedNode {
+  const node: GraphNode = {
+    id: row.n.properties["id"] ?? "",
+    labels: row.n.labels,
+    properties: row.n.properties,
+  };
+  const hasRoute = row.hasRoute === true;
+  const hasDb = row.hasDb === true;
+  // HANDLES_ROUTE (api) takes precedence over a DB touch on the same node.
+  const touchLayer: "api" | "model" | undefined = hasRoute ? "api" : hasDb ? "model" : undefined;
+  let edgeConfidence: number | undefined;
+  if (row.edgeConfidence !== null && row.edgeConfidence !== undefined) {
+    const n = typeof row.edgeConfidence === "number" ? row.edgeConfidence : parseFloat(row.edgeConfidence);
+    if (Number.isFinite(n)) edgeConfidence = Math.max(0, Math.min(1, n));
+  }
+  return { node, ...(touchLayer ? { touchLayer } : {}), ...(edgeConfidence !== undefined ? { edgeConfidence } : {}) };
+}
+
 /** Convert a GraphNode into the application-level Symbol type. */
 export function graphNodeToSymbol(node: GraphNode): Symbol {
   return {
@@ -48,5 +92,8 @@ export function graphNodeToSymbol(node: GraphNode): Symbol {
         : {}),
     ...(prop(node, "entryPointKind") ? { entryPointKind: prop(node, "entryPointKind") as EntryPointKind } : {}),
     ...(prop(node, "entryPointReason") ? { entryPointReason: prop(node, "entryPointReason") } : {}),
+    // Wave 5: read back the synthetic-Symbol tag (data-touch DB-model / API-endpoint
+    // anchors). Absent / "" for real source-derived Symbols (left undefined).
+    ...(prop(node, "synthetic") === "true" ? { synthetic: true } : {}),
   };
 }

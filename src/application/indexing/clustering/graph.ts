@@ -62,6 +62,11 @@ export function buildClusterGraph(
   // Build node map from eligible symbols
   const nodes = new Map<string, GraphNode>();
   for (const sym of symbols) {
+    // Wave 5: synthetic Symbols (data-touch DB-model / API-endpoint anchors) pass
+    // the kind filter (class/function) but are NOT real source code — exclude them
+    // so they never pollute community membership or cluster labels. They remain
+    // graph nodes (edge anchors); they are just not clustered.
+    if (sym.synthetic) continue;
     if (CLUSTERING_SYMBOL_KINDS.has(sym.kind)) {
       nodes.set(sym.id, {
         id: sym.id,

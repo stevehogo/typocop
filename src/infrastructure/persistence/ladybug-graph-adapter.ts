@@ -100,7 +100,7 @@ export class LadybugGraphAdapter implements GraphAdapter {
     for (const label of nodeLabels) {
       const tbl = this.prefixLabel(label);
       await this.exec(
-        `CREATE NODE TABLE IF NOT EXISTS ${tbl} (id STRING, name STRING, kind STRING, filePath STRING, startLine STRING, startColumn STRING, endLine STRING, endColumn STRING, visibility STRING, signature STRING, documentation STRING, cyclomatic STRING, cognitive STRING, maxLoopDepth STRING, responseKeys STRING, accessedKeys STRING, isExported STRING, entryPointKind STRING, entryPointReason STRING, category STRING, confidence STRING, symbolCount STRING, entryPoint STRING, stepCount STRING, key STRING, timestamp STRING, aliases STRING, ecosystem STRING, PRIMARY KEY(id))`,
+        `CREATE NODE TABLE IF NOT EXISTS ${tbl} (id STRING, name STRING, kind STRING, filePath STRING, startLine STRING, startColumn STRING, endLine STRING, endColumn STRING, visibility STRING, signature STRING, documentation STRING, cyclomatic STRING, cognitive STRING, maxLoopDepth STRING, responseKeys STRING, accessedKeys STRING, isExported STRING, entryPointKind STRING, entryPointReason STRING, synthetic STRING, category STRING, confidence STRING, symbolCount STRING, entryPoint STRING, stepCount STRING, key STRING, timestamp STRING, aliases STRING, ecosystem STRING, PRIMARY KEY(id))`,
       );
     }
 
@@ -113,6 +113,8 @@ export class LadybugGraphAdapter implements GraphAdapter {
       "cyclomatic", "cognitive", "maxLoopDepth", "responseKeys", "accessedKeys",
       // Wave 2: per-language export flag + entry-point classification props.
       "isExported", "entryPointKind", "entryPointReason",
+      // Wave 5: synthetic-Symbol tag (data-touch DB-model / API-endpoint anchors).
+      "synthetic",
     ];
     for (const label of nodeLabels) {
       const tbl = this.prefixLabel(label);
@@ -148,6 +150,22 @@ export class LadybugGraphAdapter implements GraphAdapter {
     // Process → Symbol (HAS_STEP) — step_order tracks ordering
     const hasStepTbl = this.prefixType("HAS_STEP");
     await this.exec(`CREATE REL TABLE IF NOT EXISTS ${hasStepTbl} (FROM ${proc} TO ${sym}, step_order STRING)`);
+
+    // ── Wave 5: data-touch / route / event edges (Symbol → Symbol) ──────────
+    // Emitted by the post-resolution data-touch pass and mapped from the
+    // readsFromDb/writesToDb/handlesRoute/publishesEvent/subscribesTo relTypes via
+    // RELTYPE_EDGE_LABEL in pipeline.ts. Each carries explainability props
+    // persisted as STRINGS. The REL table MUST declare confidence/reason here AND
+    // have a REL_SCHEMA_PROPS allow-list entry below, else those props are dropped
+    // by Kùzu's strict per-type allow-list (the schema is fixed, not flexible).
+    // DB-model / API-endpoint targets are synthetic Symbols (id-prefixed,
+    // `synthetic:"true"`) so they ride the existing Symbol node table — no new
+    // node label is introduced.
+    const dataTouchRels = ["READS_FROM_DB", "WRITES_TO_DB", "HANDLES_ROUTE", "PUBLISHES_EVENT", "SUBSCRIBES_TO"];
+    for (const relType of dataTouchRels) {
+      const tbl = this.prefixType(relType);
+      await this.exec(`CREATE REL TABLE IF NOT EXISTS ${tbl} (FROM ${sym} TO ${sym}, confidence STRING, reason STRING)`);
+    }
 
     this.schemaInitialized = true;
   }
@@ -216,6 +234,13 @@ export class LadybugGraphAdapter implements GraphAdapter {
   /** Known rel table properties declared in schema. */
   private static readonly REL_SCHEMA_PROPS: Record<string, Set<string>> = {
     HAS_STEP: new Set(["step_order"]),
+    // Wave 5: data-touch / route / event edge explainability props. Only props
+    // listed here are SET on the edge; everything else in metadata is dropped.
+    READS_FROM_DB: new Set(["confidence", "reason"]),
+    WRITES_TO_DB: new Set(["confidence", "reason"]),
+    HANDLES_ROUTE: new Set(["confidence", "reason"]),
+    PUBLISHES_EVENT: new Set(["confidence", "reason"]),
+    SUBSCRIBES_TO: new Set(["confidence", "reason"]),
   };
 
   /** Map relationship type to source/target node labels (Kùzu requires labels). */
@@ -228,6 +253,13 @@ export class LadybugGraphAdapter implements GraphAdapter {
     DEFINES: ["Symbol", "Symbol"],
     OVERRIDES: ["Symbol", "Symbol"],
     METHODIMPLEMENTS: ["Symbol", "Symbol"],
+    // Wave 5: data-touch edges connect a code Symbol to a (possibly synthetic)
+    // DB-model / API-endpoint / event-channel Symbol — all on the Symbol table.
+    READS_FROM_DB: ["Symbol", "Symbol"],
+    WRITES_TO_DB: ["Symbol", "Symbol"],
+    HANDLES_ROUTE: ["Symbol", "Symbol"],
+    PUBLISHES_EVENT: ["Symbol", "Symbol"],
+    SUBSCRIBES_TO: ["Symbol", "Symbol"],
     CONTAINS: ["Cluster", "Symbol"],
     HAS_STEP: ["Process", "Symbol"],
     DEPENDS_ON: ["Symbol", "ExternalDependency"],
@@ -415,7 +447,7 @@ export class LadybugGraphAdapter implements GraphAdapter {
 
   /** Known node labels and relationship types that need prefixing in raw Cypher. */
   private static readonly KNOWN_LABELS = ["Symbol", "Cluster", "Process", "Metadata", "ExternalDependency"];
-  private static readonly KNOWN_REL_TYPES = ["CALLS", "IMPORTS", "INHERITS", "IMPLEMENTS", "CONTAINS", "HAS_STEP", "REFERENCES", "DEFINES", "DEPENDS_ON", "OVERRIDES", "METHODIMPLEMENTS"];
+  private static readonly KNOWN_REL_TYPES = ["CALLS", "IMPORTS", "INHERITS", "IMPLEMENTS", "CONTAINS", "HAS_STEP", "REFERENCES", "DEFINES", "DEPENDS_ON", "OVERRIDES", "METHODIMPLEMENTS", "READS_FROM_DB", "WRITES_TO_DB", "HANDLES_ROUTE", "PUBLISHES_EVENT", "SUBSCRIBES_TO"];
 
   /**
    * Inject prefix into bare node labels and relationship types in a Cypher query.
