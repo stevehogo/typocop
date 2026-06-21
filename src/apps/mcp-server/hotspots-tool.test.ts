@@ -27,7 +27,7 @@ function makeGraph(symbols: FixtureNode[]): GraphAdapter {
     },
   });
   const runCypher = async <T,>(query: string, params?: Record<string, unknown>): Promise<T[]> => {
-    if (!query.includes("toInteger(s.cyclomatic) > $min")) return [] as T[];
+    if (!query.includes("CAST(s.cyclomatic AS INT64) > $min")) return [] as T[];
     const min = (params?.min as number) ?? 0;
     return symbols
       .filter((s) => s.cyclomatic > min)

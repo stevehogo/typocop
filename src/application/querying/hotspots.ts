@@ -2,7 +2,7 @@
  * Complexity hotspots query (E2).
  *
  * Returns :Symbol nodes ranked by persisted cyclomatic complexity (stored as a
- * STRING prop, coerced with `toInteger`), filtered to those above a minimum
+ * STRING prop, coerced with `CAST(... AS INT64)`), filtered to those above a minimum
  * threshold, ordered DESC and paged with SKIP/LIMIT. Strictly READ-ONLY.
  *
  * Symbols indexed before E2 (no complexity prop) coerce to 0 via the default
@@ -61,10 +61,12 @@ export async function findHotspots(
   const skip = options.offset && options.offset > 0 ? options.offset : 0;
 
   const rows = await graph.runCypher<CypherNodeRow>(
+    // NOTE: CAST(... AS INT64) — this backend has no `toInteger()`. The
+    // IS NOT NULL guard keeps the CAST off unset values.
     `MATCH (s:Symbol)
-     WHERE toInteger(s.cyclomatic) > $min
+     WHERE s.cyclomatic IS NOT NULL AND CAST(s.cyclomatic AS INT64) > $min
      RETURN s AS n
-     ORDER BY toInteger(s.cyclomatic) DESC, s.id ASC
+     ORDER BY CAST(s.cyclomatic AS INT64) DESC, s.id ASC
      SKIP $skip LIMIT $limit`,
     { min, skip, limit },
   ) ?? [];

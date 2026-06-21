@@ -74,12 +74,13 @@ export async function resolveChangedSymbols(
   const paths = [...pathSet];
 
   const rows = await graphAdapter.runCypher<SymbolRangeRow>(
+    // NOTE: CAST(... AS INT64) — this backend has no `toInteger()`.
     `MATCH (s:Symbol)
      WHERE s.filePath IN $paths
      RETURN s.id AS id,
             s.filePath AS filePath,
-            toInteger(s.startLine) AS startLine,
-            toInteger(s.endLine) AS endLine`,
+            CAST(s.startLine AS INT64) AS startLine,
+            CAST(s.endLine AS INT64) AS endLine`,
     { paths },
   );
 

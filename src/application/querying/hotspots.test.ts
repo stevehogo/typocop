@@ -3,8 +3,8 @@
  *
  * Uses a query-aware mock GraphAdapter that emulates the single Cypher shape
  * findHotspots issues:
- *   MATCH (s:Symbol) WHERE toInteger(s.cyclomatic) > $min
- *   RETURN s AS n ORDER BY toInteger(s.cyclomatic) DESC, s.id ASC
+ *   MATCH (s:Symbol) WHERE CAST(s.cyclomatic AS INT64) > $min
+ *   RETURN s AS n ORDER BY CAST(s.cyclomatic AS INT64) DESC, s.id ASC
  *   SKIP $skip LIMIT $limit
  *
  * The mock applies the $min/$skip/$limit params + DESC ordering over a fixture,
@@ -48,7 +48,7 @@ function makeGraph(symbols: FixtureNode[]): GraphAdapter {
     query: string,
     params?: Record<string, unknown>,
   ): Promise<T[]> => {
-    if (!query.includes("toInteger(s.cyclomatic) > $min")) return [] as T[];
+    if (!query.includes("CAST(s.cyclomatic AS INT64) > $min")) return [] as T[];
     const min = (params?.min as number) ?? 0;
     const skip = (params?.skip as number) ?? 0;
     const limit = (params?.limit as number) ?? Number.MAX_SAFE_INTEGER;
