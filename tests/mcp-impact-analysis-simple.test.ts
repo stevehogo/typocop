@@ -1,5 +1,5 @@
 /**
- * Simple unit test for MCP find_dependents tool using mocks
+ * Simple unit test for MCP impact_analysis tool using mocks
  * Tests the tool logic without requiring full database setup
  */
 
@@ -15,7 +15,7 @@ vi.mock("../src/application/querying/impact-analysis.js", () => ({
 
 import { executeImpactAnalysis } from "../src/application/querying/impact-analysis.js";
 
-describe("MCP find_dependents tool (mocked)", () => {
+describe("MCP impact_analysis tool (mocked)", () => {
   let mockAdapter: DatabaseAdapter;
 
   beforeEach(() => {
@@ -52,7 +52,7 @@ describe("MCP find_dependents tool (mocked)", () => {
       affectedFlows: [],
     });
 
-    const result = (await executeTool("find_dependents", {
+    const result = (await executeTool("impact_analysis", {
       symbolName: "add",
       maxResults: 50,
     }, mockAdapter)) as MCPToolResponse;
@@ -61,7 +61,7 @@ describe("MCP find_dependents tool (mocked)", () => {
     expect(result.symbols).toBeDefined();
     expect(result.symbols.length).toBeGreaterThan(0);
     expect(result.symbols[0].name).toBe("processData");
-    expect(result.summary).toContain("dependents");
+    expect(result.summary).toContain("affected symbols");
   });
 
   it("should return empty array for symbol with no dependents", async () => {
@@ -78,7 +78,7 @@ describe("MCP find_dependents tool (mocked)", () => {
       affectedFlows: [],
     });
 
-    const result = (await executeTool("find_dependents", {
+    const result = (await executeTool("impact_analysis", {
       symbolName: "multiply",
       maxResults: 50,
     }, mockAdapter)) as MCPToolResponse;
@@ -102,7 +102,7 @@ describe("MCP find_dependents tool (mocked)", () => {
       affectedFlows: [],
     });
 
-    const result = (await executeTool("find_dependents", {
+    const result = (await executeTool("impact_analysis", {
       symbolName: "nonExistentSymbol",
       maxResults: 50,
     }, mockAdapter)) as MCPToolResponse;
@@ -136,7 +136,7 @@ describe("MCP find_dependents tool (mocked)", () => {
       affectedFlows: ["flow1", "flow2"],
     });
 
-    const result = (await executeTool("find_dependents", {
+    const result = (await executeTool("impact_analysis", {
       symbolName: "add",
       maxResults: 50,
     }, mockAdapter)) as MCPToolResponse;
@@ -169,7 +169,7 @@ describe("MCP find_dependents tool (mocked)", () => {
       affectedFlows: [],
     });
 
-    const result = (await executeTool("find_dependents", {
+    const result = (await executeTool("impact_analysis", {
       symbolName: "add",
       maxResults: 50,
     }, mockAdapter)) as MCPToolResponse;
@@ -218,7 +218,7 @@ describe("MCP find_dependents tool (mocked)", () => {
       affectedFlows: [],
     });
 
-    const result = (await executeTool("find_dependents", {
+    const result = (await executeTool("impact_analysis", {
       symbolName: "add",
       maxResults: 50,
     }, mockAdapter)) as MCPToolResponse;
@@ -226,7 +226,7 @@ describe("MCP find_dependents tool (mocked)", () => {
     expect(result.summary).toBeDefined();
     expect(typeof result.summary).toBe("string");
     expect(result.summary.length).toBeGreaterThan(0);
-    expect(result.summary).toContain("dependents");
+    expect(result.summary).toContain("affected symbols");
   });
 
   it("should respect maxResults parameter", async () => {
@@ -251,7 +251,7 @@ describe("MCP find_dependents tool (mocked)", () => {
       affectedFlows: [],
     }));
 
-    const result = (await executeTool("find_dependents", {
+    const result = (await executeTool("impact_analysis", {
       symbolName: "add",
       maxResults: 5,
     }, mockAdapter)) as MCPToolResponse;
@@ -283,7 +283,7 @@ describe("MCP find_dependents tool (mocked)", () => {
       affectedFlows: [],
     });
 
-    const result = (await executeTool("find_dependents", {
+    const result = (await executeTool("impact_analysis", {
       symbolName: "ad",
       maxResults: 50,
     }, mockAdapter)) as MCPToolResponse;

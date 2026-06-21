@@ -114,9 +114,9 @@ describe("full tool call flow with DatabaseAdapter", () => {
     expect(response.summary.length).toBeGreaterThan(0);
   });
 
-  it("find_dependents returns MCPToolResponse with summary field", async () => {
+  it("impact_analysis returns MCPToolResponse with summary field", async () => {
     const adapter = createMockAdapter();
-    const response = await executeTool("find_dependents", { symbolName: "UserService" }, adapter);
+    const response = await executeTool("impact_analysis", { symbolName: "UserService" }, adapter);
 
     expect(response.summary).toBeDefined();
     expect(typeof response.summary).toBe("string");
@@ -186,7 +186,7 @@ describe("concurrent tool calls with DatabaseAdapter", () => {
 
     const [r1, r2] = await Promise.all([
       executeTool("get_symbol_context", { symbolName: "ServiceA" }, adapter),
-      executeTool("find_dependents", { symbolName: "ServiceB" }, adapter),
+      executeTool("impact_analysis", { symbolName: "ServiceB" }, adapter),
     ]);
 
     expect(r1.summary).toBeDefined();

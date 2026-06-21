@@ -131,9 +131,10 @@ describe("6.1 tools/list includes smart_search", () => {
 
       expect(toolNames).toContain("smart_search");
       expect(toolNames).toContain("get_symbol_context");
-      expect(toolNames).toContain("find_dependents");
       expect(toolNames).toContain("trace_data_flow");
       expect(toolNames).toContain("impact_analysis");
+      // find_dependents was merged into impact_analysis.
+      expect(toolNames).not.toContain("find_dependents");
     } finally {
       await cleanup();
     }
@@ -177,7 +178,6 @@ describe("6.2 smart_search with DatabaseAdapter", () => {
 describe("6.3 existing tools return valid MCPToolResponse", () => {
   const EXISTING_TOOLS: Array<[string, Record<string, unknown>]> = [
     ["get_symbol_context", { symbolName: "RateLimiter" }],
-    ["find_dependents", { symbolName: "RateLimiter" }],
     ["trace_data_flow", { entryPoint: "RateLimiterController.check" }],
     ["impact_analysis", { symbolName: "RateLimiter", changeType: "modify" }],
   ];
