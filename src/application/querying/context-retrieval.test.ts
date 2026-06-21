@@ -199,6 +199,86 @@ describe("executeContextRetrieval", () => {
     expect(result.confidence).toBe(0.75);
   });
 
+  // ── Wave 8 (T6): heritage / MRO surfacing from persisted edges ────────────
+  describe("heritage (T6)", () => {
+    /**
+     * Query-aware mock: branches on the heritage query fragments so the BFS over
+     * INHERITS, the IMPLEMENTS lookup, and the OVERRIDES|METHODIMPLEMENTS lookup
+     * are answered deterministically (the sequenced mock can't express the BFS).
+     */
+    function heritageGraph(opts: {
+      inherits: Record<string, Array<{ id: string; name: string }>>;
+      implements?: Array<{ id: string; name: string }>;
+      overrides?: Array<{ id: string; name: string; type: "OVERRIDES" | "METHODIMPLEMENTS" }>;
+    }): GraphAdapter {
+      const runCypher = async <T,>(query: string, params?: Record<string, unknown>): Promise<T[]> => {
+        const val = params?.["val"] as string | undefined;
+        if (query.includes("[:INHERITS]->")) {
+          const sups = (val && opts.inherits[val]) || [];
+          return sups.map((s) => ({ superId: s.id, superName: s.name })) as unknown as T[];
+        }
+        if (query.includes("[:IMPLEMENTS]->")) {
+          return (opts.implements ?? []).map((s) => ({ superId: s.id, superName: s.name })) as unknown as T[];
+        }
+        if (query.includes("OVERRIDES|METHODIMPLEMENTS")) {
+          return (opts.overrides ?? []).map((o) => ({ targetId: o.id, targetName: o.name, edgeType: o.type })) as unknown as T[];
+        }
+        // Resolver exact lookup for the target.
+        if (query.includes("WHERE n.id = $val") && query.includes("LIMIT 1")) {
+          return [nodeRow(mockTargetNode)] as unknown as T[];
+        }
+        return [] as T[];
+      };
+      return {
+        createNode: vi.fn(),
+        createRelationship: vi.fn(),
+        queryNodes: vi.fn(),
+        queryRelationships: vi.fn(),
+        deleteNodesByLabel: vi.fn(),
+        deleteRelationshipsByType: vi.fn(),
+        runCypher: runCypher as GraphAdapter["runCypher"],
+        runCypherWrite: vi.fn(),
+      };
+    }
+
+    it("walks the INHERITS chain nearest-first with hop depth", async () => {
+      const adapter = heritageGraph({
+        inherits: {
+          "target-symbol-id": [{ id: "base1", name: "Base" }],
+          base1: [{ id: "base2", name: "GrandBase" }],
+        },
+      });
+      const result = await executeContextRetrieval("target-symbol-id", 10, adapter);
+      expect(result.heritage?.ancestors).toEqual([
+        { id: "base1", name: "Base", depth: 1 },
+        { id: "base2", name: "GrandBase", depth: 2 },
+      ]);
+    });
+
+    it("surfaces implemented interfaces and override/methodImplements edges", async () => {
+      const adapter = heritageGraph({
+        inherits: {},
+        implements: [{ id: "iface1", name: "Comparable" }],
+        overrides: [
+          { id: "Base.compute", name: "compute", type: "OVERRIDES" },
+          { id: "Comparable.compareTo", name: "compareTo", type: "METHODIMPLEMENTS" },
+        ],
+      });
+      const result = await executeContextRetrieval("target-symbol-id", 10, adapter);
+      expect(result.heritage?.interfaces).toEqual([{ id: "iface1", name: "Comparable" }]);
+      expect(result.heritage?.overrides).toEqual([
+        { id: "Base.compute", name: "compute", relation: "overrides" },
+        { id: "Comparable.compareTo", name: "compareTo", relation: "methodImplements" },
+      ]);
+    });
+
+    it("returns empty heritage arrays for a symbol with no heritage edges (degrade)", async () => {
+      const adapter = heritageGraph({ inherits: {} });
+      const result = await executeContextRetrieval("target-symbol-id", 10, adapter);
+      expect(result.heritage).toEqual({ ancestors: [], interfaces: [], overrides: [] });
+    });
+  });
+
   it("respects maxResults limit for symbols", async () => {
     const manyCallers = Array.from({ length: 10 }, (_, i) =>
       nodeRow(makeGraphNode(`caller-${i}`, {

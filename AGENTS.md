@@ -65,12 +65,17 @@ When the user asks to execute work under `.kiro/specs/`:
 
 ## Typocop MCP Usage (Prefer Tools First)
 
-Prefer Typocop MCP tools over manual grepping/file-walking when you need symbol context, dependents, blast radius, or data flow:
+Prefer Typocop MCP tools over manual grepping/file-walking when you need symbol context, dependents, blast radius, data flow, the route surface, table access, or events. The MCP server exposes **17 read-only tools** (none mutate code or the graph); each returns a structured result plus a human-readable `summary`. Common ones:
 
-- `get_symbol_context` for first-pass understanding of a symbol.
-- `impact_analysis` before modifying/renaming/deleting shared symbols.
-- `find_dependents` before refactors/renames.
-- `trace_data_flow` for end-to-end flows (controller to DB).
+- `get_symbol_context` for first-pass understanding of a symbol (callers, callees, clusters, heritage/MRO, ORM-model docs).
+- `smart_search` to find a symbol by natural-language description when you don't know its name.
+- `impact_analysis` before modifying/renaming/deleting shared symbols (direct + transitive dependents; pass `maxDepth` to bound the caller traversal — this subsumes the old `find_dependents`).
+- `trace` for the shortest call/containment path between two symbols; `trace_data_flow` for end-to-end flows (controller to DB).
+- `find_dead_code` / `find_hotspots` for cleanup and complexity triage.
+- `shape_check` for API-contract drift; `rename` to preview a coordinated rename; `detect_changes` for the blast radius of uncommitted changes.
+- `verify_claim` to ground a belief (usage / edge / reachability) → verdict + confidence + evidence, so you don't act on a false assumption.
+- `query_graph` for a guarded, read-only Cypher query when no canned tool fits (writes/DDL are rejected; results are row-capped).
+- **Data-touch enumeration** (only populated when data-touch indexing was enabled at index time; degrade to empty otherwise): `route_map` lists all routes; `what_reads_table` / `what_writes_table` list the code touching a table; `what_publishes_to` / `what_subscribes_to` list a topic's publishers/subscribers (events are off by default).
 
 Do not re-read files for information Typocop already provided unless you need exact implementation details.
 

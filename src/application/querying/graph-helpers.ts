@@ -79,6 +79,11 @@ export function graphNodeToSymbol(node: GraphNode): Symbol {
       endColumn: parseInt(prop(node, "endColumn", "0"), 10),
     },
     signature: node.properties["signature"] as string | undefined,
+    // Wave 8 (T8): read back the persisted `documentation` (e.g. the framework
+    // ORM-model enrichment summary). Persisted as a node prop but previously
+    // dropped on the read path. Left UNDEFINED when absent/empty so the Symbol
+    // shape stays unchanged for symbols without documentation.
+    ...(prop(node, "documentation") ? { documentation: prop(node, "documentation") } : {}),
     visibility: prop(node, "visibility", "public") as Visibility,
     modifiers: [],
     // Wave 2: read back the export flag + entry-point classification props.

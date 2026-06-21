@@ -42,7 +42,15 @@ function mean(xs: number[]): number {
 }
 
 /** Return type for executeDataFlowTrace, including resolution info for callers. */
-export type DataFlowTraceResult = { resolution: SymbolResolution } & Pick<QueryResult, "symbols" | "relationships" | "clusters" | "processes" | "confidence" | "riskLevel" | "affectedFlows">;
+export type DataFlowTraceResult = {
+  resolution: SymbolResolution;
+  /**
+   * Wave 8 (T7): `[0,1]` edge confidence per symbol id, read off the data-touch
+   * edge that classified the node. Only populated for edge-resolved nodes; used
+   * to surface `edgeConfidence` on the MCP response. Empty for the regex path.
+   */
+  edgeConfidenceById?: ReadonlyMap<string, number>;
+} & Pick<QueryResult, "symbols" | "relationships" | "clusters" | "processes" | "confidence" | "riskLevel" | "affectedFlows">;
 
 /**
  * Execute a data flow tracing query using GraphAdapter.runCypher().
@@ -56,6 +64,7 @@ export async function executeDataFlowTrace(
   maxResults: number,
   graphAdapter: GraphAdapter,
   framework?: string,
+  minConfidence?: number,
 ): Promise<DataFlowTraceResult> {
   // Req 13.1, 1.1, 1.2, 1.4 — resolve entry point symbol (exact → fuzzy → not_found)
   const resolution = await resolveSymbol(entryPoint, graphAdapter);
@@ -77,7 +86,18 @@ export async function executeDataFlowTrace(
   const entryNode = resolution.node;
 
   // Req 13.2-13.5 — trace through all dependencies (edge-resolved touch evidence)
-  const dependencyNodes = await findDependencies(graphAdapter, entryPoint);
+  const allDependencyNodes = await findDependencies(graphAdapter, entryPoint);
+
+  // Wave 8 (T7): optional confidence floor. Drop EDGE-RESOLVED nodes whose
+  // touch-edge confidence is below `minConfidence`. Nodes WITHOUT a touch edge
+  // (regex-classified, no `edgeConfidence`) are kept — the filter only prunes
+  // confidence-bearing edges, so a trace with no `minConfidence` is unchanged.
+  const hasFloor = typeof minConfidence === "number" && Number.isFinite(minConfidence);
+  const dependencyNodes = hasFloor
+    ? allDependencyNodes.filter(
+        (d) => d.edgeConfidence === undefined || d.edgeConfidence >= (minConfidence as number),
+      )
+    : allDependencyNodes;
 
   // Classify nodes by layer. Wave 5: prefer the EDGE-RESOLVED layer (a real
   // HANDLES_ROUTE → `api`, a real READS/WRITES_TO_DB → `model`) over the
@@ -141,8 +161,16 @@ export async function executeDataFlowTrace(
     ? Math.max(0, Math.min(1, Math.max(ladderConfidence, mean(edgeConfidences) + 0.05)))
     : ladderConfidence;
 
+  // Wave 8 (T7): per-symbol edge confidence map (id → [0,1]) for the nodes whose
+  // layer was edge-resolved, so the MCP layer can surface `edgeConfidence`.
+  const edgeConfidenceById = new Map<string, number>();
+  for (const dep of dependencyNodes) {
+    if (dep.edgeConfidence !== undefined) edgeConfidenceById.set(dep.node.id, dep.edgeConfidence);
+  }
+
   return {
     resolution,
+    edgeConfidenceById,
     symbols: allSymbols,
     relationships,
     clusters: [],

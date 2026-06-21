@@ -126,4 +126,40 @@ describe("trace_data_flow — edge-resolved layering (Task 7)", () => {
     const res = await executeDataFlowTrace("h", 50, graph);
     expect(res.affectedFlows).toContain("repository");
   });
+
+  // ── Wave 8 (T7): minConfidence floor on data-touch edges ──────────────────
+  it("drops an edge-resolved node whose touch-edge confidence is below minConfidence", async () => {
+    const graph = makeGraph({
+      entryName: "listUsersHandler",
+      deps: [
+        { id: "users", name: "users", hasDb: true, edgeConfidence: "0.4" }, // below floor
+        { id: "orders", name: "orders", hasDb: true, edgeConfidence: "0.9" }, // above floor
+      ],
+    });
+    const res = await executeDataFlowTrace("listUsersHandler", 50, graph, undefined, 0.8);
+    const names = res.symbols.map((s) => s.name);
+    expect(names).toContain("orders"); // kept (0.9 ≥ 0.8)
+    expect(names).not.toContain("users"); // dropped (0.4 < 0.8)
+    // The surviving model node's confidence is surfaced.
+    expect(res.edgeConfidenceById?.get("orders")).toBeCloseTo(0.9, 5);
+  });
+
+  it("keeps regex-classified (no-edge) nodes regardless of minConfidence", async () => {
+    const graph = makeGraph({
+      entryName: "h",
+      deps: [{ id: "repo", name: "OrderRepository" }], // no edge → no edgeConfidence
+    });
+    const res = await executeDataFlowTrace("h", 50, graph, undefined, 0.99);
+    expect(res.affectedFlows).toContain("repository");
+    expect(res.symbols.some((s) => s.name === "OrderRepository")).toBe(true);
+  });
+
+  it("no minConfidence → behaviour unchanged (all edge-resolved nodes kept)", async () => {
+    const graph = makeGraph({
+      entryName: "listUsersHandler",
+      deps: [{ id: "users", name: "users", hasDb: true, edgeConfidence: "0.3" }],
+    });
+    const res = await executeDataFlowTrace("listUsersHandler", 50, graph);
+    expect(res.symbols.some((s) => s.name === "users")).toBe(true);
+  });
 });

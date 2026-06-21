@@ -316,6 +316,15 @@ export interface MCPToolResponse {
     responseKeys?: readonly string[];
     /** Consumer-read keys (consumer symbols, shape_check only). */
     accessedKeys?: readonly string[];
+    // ── Wave 8 (T7) edge confidence (ADDITIVE; populated by confidence-aware
+    //    tools — trace_data_flow / impact_analysis with a minConfidence). ──────
+    /**
+     * `[0,1]` confidence of the edge that pulled this symbol into the result,
+     * read off the relationship's `metadata.confidence` (data-touch edges carry
+     * it; CALLS edges do not). Absent for symbols reached via a confidence-less
+     * edge, so the wire shape is unchanged when no edge confidence exists.
+     */
+    edgeConfidence?: number;
   }>;
   clusters: Array<{
     id: string;
@@ -453,6 +462,142 @@ export interface MCPToolResponse {
     truncated: boolean;
     /** Rejection reason when `ok` is false (prefixed `unsupported: …`). */
     unsupported?: string;
+  };
+  // ── Heritage / MRO (ADDITIVE; only populated by `get_symbol_context` for a
+  //    class/interface/method target, Wave 8 · T6). Absent for all other tools
+  //    and for symbols with no heritage edges → wire contract unchanged. ──────
+  /**
+   * Inheritance / interface-implementation context for a symbol, reconstructed
+   * from the PERSISTED graph edges (INHERITS/IMPLEMENTS for the ancestor chain;
+   * OVERRIDES/METHODIMPLEMENTS for a method's resolved targets). NOTE: the full
+   * MRO ambiguity diagnostics (the linearised C3 order + per-method ambiguity
+   * `reason`) are NOT persisted — the resolver computes them but only emits the
+   * resolved edges — so this surface reflects what the graph holds (the edges),
+   * not the in-resolver linearisation. Surfacing those diagnostics would require
+   * persisting them in a future wave.
+   */
+  heritage?: {
+    /**
+     * Direct + transitive supertypes via INHERITS edges (the ancestor chain),
+     * nearest-first. Best-effort linearisation by graph distance — NOT the full
+     * C3 MRO (which is not persisted).
+     */
+    ancestors: Array<{ id: string; name: string; depth: number }>;
+    /** Interfaces/traits the target implements (direct IMPLEMENTS edges). */
+    interfaces: Array<{ id: string; name: string }>;
+    /**
+     * Methods the target overrides (OVERRIDES edges) and interface/trait methods
+     * it satisfies (METHODIMPLEMENTS edges), with the resolved ancestor member.
+     */
+    overrides: Array<{ id: string; name: string; relation: "overrides" | "methodImplements" }>;
+    /**
+     * True when the full C3 linearisation + ambiguity diagnostics are not
+     * available from the persisted graph (always true today). A hint to the
+     * agent that `ancestors` is distance-ordered, not C3-ordered.
+     */
+    mroDiagnosticsUnavailable: boolean;
+  };
+  // ── Language coverage + ORM-model insight (ADDITIVE; only populated by
+  //    `get_symbol_context`, Wave 8 · T8). Absent for all other tools. ────────
+  /**
+   * Per-symbol enrichment for `get_symbol_context`: the target symbol's language
+   * (derived from its file extension — there is NO persisted per-Symbol language
+   * column), a small language-coverage breakdown across the returned context
+   * symbols, and the ORM-model documentation summary (framework `fillable`/
+   * relations folded into `Symbol.documentation`) when present. Every field is
+   * optional/additive.
+   */
+  symbolInsights?: {
+    /** Language of the TARGET symbol, derived from its file extension. */
+    language?: Language;
+    /**
+     * Count of returned context symbols per derived language (a coverage
+     * snapshot across the 12 supported languages). Omitted when no symbol's
+     * language could be derived.
+     */
+    languageCoverage?: Record<string, number>;
+    /**
+     * The ORM-model documentation summary (e.g. the Eloquent
+     * `fillable`/relations digest) read off the target's persisted
+     * `documentation`. Present only when the target carries documentation.
+     */
+    modelDocumentation?: string;
+  };
+  // ── Route enumeration (ADDITIVE; only populated by `route_map`, Wave 8 · T4).
+  //    Absent for all other tools → wire contract unchanged. ──────────────────
+  /**
+   * All API routes the indexer linked a handler to, via the persisted
+   * `HANDLES_ROUTE` edges (W5/W6, incl. Laravel resource expansion). Empty when
+   * the data-touch pass did not run at index time (`TYPOCOP_DATA_TOUCH` off) —
+   * the REL table always exists, so an unfilled graph degrades to `routes: []`.
+   */
+  routeMap?: {
+    /** Every linked route, endpoint + serving handler. */
+    routes: Array<{
+      /** Endpoint id (synthetic `apiendpoint:<METHOD>:<path>` or a real route Symbol). */
+      endpointId: string;
+      /** Endpoint display name, e.g. `"GET /users"`. */
+      endpointName: string;
+      /** The handler Symbol id linked via `HANDLES_ROUTE`. */
+      handlerId: string;
+      /** The handler Symbol name. */
+      handlerName: string;
+      /** Handler file path. */
+      filePath: string;
+      /** `[0,1]` confidence of the route edge, when present. */
+      confidence?: number;
+      /** The edge's provenance reason (e.g. `decorator-Get`), when present. */
+      reason?: string;
+    }>;
+    /** Total routes found BEFORE the maxResults cap. */
+    totalFound: number;
+  };
+  // ── Data-access enumeration (ADDITIVE; only populated by `what_reads_table` /
+  //    `what_writes_table`, Wave 8 · T4). Absent for other tools. ─────────────
+  /**
+   * The code symbols that touch a given table/model, via the persisted
+   * `READS_FROM_DB` / `WRITES_TO_DB` edges. Empty when the data-touch pass did
+   * not run, or no symbol touches the resolved model (clear empty result).
+   */
+  tableTouch?: {
+    /** The resolved table name (lower-cased). */
+    table: string;
+    /** `reads` (READS_FROM_DB) or `writes` (WRITES_TO_DB). */
+    direction: "reads" | "writes";
+    /** Per-toucher edge provenance (the symbols themselves ride `symbols[]`). */
+    touchers: Array<{
+      symbolId: string;
+      /** `[0,1]` confidence of the touch edge, when present. */
+      confidence?: number;
+      /** The edge's provenance reason (e.g. `prisma-findMany`), when present. */
+      reason?: string;
+    }>;
+    /** Total touchers found BEFORE the maxResults cap. */
+    totalFound: number;
+  };
+  // ── Event-channel enumeration (ADDITIVE; only populated by `what_publishes_to`
+  //    / `what_subscribes_to`, Wave 8 · T5). Absent for other tools. ──────────
+  /**
+   * The code symbols that publish to / subscribe to a given event topic, via the
+   * persisted `PUBLISHES_EVENT` / `SUBSCRIBES_TO` edges. Empty when the event
+   * sub-flag (`TYPOCOP_DATA_TOUCH_EVENTS`, default OFF) was off at index time —
+   * a clear empty result, never an error.
+   */
+  eventChannel?: {
+    /** The queried event topic. */
+    topic: string;
+    /** `publishers` (PUBLISHES_EVENT) or `subscribers` (SUBSCRIBES_TO). */
+    direction: "publishers" | "subscribers";
+    /** Per-participant edge provenance (the symbols themselves ride `symbols[]`). */
+    participants: Array<{
+      symbolId: string;
+      /** `[0,1]` confidence of the event edge, when present. */
+      confidence?: number;
+      /** The edge's provenance reason (e.g. `decorator-OnEvent`), when present. */
+      reason?: string;
+    }>;
+    /** Total participants found BEFORE the maxResults cap. */
+    totalFound: number;
   };
 }
 

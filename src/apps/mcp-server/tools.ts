@@ -4,8 +4,8 @@
  */
 import type { DatabaseAdapter } from "../../core/ports/persistence.js";
 import type { GitPort } from "../../core/ports/git.js";
-import type { MCPToolResponse } from "../../core/domain.js";
-import { executeContextRetrieval } from "../../application/querying/context-retrieval.js";
+import type { MCPToolResponse, Language } from "../../core/domain.js";
+import { executeContextRetrieval, type ContextRetrievalResult } from "../../application/querying/context-retrieval.js";
 import { sliceContext, type RelatedSymbol } from "../../application/querying/context-slice.js";
 import { executeImpactAnalysis } from "../../application/querying/impact-analysis.js";
 import { executeDataFlowTrace } from "../../application/querying/data-flow-trace.js";
@@ -18,6 +18,9 @@ import { executeRenameTool } from "./rename-tool.js";
 import { executeShapeCheck } from "./shape-check-tool.js";
 import { executeVerifyClaimTool } from "./verify-claim-tool.js";
 import { executeQueryGraph } from "./query-graph-tool.js";
+import { executeRouteMap } from "./route-map-tool.js";
+import { executeTableTouch } from "./table-touch-tool.js";
+import { executeEventChannel } from "./event-channel-tool.js";
 import { formatMCPResponse, type SymbolExplanation } from "./format-response.js";
 import type { ImpactAnalysisResult } from "../../application/querying/impact-analysis.js";
 
@@ -55,6 +58,118 @@ function buildExplainability(result: ImpactAnalysisResult): {
  * Default maximum results for queries.
  */
 const DEFAULT_MAX_RESULTS = 100;
+
+/**
+ * Wave 8 (T6): attach the heritage / MRO block to a get_symbol_context response
+ * when the target has any persisted heritage edges. ADDITIVE — absent when the
+ * symbol has no ancestors/interfaces/overrides, so the wire shape is unchanged
+ * for plain functions. `mroDiagnosticsUnavailable` is always true: the full C3
+ * linearisation + ambiguity diagnostics are NOT persisted (only the resolved
+ * edges are), so `ancestors` is distance-ordered, not C3-ordered.
+ */
+function attachHeritage(
+  response: MCPToolResponse,
+  result: ContextRetrievalResult,
+): MCPToolResponse {
+  const h = result.heritage;
+  if (!h) return response;
+  const hasAny = h.ancestors.length > 0 || h.interfaces.length > 0 || h.overrides.length > 0;
+  if (!hasAny) return response;
+  response.heritage = {
+    ancestors: h.ancestors.map((a) => ({ id: a.id, name: a.name, depth: a.depth })),
+    interfaces: h.interfaces.map((i) => ({ id: i.id, name: i.name })),
+    overrides: h.overrides.map((o) => ({ id: o.id, name: o.name, relation: o.relation })),
+    mroDiagnosticsUnavailable: true,
+  };
+  return response;
+}
+
+/** Build a short heritage digest for the summary, or "" when there is none. */
+function heritageDigest(result: ContextRetrievalResult): string {
+  const h = result.heritage;
+  if (!h) return "";
+  const parts: string[] = [];
+  if (h.ancestors.length > 0) {
+    parts.push(`extends ${h.ancestors.map((a) => a.name).join(" → ")}`);
+  }
+  if (h.interfaces.length > 0) {
+    parts.push(`implements ${h.interfaces.map((i) => i.name).join(", ")}`);
+  }
+  if (h.overrides.length > 0) {
+    const overridesN = h.overrides.filter((o) => o.relation === "overrides").length;
+    const implN = h.overrides.length - overridesN;
+    const segs: string[] = [];
+    if (overridesN > 0) segs.push(`overrides ${overridesN} method${overridesN === 1 ? "" : "s"}`);
+    if (implN > 0) segs.push(`satisfies ${implN} interface method${implN === 1 ? "" : "s"}`);
+    parts.push(segs.join(", "));
+  }
+  return parts.length > 0 ? ` Heritage: ${parts.join("; ")}.` : "";
+}
+
+/**
+ * File-extension → language map for the language-coverage summary (T8). There is
+ * NO persisted per-Symbol language column, so coverage is DERIVED from the
+ * symbol's file path. Kept local to the read layer (a small lookup) rather than
+ * importing the infrastructure parser's map, so the querying/MCP layer stays
+ * decoupled from the parsing layer.
+ */
+const EXTENSION_TO_LANGUAGE: Readonly<Record<string, Language>> = {
+  ts: "typescript", tsx: "typescript", mts: "typescript", cts: "typescript",
+  js: "javascript", jsx: "javascript", mjs: "javascript", cjs: "javascript",
+  py: "python", php: "php", java: "java", go: "go", rs: "rust",
+  c: "c", h: "c", cpp: "cpp", cc: "cpp", cxx: "cpp", hpp: "cpp",
+  cs: "csharp", rb: "ruby", swift: "swift",
+};
+
+/** Derive a {@link Language} from a file path's extension, or undefined. */
+function languageOf(filePath: string): Language | undefined {
+  const dot = filePath.lastIndexOf(".");
+  if (dot < 0) return undefined;
+  return EXTENSION_TO_LANGUAGE[filePath.slice(dot + 1).toLowerCase()];
+}
+
+/**
+ * Wave 8 (T8): attach the per-symbol insights block — target language, a
+ * language-coverage breakdown across the returned context symbols, and the
+ * ORM-model documentation summary (e.g. the Eloquent `fillable`/relations digest
+ * folded into the model class's `documentation`). All fields are additive and
+ * omitted when empty, so the wire shape is unchanged for symbols with none.
+ */
+function attachSymbolInsights(
+  response: MCPToolResponse,
+  result: ContextRetrievalResult,
+): MCPToolResponse {
+  const targetLanguage = result.target ? languageOf(result.target.location.filePath) : undefined;
+
+  const coverage: Record<string, number> = {};
+  for (const s of response.symbols) {
+    const lang = languageOf(s.location.filePath);
+    if (lang) coverage[lang] = (coverage[lang] ?? 0) + 1;
+  }
+
+  const modelDocumentation = result.target?.documentation;
+
+  const insights: NonNullable<MCPToolResponse["symbolInsights"]> = {
+    ...(targetLanguage ? { language: targetLanguage } : {}),
+    ...(Object.keys(coverage).length > 0 ? { languageCoverage: coverage } : {}),
+    ...(modelDocumentation ? { modelDocumentation } : {}),
+  };
+
+  if (Object.keys(insights).length > 0) {
+    response.symbolInsights = insights;
+  }
+  return response;
+}
+
+/** Build a short insights digest (target language + model docs) for the summary. */
+function insightsDigest(result: ContextRetrievalResult): string {
+  if (!result.target) return "";
+  const parts: string[] = [];
+  const lang = languageOf(result.target.location.filePath);
+  if (lang) parts.push(`Language: ${lang}`);
+  if (result.target.documentation) parts.push(`Model: ${result.target.documentation}`);
+  return parts.length > 0 ? ` ${parts.join(". ")}.` : "";
+}
 
 /**
  * Execute get_symbol_context tool.
@@ -108,19 +223,20 @@ async function executeGetSymbolContext(
     const response = formatMCPResponse(slicedResult, prefix + sliceSummary);
     response.truncationReason = slice.truncationReason;
     response.estimatedTokens = slice.estimatedTokens;
-    return response;
+    return attachSymbolInsights(attachHeritage(response, result), result);
   }
 
   const baseSummary = `Found ${result.symbols.length} related symbols, ` +
     `${result.clusters.length} clusters, and ${result.processes.length} processes ` +
-    `for symbol '${symbolName}'. Confidence: ${(result.confidence * 100).toFixed(0)}%.`;
+    `for symbol '${symbolName}'. Confidence: ${(result.confidence * 100).toFixed(0)}%.` +
+    heritageDigest(result) + insightsDigest(result);
 
   if (resolution.kind === "fuzzy") {
     const fuzzyPrefix = `Fuzzy matched '${symbolName}' → '${resolution.matchedName}'. `;
-    return formatMCPResponse(result, fuzzyPrefix + baseSummary);
+    return attachSymbolInsights(attachHeritage(formatMCPResponse(result, fuzzyPrefix + baseSummary), result), result);
   }
 
-  return formatMCPResponse(result, baseSummary);
+  return attachSymbolInsights(attachHeritage(formatMCPResponse(result, baseSummary), result), result);
 }
 
 /**
@@ -134,8 +250,11 @@ async function executeTraceDataFlow(
   const entryPoint = params.entryPoint as string;
   const framework = params.framework as string | undefined;
   const maxResults = (params.maxResults as number) || DEFAULT_MAX_RESULTS;
+  // Wave 8 (T7): optional confidence floor for the data-touch edges. Absent →
+  // today's behaviour unchanged.
+  const minConfidence = typeof params.minConfidence === "number" ? params.minConfidence : undefined;
   const graphAdapter = adapter.getGraphAdapter();
-  const result = await executeDataFlowTrace(entryPoint, maxResults, graphAdapter, framework);
+  const result = await executeDataFlowTrace(entryPoint, maxResults, graphAdapter, framework, minConfidence);
 
   const resolution = result.resolution;
 
@@ -146,16 +265,18 @@ async function executeTraceDataFlow(
     return formatMCPResponse(result, `Symbol '${entryPoint}' not found. ${suggestions}`);
   }
 
+  const confidenceById = result.edgeConfidenceById;
+  const floorNote = minConfidence !== undefined ? ` (min edge confidence ${minConfidence}).` : "";
   const baseSummary = `Traced data flow from '${entryPoint}' through ${result.processes.length} processes. ` +
     `Found ${result.symbols.length} symbols in the flow. ` +
-    `Confidence: ${(result.confidence * 100).toFixed(0)}%.`;
+    `Confidence: ${(result.confidence * 100).toFixed(0)}%.` + floorNote;
 
   if (resolution.kind === "fuzzy") {
     const fuzzyPrefix = `Fuzzy matched '${entryPoint}' → '${resolution.matchedName}'. `;
-    return formatMCPResponse(result, fuzzyPrefix + baseSummary);
+    return formatMCPResponse(result, fuzzyPrefix + baseSummary, undefined, confidenceById);
   }
 
-  return formatMCPResponse(result, baseSummary);
+  return formatMCPResponse(result, baseSummary, undefined, confidenceById);
 }
 
 /**
@@ -172,8 +293,11 @@ async function executeImpactAnalysisTool(
   // Optional depth bound for the transitive-dependent traversal (folded in from
   // the former find_dependents; clamped to MAX_TRAVERSAL_DEPTH inside the engine).
   const maxDepth = typeof params.maxDepth === "number" ? params.maxDepth : undefined;
+  // Wave 8 (T7): optional confidence floor (no-op on the confidence-less CALLS
+  // path today; absent → unchanged).
+  const minConfidence = typeof params.minConfidence === "number" ? params.minConfidence : undefined;
   const graphAdapter = adapter.getGraphAdapter();
-  const result = await executeImpactAnalysis(symbolName, maxResults, graphAdapter, maxDepth);
+  const result = await executeImpactAnalysis(symbolName, maxResults, graphAdapter, maxDepth, minConfidence);
 
   const resolution = result.resolution;
 
@@ -244,6 +368,16 @@ export async function executeTool(
       return executeVerifyClaimTool(params, adapter);
     case "query_graph":
       return executeQueryGraph(params, adapter);
+    case "route_map":
+      return executeRouteMap(params, adapter);
+    case "what_reads_table":
+      return executeTableTouch(params, adapter, "reads");
+    case "what_writes_table":
+      return executeTableTouch(params, adapter, "writes");
+    case "what_publishes_to":
+      return executeEventChannel(params, adapter, "publishers");
+    case "what_subscribes_to":
+      return executeEventChannel(params, adapter, "subscribers");
     case "detect_changes": {
       if (!git) {
         throw new Error("detect_changes requires a GitPort (none injected)");

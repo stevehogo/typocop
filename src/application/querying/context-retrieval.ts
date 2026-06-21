@@ -46,6 +46,136 @@ async function findDependencies(graph: GraphAdapter, symbolId: string): Promise<
   return rows.map(rowToNode);
 }
 
+// ─── Wave 8 (T6): heritage / MRO surfacing from the PERSISTED graph ───────────
+
+/** A reachable supertype on the inheritance chain, with its hop distance. */
+export interface AncestorEntry {
+  readonly id: string;
+  readonly name: string;
+  /** Minimum number of INHERITS hops from the target (1 = direct superclass). */
+  readonly depth: number;
+}
+
+/** An interface/trait the target directly implements. */
+export interface InterfaceEntry {
+  readonly id: string;
+  readonly name: string;
+}
+
+/** A resolved override/interface-impl target of the symbol. */
+export interface OverrideEntry {
+  readonly id: string;
+  readonly name: string;
+  readonly relation: "overrides" | "methodImplements";
+}
+
+/** Heritage context for a symbol, derived from persisted heritage edges. */
+export interface HeritageContext {
+  readonly ancestors: readonly AncestorEntry[];
+  readonly interfaces: readonly InterfaceEntry[];
+  readonly overrides: readonly OverrideEntry[];
+}
+
+/** One direct INHERITS supertype (id + name). */
+interface SuperRow {
+  superId: string;
+  superName: string;
+}
+
+/**
+ * Walk the persisted INHERITS chain in a bounded BFS (nearest-first), yielding
+ * each distinct ancestor with its minimum hop distance. A per-level BFS over
+ * single-hop neighbour expansions (mirrors `trace-path.ts`) gives a
+ * deterministic distance ordering WITHOUT relying on a path-length projection,
+ * and the visited-set + depth bound make a deep/cyclic heritage graph safe.
+ *
+ * This is a best-effort linearisation by graph distance — it is NOT the full C3
+ * MRO order (which the resolver computes but does NOT persist; see T6 notes).
+ */
+async function findAncestors(graph: GraphAdapter, symbolId: string): Promise<AncestorEntry[]> {
+  const ancestors: AncestorEntry[] = [];
+  const visited = new Set<string>([symbolId]);
+  let frontier: string[] = [symbolId];
+
+  for (let depth = 1; depth <= MAX_TRAVERSAL_DEPTH && frontier.length > 0; depth++) {
+    const next: string[] = [];
+    for (const id of frontier) {
+      const rows = await graph.runCypher<SuperRow>(
+        `MATCH (sub:Symbol)-[:INHERITS]->(sup:Symbol)
+         WHERE sub.id = $val
+         RETURN DISTINCT sup.id AS superId, sup.name AS superName`,
+        { val: id },
+      ) ?? [];
+      for (const row of rows) {
+        if (!row?.superId || visited.has(row.superId)) continue;
+        visited.add(row.superId);
+        ancestors.push({ id: row.superId, name: row.superName ?? row.superId, depth });
+        next.push(row.superId);
+      }
+    }
+    frontier = next;
+  }
+  return ancestors;
+}
+
+/** Direct interfaces/traits the target implements (IMPLEMENTS edges). */
+async function findInterfaces(graph: GraphAdapter, symbolId: string): Promise<InterfaceEntry[]> {
+  const rows = await graph.runCypher<SuperRow>(
+    `MATCH (s:Symbol)-[:IMPLEMENTS]->(iface:Symbol)
+     WHERE s.id = $val
+     RETURN DISTINCT iface.id AS superId, iface.name AS superName`,
+    { val: symbolId },
+  ) ?? [];
+  return rows
+    .filter((r): r is SuperRow => Boolean(r?.superId))
+    .map((r) => ({ id: r.superId, name: r.superName ?? r.superId }));
+}
+
+/** One resolved override/method-implements target + its relation kind. */
+interface OverrideRow {
+  targetId: string;
+  targetName: string;
+  edgeType: string;
+}
+
+/**
+ * The OVERRIDES / METHODIMPLEMENTS targets of a method symbol (the ancestor
+ * member it overrides, or the interface/trait method it satisfies). These edges
+ * are emitted by the MRO computation and persisted; the `entries` ambiguity
+ * diagnostics are NOT persisted (T6 limitation).
+ */
+async function findOverrides(graph: GraphAdapter, symbolId: string): Promise<OverrideEntry[]> {
+  const rows = await graph.runCypher<OverrideRow>(
+    `MATCH (s:Symbol)-[e:OVERRIDES|METHODIMPLEMENTS]->(t:Symbol)
+     WHERE s.id = $val
+     RETURN DISTINCT t.id AS targetId, t.name AS targetName, label(e) AS edgeType`,
+    { val: symbolId },
+  ) ?? [];
+  return rows
+    .filter((r): r is OverrideRow => Boolean(r?.targetId))
+    .map((r) => {
+      const bare = r.edgeType.includes("_") ? r.edgeType.slice(r.edgeType.lastIndexOf("_") + 1) : r.edgeType;
+      const relation: "overrides" | "methodImplements" =
+        bare.toUpperCase() === "METHODIMPLEMENTS" ? "methodImplements" : "overrides";
+      return { id: r.targetId, name: r.targetName ?? r.targetId, relation };
+    });
+}
+
+/**
+ * Assemble the full heritage context for a resolved symbol from the persisted
+ * INHERITS / IMPLEMENTS / OVERRIDES / METHODIMPLEMENTS edges. Returns empty
+ * arrays when the symbol has no heritage edges (a plain function, or a graph
+ * indexed before heritage edges existed).
+ */
+async function findHeritage(graph: GraphAdapter, symbolId: string): Promise<HeritageContext> {
+  const [ancestors, interfaces, overrides] = await Promise.all([
+    findAncestors(graph, symbolId),
+    findInterfaces(graph, symbolId),
+    findOverrides(graph, symbolId),
+  ]);
+  return { ancestors, interfaces, overrides };
+}
+
 async function findExternalDependencies(graph: GraphAdapter, symbolId: string): Promise<GraphNode[]> {
   const rows = await graph.runCypher<CypherExternalDependencyRow>(
     `MATCH (s:Symbol)-[:DEPENDS_ON]->(ext:ExternalDependency)
@@ -126,6 +256,12 @@ export type ContextRetrievalResult = {
   target?: Symbol;
   callers?: readonly Symbol[];
   callees?: readonly Symbol[];
+  /**
+   * Wave 8 (T6): heritage / MRO context derived from the persisted
+   * INHERITS/IMPLEMENTS/OVERRIDES/METHODIMPLEMENTS edges. Always present
+   * (empty arrays when the target has no heritage edges or is not_found).
+   */
+  heritage?: HeritageContext;
 } & Pick<QueryResult, "symbols" | "relationships" | "clusters" | "processes" | "confidence" | "riskLevel" | "affectedFlows">;
 
 /**
@@ -156,6 +292,7 @@ export async function executeContextRetrieval(
       resolution,
       callers: [],
       callees: [],
+      heritage: { ancestors: [], interfaces: [], overrides: [] },
       symbols: [],
       relationships: [],
       clusters: [],
@@ -187,6 +324,11 @@ export async function executeContextRetrieval(
   const clusterNodes = await findClustersBySymbol(graphAdapter, target);
   const clusters = clusterNodes.map(graphNodeToCluster);
   const externalDependencyNodes = await findExternalDependencies(graphAdapter, target);
+
+  // Wave 8 (T6) — heritage / MRO context from the persisted heritage edges.
+  // Keyed on the resolved node id (NOT the raw `target` string) so it works for
+  // both exact and fuzzy resolutions.
+  const heritage = await findHeritage(graphAdapter, targetNode.id);
 
   // Build relationships: callers → target and target → callees
   const relationships: Relationship[] = [
@@ -236,6 +378,7 @@ export async function executeContextRetrieval(
     target: targetSymbol,
     callers,
     callees,
+    heritage,
     symbols: allSymbols,
     relationships,
     clusters,

@@ -289,7 +289,10 @@ function buildExplanations(
     const degree: NodeDegree = {
       inDegree: deg.inDegree,
       outDegree: deg.outDegree,
-      isExported: dep.visibility === "public",
+      // Wave 8 (T1): prefer the REAL persisted `isExported` signal (Wave 2) over
+      // the `visibility === "public"` proxy; fall back to the proxy for
+      // pre-Wave-2 graphs where the field is absent.
+      isExported: dep.isExported ?? (dep.visibility === "public"),
     };
     return explainAffectedNode({ symbolId: dep.id, entryEdge, hopDistance, degree });
   });
@@ -305,6 +308,12 @@ export async function executeImpactAnalysis(
   maxResults: number,
   graphAdapter: GraphAdapter,
   maxDepth?: number,
+  // Wave 8 (T7): optional confidence floor. The transitive-dependent traversal
+  // runs over CALLS edges, which carry NO `metadata.confidence` today, so this
+  // filter is a documented no-op on the CALLS path (kept forward-compatible for
+  // when call edges gain confidence). It DOES apply to any dependent whose edge
+  // metadata carries a `confidence` below the floor. Absent → unchanged.
+  minConfidence?: number,
 ): Promise<ImpactAnalysisResult> {
   const exactRows = await graphAdapter.runCypher<CypherNodeRow>(
     `MATCH (n:Symbol) WHERE n.id = $val OR n.name = $val RETURN n LIMIT 1`,
@@ -372,7 +381,19 @@ export async function executeImpactAnalysis(
   // Req 10.2 — find all direct and transitive dependents (depth-bounded; D3 fix
   // for the previously-dead find_dependents.maxDepth).
   const dependentNodes = await findDependents(graphAdapter, target, clampTraversalDepth(maxDepth));
-  const dependentSymbols = dependentNodes.map(graphNodeToSymbol);
+  // Wave 8 (T7): optional confidence floor. CALLS edges carry NO confidence
+  // today, so this prunes only nodes that DO carry a `confidence` prop below the
+  // floor (forward-compatible); the CALLS path is unaffected. Absent → unchanged.
+  const hasFloor = typeof minConfidence === "number" && Number.isFinite(minConfidence);
+  const keptDependentNodes = hasFloor
+    ? dependentNodes.filter((n) => {
+        const raw = prop(n, "confidence");
+        if (raw === "") return true; // no edge confidence → keep (CALLS path)
+        const c = Number(raw);
+        return !Number.isFinite(c) || c >= (minConfidence as number);
+      })
+    : dependentNodes;
+  const dependentSymbols = keptDependentNodes.map(graphNodeToSymbol);
 
   // Req 10.3 — identify affected business processes
   const processNodes = await findProcessesBySymbol(graphAdapter, target);

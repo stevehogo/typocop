@@ -106,6 +106,45 @@ describe("executeImpactAnalysis — D2 explainability", () => {
     expect((result.explanations ?? []).map((e) => e.symbolId).sort()).toEqual(["a", "b"]);
   });
 
+  // ── Wave 8 (T1): degree.isExported reads the REAL persisted field ─────────
+  it("derives degree.isExported from the persisted isExported field (private visibility, exported=true)", async () => {
+    // The dependent is visibility:"private" (the old `visibility === "public"`
+    // proxy would mark it NOT exported) but carries the persisted Wave 2 export
+    // flag isExported:"true" — so the explanation must treat it as exported.
+    const adapter = makeAdapter([
+      [symbolRow("target")],
+      [symbolRow("dep", { visibility: "private", isExported: "true" })],
+      [],
+      [],
+      [{ callerId: "dep", edgeType: "CALLS" }],
+      [{ id: "dep", inDegree: 2, outDegree: 2 }], // CoreLogic (well-connected)
+    ]);
+
+    const result = await executeImpactAnalysis("target", 100, adapter);
+    const dep = (result.explanations ?? []).find((e) => e.symbolId === "dep");
+    expect(dep?.nodeRole).toBe("CoreLogic");
+    // The exported reason is only added when degree.isExported is true — proving
+    // the persisted field (not visibility) drove it.
+    expect(dep?.reasons.join(" ")).toMatch(/exported/i);
+  });
+
+  it("treats a persisted isExported=false dependent as NOT exported (overrides public visibility)", async () => {
+    // visibility:"public" (proxy would say exported) but the persisted flag is
+    // false → the exported reason must NOT appear.
+    const adapter = makeAdapter([
+      [symbolRow("target")],
+      [symbolRow("dep", { visibility: "public", isExported: "false" })],
+      [],
+      [],
+      [{ callerId: "dep", edgeType: "CALLS" }],
+      [{ id: "dep", inDegree: 2, outDegree: 2 }],
+    ]);
+
+    const result = await executeImpactAnalysis("target", 100, adapter);
+    const dep = (result.explanations ?? []).find((e) => e.symbolId === "dep");
+    expect(dep?.reasons.join(" ")).not.toMatch(/exported/i);
+  });
+
   it("returns no explanations when there are no dependents", async () => {
     const adapter = makeAdapter([
       [symbolRow("lonely")],

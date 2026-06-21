@@ -93,6 +93,19 @@ export function validateToolParams(
           { tool: toolName, missing: "entryPoint" },
         );
       }
+      if (params.minConfidence !== undefined) {
+        if (
+          typeof params.minConfidence !== "number" ||
+          params.minConfidence < 0 ||
+          params.minConfidence > 1
+        ) {
+          throw new MCPValidationError(
+            "trace_data_flow 'minConfidence' must be a number in [0, 1]",
+            "INVALID_PARAMETER_TYPE",
+            { tool: toolName, parameter: "minConfidence", expected: "number in [0,1]" },
+          );
+        }
+      }
       break;
 
     case "impact_analysis":
@@ -119,6 +132,19 @@ export function validateToolParams(
           "INVALID_PARAMETER_TYPE",
           { tool: toolName, parameter: "maxDepth", expected: "number" },
         );
+      }
+      if (params.minConfidence !== undefined) {
+        if (
+          typeof params.minConfidence !== "number" ||
+          params.minConfidence < 0 ||
+          params.minConfidence > 1
+        ) {
+          throw new MCPValidationError(
+            "impact_analysis 'minConfidence' must be a number in [0, 1]",
+            "INVALID_PARAMETER_TYPE",
+            { tool: toolName, parameter: "minConfidence", expected: "number in [0,1]" },
+          );
+        }
       }
       break;
 
@@ -328,7 +354,13 @@ export function validateToolParams(
           );
         }
         if (params.kind === "edge") {
-          const validRelations = ["calls", "imports", "inherits", "implements", "references"];
+          // Kept in sync with registration.ts (the `relation` enum) and the
+          // app-side CLAIM_EDGE_RELATIONS (verify-claim-types.ts). Wave 8 (T2)
+          // added the MRO-derived `overrides`/`methodImplements` edges.
+          const validRelations = [
+            "calls", "imports", "inherits", "implements", "references",
+            "overrides", "methodImplements",
+          ];
           if (
             !params.relation ||
             typeof params.relation !== "string" ||
@@ -379,6 +411,62 @@ export function validateToolParams(
       // NOTE: read-only / write-rejection enforcement lives in the querying fn
       // (query-graph.ts) so the guarded path runs even if a caller bypasses this
       // validator. This case only checks param shape.
+      break;
+    }
+
+    case "route_map": {
+      // Enumerates routes — no required params.
+      if (params.maxResults !== undefined) {
+        if (typeof params.maxResults !== "number" || params.maxResults <= 0) {
+          throw new MCPValidationError(
+            "route_map 'maxResults' must be a positive number",
+            "INVALID_PARAMETER_TYPE",
+            { tool: toolName, parameter: "maxResults", expected: "positive number" },
+          );
+        }
+      }
+      break;
+    }
+
+    case "what_reads_table":
+    case "what_writes_table": {
+      if (!params.table || typeof params.table !== "string" || params.table.trim() === "") {
+        throw new MCPValidationError(
+          `${toolName} requires a non-empty 'table' string parameter`,
+          "MISSING_PARAMETER",
+          { tool: toolName, missing: "table" },
+        );
+      }
+      if (params.maxResults !== undefined) {
+        if (typeof params.maxResults !== "number" || params.maxResults <= 0) {
+          throw new MCPValidationError(
+            `${toolName} 'maxResults' must be a positive number`,
+            "INVALID_PARAMETER_TYPE",
+            { tool: toolName, parameter: "maxResults", expected: "positive number" },
+          );
+        }
+      }
+      break;
+    }
+
+    case "what_publishes_to":
+    case "what_subscribes_to": {
+      if (!params.topic || typeof params.topic !== "string" || params.topic.trim() === "") {
+        throw new MCPValidationError(
+          `${toolName} requires a non-empty 'topic' string parameter`,
+          "MISSING_PARAMETER",
+          { tool: toolName, missing: "topic" },
+        );
+      }
+      if (params.maxResults !== undefined) {
+        if (typeof params.maxResults !== "number" || params.maxResults <= 0) {
+          throw new MCPValidationError(
+            `${toolName} 'maxResults' must be a positive number`,
+            "INVALID_PARAMETER_TYPE",
+            { tool: toolName, parameter: "maxResults", expected: "positive number" },
+          );
+        }
+      }
       break;
     }
 

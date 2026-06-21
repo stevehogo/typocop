@@ -341,4 +341,91 @@ describe("executeTool", () => {
       ]);
     });
   });
+
+  // ── Wave 8 (T6 + T8): heritage / MRO + language-coverage / ORM insights ─────
+  describe("get_symbol_context heritage + insights (T6/T8)", () => {
+    function symNode(
+      id: string,
+      props: Record<string, string> = {},
+    ) {
+      return {
+        n: {
+          labels: ["Symbol"],
+          properties: {
+            id, name: id, kind: "class", filePath: `/repo/${id}.php`,
+            startLine: "1", startColumn: "0", endLine: "9", endColumn: "0",
+            visibility: "public", ...props,
+          },
+        },
+      };
+    }
+
+    it("surfaces heritage (ancestors/interfaces/overrides) and the MRO-unavailable flag", async () => {
+      vi.mocked(adapter._graph.runCypher).mockImplementation(async (query: string, params?: Record<string, unknown>) => {
+        const val = params?.["val"] as string | undefined;
+        if (query.includes("WHERE n.id = $val OR n.name = $val")) return [symNode("User")] as never;
+        if (query.includes("[:INHERITS]->")) {
+          return (val === "User" ? [{ superId: "Model", superName: "Model" }] : []) as never;
+        }
+        if (query.includes("[:IMPLEMENTS]->")) return [{ superId: "Arrayable", superName: "Arrayable" }] as never;
+        if (query.includes("OVERRIDES|METHODIMPLEMENTS")) {
+          return [{ targetId: "Model.save", targetName: "save", edgeType: "tpc_OVERRIDES" }] as never;
+        }
+        return [] as never;
+      });
+
+      const result = await executeTool("get_symbol_context", { symbolName: "User" }, adapter);
+      expect(result.heritage).toBeDefined();
+      expect(result.heritage?.ancestors).toEqual([{ id: "Model", name: "Model", depth: 1 }]);
+      expect(result.heritage?.interfaces).toEqual([{ id: "Arrayable", name: "Arrayable" }]);
+      expect(result.heritage?.overrides).toEqual([{ id: "Model.save", name: "save", relation: "overrides" }]);
+      expect(result.heritage?.mroDiagnosticsUnavailable).toBe(true);
+      expect(result.summary).toMatch(/Heritage:/);
+    });
+
+    it("surfaces target language (T8) and the ORM-model documentation summary", async () => {
+      vi.mocked(adapter._graph.runCypher).mockImplementation(async (query: string) => {
+        if (query.includes("WHERE n.id = $val OR n.name = $val")) {
+          // A PHP model class carrying the framework ORM enrichment summary in
+          // its persisted `documentation`.
+          return [symNode("User", {
+            documentation: "Eloquent model | fillable: name, email | relations: hasMany(Post)",
+          })] as never;
+        }
+        return [] as never;
+      });
+
+      const result = await executeTool("get_symbol_context", { symbolName: "User" }, adapter);
+      expect(result.symbolInsights?.language).toBe("php");
+      expect(result.symbolInsights?.languageCoverage).toMatchObject({ php: 1 });
+      expect(result.symbolInsights?.modelDocumentation).toContain("fillable: name, email");
+      expect(result.summary).toContain("Language: php");
+      expect(result.summary).toContain("hasMany(Post)");
+    });
+
+    it("omits heritage + insights blocks for a plain symbol with none (degrade)", async () => {
+      vi.mocked(adapter._graph.runCypher).mockImplementation(async (query: string) => {
+        if (query.includes("WHERE n.id = $val OR n.name = $val")) {
+          // A plain TS function with no documentation and no heritage edges.
+          return [{
+            n: {
+              labels: ["Symbol"],
+              properties: {
+                id: "plainFn", name: "plainFn", kind: "function", filePath: "/repo/plainFn.ts",
+                startLine: "1", startColumn: "0", endLine: "9", endColumn: "0", visibility: "public",
+              },
+            },
+          }] as never;
+        }
+        return [] as never;
+      });
+
+      const result = await executeTool("get_symbol_context", { symbolName: "plainFn" }, adapter);
+      expect(result.heritage).toBeUndefined();
+      // languageCoverage is still derived (the target itself is a .ts file), but
+      // there is no model documentation.
+      expect(result.symbolInsights?.modelDocumentation).toBeUndefined();
+      expect(result.symbolInsights?.language).toBe("typescript");
+    });
+  });
 });

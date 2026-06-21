@@ -18,7 +18,8 @@ import {
 const TOOL_DEFINITIONS = [
   {
     name: "get_symbol_context",
-    description: "Get 360° context for a symbol: callers, callees, clusters, and processes",
+    description:
+      "Get 360° context for a symbol: callers, callees, clusters, and processes. For a class/interface/method it also returns heritage from the graph: the inheritance chain (ancestors, nearest-first), implemented interfaces, and the methods it overrides / interface methods it satisfies. Note: ancestors are ordered by graph distance, NOT the full C3 MRO (the linearised order + ambiguity diagnostics are not persisted).",
     inputSchema: {
       type: "object",
       properties: {
@@ -65,6 +66,10 @@ const TOOL_DEFINITIONS = [
           type: "string",
           description: "Optional framework hint (NestJS, Laravel, Express, etc.)",
         },
+        minConfidence: {
+          type: "number",
+          description: "Optional [0,1] floor on data-touch edge confidence: nodes reached via a lower-confidence route/DB edge are dropped. Nodes with no edge confidence (regex-classified) are kept. Omit for no filtering.",
+        },
         maxResults: {
           type: "number",
           description: "Maximum number of results to return (default: 100)",
@@ -92,6 +97,10 @@ const TOOL_DEFINITIONS = [
         maxDepth: {
           type: "number",
           description: "Maximum traversal depth for transitive dependents (default: unlimited, capped at 20)",
+        },
+        minConfidence: {
+          type: "number",
+          description: "Optional [0,1] floor on edge confidence: dependents reached via a lower-confidence edge are dropped. NOTE: CALLS edges carry no confidence today, so this currently prunes nothing on the call graph (forward-compatible).",
         },
         maxResults: {
           type: "number",
@@ -248,7 +257,7 @@ const TOOL_DEFINITIONS = [
   {
     name: "verify_claim",
     description:
-      "Verify a structured belief about the codebase and get back verdict (confirmed/refuted/uncertain) + confidence + evidence — so you stop acting on false assumptions. Claim kinds: 'usage' (needs 'symbol'): 'X has no callers / is dead'. 'edge' (needs 'from','to','relation' ∈ calls|imports|inherits|implements|references): 'X {relation} Y'. 'reachability' (needs 'from','to','polarity' ∈ reachable|independent): 'X can reach Y' / 'changing X can't affect Y'. Honest-uncertainty: relationships the graph can't prove (dynamic dispatch/callbacks/DI) return 'uncertain', never a false confirm/refute; a refute includes the true answer. Read-only; never throws.",
+      "Verify a structured belief about the codebase and get back verdict (confirmed/refuted/uncertain) + confidence + evidence — so you stop acting on false assumptions. Claim kinds: 'usage' (needs 'symbol'): 'X has no callers / is dead'. 'edge' (needs 'from','to','relation' ∈ calls|imports|inherits|implements|references|overrides|methodImplements): 'X {relation} Y' (overrides = a subclass method overrides an ancestor's; methodImplements = a method satisfies an interface/trait contract). 'reachability' (needs 'from','to','polarity' ∈ reachable|independent): 'X can reach Y' / 'changing X can't affect Y'. Honest-uncertainty: relationships the graph can't prove (dynamic dispatch/callbacks/DI) return 'uncertain', never a false confirm/refute; a refute includes the true answer. Read-only; never throws.",
     inputSchema: {
       type: "object",
       properties: {
@@ -271,7 +280,7 @@ const TOOL_DEFINITIONS = [
         },
         relation: {
           type: "string",
-          enum: ["calls", "imports", "inherits", "implements", "references"],
+          enum: ["calls", "imports", "inherits", "implements", "references", "overrides", "methodImplements"],
           description: "Edge type for an 'edge' claim.",
         },
         polarity: {
@@ -302,6 +311,97 @@ const TOOL_DEFINITIONS = [
         },
       },
       required: ["cypher"],
+    },
+  },
+  {
+    name: "route_map",
+    description:
+      "List ALL API routes the indexer linked a handler to, via the persisted HANDLES_ROUTE edges — endpoint + serving handler + provenance. Covers decorator (NestJS/Spring), Express/Fastify, and structured framework routes (incl. Laravel resource expansion). Enumerates the route surface — distinct from trace_data_flow (traces FROM one endpoint) and shape_check (response-contract drift). Read-only. Returns an EMPTY result when data-touch indexing was disabled at index time (TYPOCOP_DATA_TOUCH off), not an error.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        maxResults: {
+          type: "number",
+          description: "Maximum number of routes to return (default: 100)",
+        },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "what_reads_table",
+    description:
+      "Given a table/model name, list the code symbols that READ from it via the persisted READS_FROM_DB edges (\"what code reads table X\"). Resolves the table to its dbmodel:<table> synthetic node or a real model class. Keyed on DATA edges, not CALLS — distinct from impact_analysis. Read-only. Returns an EMPTY result when data-touch indexing was disabled at index time, not an error.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        table: {
+          type: "string",
+          description: "Table / model name (case-insensitive), e.g. 'users' or 'User'.",
+        },
+        maxResults: {
+          type: "number",
+          description: "Maximum number of symbols to return (default: 100)",
+        },
+      },
+      required: ["table"],
+    },
+  },
+  {
+    name: "what_writes_table",
+    description:
+      "Given a table/model name, list the code symbols that WRITE to it via the persisted WRITES_TO_DB edges (\"what code writes table X\"). Resolves the table to its dbmodel:<table> synthetic node or a real model class. Keyed on DATA edges, not CALLS — distinct from impact_analysis. Read-only. Returns an EMPTY result when data-touch indexing was disabled at index time, not an error.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        table: {
+          type: "string",
+          description: "Table / model name (case-insensitive), e.g. 'users' or 'User'.",
+        },
+        maxResults: {
+          type: "number",
+          description: "Maximum number of symbols to return (default: 100)",
+        },
+      },
+      required: ["table"],
+    },
+  },
+  {
+    name: "what_publishes_to",
+    description:
+      "Given an event topic, list the code symbols that PUBLISH to it via the persisted PUBLISHES_EVENT edges. Resolves the topic to its eventchannel:<topic> node. Read-only. Event indexing is OFF by default (TYPOCOP_DATA_TOUCH_EVENTS) even when data-touch is on, so this returns an EMPTY result when events were not indexed — not an error.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        topic: {
+          type: "string",
+          description: "Event topic / channel name, e.g. 'order.created'.",
+        },
+        maxResults: {
+          type: "number",
+          description: "Maximum number of publishers to return (default: 100)",
+        },
+      },
+      required: ["topic"],
+    },
+  },
+  {
+    name: "what_subscribes_to",
+    description:
+      "Given an event topic, list the code symbols that SUBSCRIBE to it via the persisted SUBSCRIBES_TO edges (the handlers a published event reaches). Resolves the topic to its eventchannel:<topic> node. Read-only. Event indexing is OFF by default (TYPOCOP_DATA_TOUCH_EVENTS) even when data-touch is on, so this returns an EMPTY result when events were not indexed — not an error.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        topic: {
+          type: "string",
+          description: "Event topic / channel name, e.g. 'order.created'.",
+        },
+        maxResults: {
+          type: "number",
+          description: "Maximum number of subscribers to return (default: 100)",
+        },
+      },
+      required: ["topic"],
     },
   },
 ];

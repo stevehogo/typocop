@@ -39,10 +39,23 @@ export async function executeFindDeadCode(
   const cappedNote = result.totalFound > shown
     ? ` (showing first ${shown} of ${result.totalFound})`
     : "";
-  const summary = shown === 0
+  // Wave 8 (T1): "kept because" note — explain entry points excluded by the
+  // persisted entryPointKind/entryPointReason (Wave 2) so the agent sees WHY an
+  // uncalled symbol was not flagged dead. Empty for pre-Wave-2 graphs.
+  const kept = result.keptEntryPoints;
+  const keptNote = kept.length === 0
+    ? ""
+    : ` Kept ${kept.length} uncalled entry point${kept.length === 1 ? "" : "s"} (not dead): ` +
+      kept
+        .slice(0, 5)
+        .map((k) => `${k.name} [${k.entryPointKind}${k.entryPointReason ? `: ${k.entryPointReason}` : ""}]`)
+        .join("; ") +
+      (kept.length > 5 ? `; …and ${kept.length - 5} more` : "") +
+      ".";
+  const summary = (shown === 0
     ? `No dead-code candidates found${kindNote}. ${DEAD_CODE_CAVEAT}`
     : `Found ${result.totalFound} dead-code candidate${result.totalFound === 1 ? "" : "s"}${kindNote}${cappedNote}. ` +
-      `${DEAD_CODE_CAVEAT}`;
+      `${DEAD_CODE_CAVEAT}`) + keptNote;
 
   return {
     symbols: result.candidates.map(({ symbol }) => ({

@@ -7,7 +7,7 @@ Model Context Protocol (MCP) server implementation for the Code Graph Analyzer.
 This module provides MCP integration for AI editors (Kiro, Claude, Cursor, Windsurf, Antigravity) to query the code knowledge graph. It implements:
 
 - **Protocol Handling**: Request validation, error responses, connection state management
-- **Tool Registration**: 12 read-only MCP tools for querying the knowledge graph (including the `verify_claim` grounding / anti-hallucination tool and the guarded `query_graph` Cypher tool)
+- **Tool Registration**: 17 read-only MCP tools for querying the knowledge graph (including the `verify_claim` grounding / anti-hallucination tool, the guarded `query_graph` Cypher tool, and the data-touch enumeration tools `route_map` / `what_reads_table` / `what_writes_table` / `what_publishes_to` / `what_subscribes_to`)
 - **Prompt Registration**: Pre-defined prompts for common workflows
 - **Authentication**: Token-based authentication for secure connections
 
@@ -47,7 +47,7 @@ Implements requirements:
 
 ## MCP Tools
 
-**12 read-only tools** — none mutate your code or the graph. Every response carries a mandatory human-readable `summary` (see [Response Format](#response-format)).
+**17 read-only tools** — none mutate your code or the graph. Every response carries a mandatory human-readable `summary` (see [Response Format](#response-format)).
 
 ### Context & search
 
@@ -160,7 +160,7 @@ Verify a **structured belief** about the codebase and get back **verdict (`confi
 Claim kinds (discriminated by `kind`):
 
 - `usage` — *"X has no callers / is dead"*. Needs `symbol`.
-- `edge` — *"X {relation} Y"*. Needs `from`, `to`, and `relation` ∈ `calls` | `imports` | `inherits` | `implements` | `references`.
+- `edge` — *"X {relation} Y"*. Needs `from`, `to`, and `relation` ∈ `calls` | `imports` | `inherits` | `implements` | `references` | `overrides` | `methodImplements` (`overrides` = a subclass method overrides an ancestor's; `methodImplements` = a method satisfies an interface/trait contract).
 - `reachability` — *"X can reach Y"* / *"changing X can't affect Y"*. Needs `from`, `to`, and `polarity` ∈ `reachable` | `independent`.
 
 ```json
@@ -181,6 +181,48 @@ Run a **guarded, read-only** Cypher query against the knowledge graph for questi
 ```
 
 Rows are returned in the additive `queryGraph` block (`ok` / `rows[]` / `rowCount` / `limit` / `truncated`; `unsupported` carries the rejection reason when `ok` is false).
+
+### Data flow, tables & events
+
+These tools read the persisted **data-touch edges** (`HANDLES_ROUTE` / `READS_FROM_DB` / `WRITES_TO_DB` / `PUBLISHES_EVENT` / `SUBSCRIBES_TO`) that the indexer emits when data-touch indexing is enabled (`TYPOCOP_DATA_TOUCH`; events additionally gated by `TYPOCOP_DATA_TOUCH_EVENTS`, **OFF by default**). When that pass did not run at index time the edge tables are empty, so each tool **degrades to a clear empty result** (low confidence + a "may be disabled" summary) — never an error.
+
+#### `route_map`
+
+List **all** API routes the indexer linked a handler to (via `HANDLES_ROUTE`) — endpoint + serving handler + provenance. Covers decorator (NestJS/Spring), Express/Fastify, and structured framework routes (incl. Laravel resource expansion). *Enumerates* the route surface — distinct from `trace_data_flow` (traces **from** one endpoint) and `shape_check` (response-contract drift).
+
+- `maxResults` (optional, default 100)
+
+Rows ride the additive `routeMap` block (`routes[]` of endpoint/handler + `confidence`/`reason`; `totalFound`).
+
+```json
+{ "method": "route_map", "params": {} }
+```
+
+#### `what_reads_table` / `what_writes_table`
+
+Given a **table/model name**, list the code symbols that **read from** / **write to** it (via `READS_FROM_DB` / `WRITES_TO_DB`). Keyed on **data edges**, not `CALLS` — distinct from `impact_analysis`. Resolves the table to its `dbmodel:<table>` synthetic node **or** a real model class (case-insensitive name match).
+
+- `table` (required) — e.g. `users` or `User`
+- `maxResults` (optional, default 100)
+
+Touchers ride the additive `tableTouch` block (`table` / `direction` / `touchers[]` with `confidence`/`reason`; `totalFound`).
+
+```json
+{ "method": "what_reads_table", "params": { "table": "users" } }
+```
+
+#### `what_publishes_to` / `what_subscribes_to`
+
+Given an **event topic**, list the code symbols that **publish to** / **subscribe to** it (via `PUBLISHES_EVENT` / `SUBSCRIBES_TO`). Resolves the topic to its `eventchannel:<topic>` node. **Event indexing is OFF by default** even when data-touch is on — these return an empty result when events were not indexed.
+
+- `topic` (required) — e.g. `order.created`
+- `maxResults` (optional, default 100)
+
+Participants ride the additive `eventChannel` block (`topic` / `direction` / `participants[]` with `confidence`/`reason`; `totalFound`).
+
+```json
+{ "method": "what_subscribes_to", "params": { "topic": "order.created" } }
+```
 
 ## Response Format
 
@@ -227,7 +269,12 @@ Some tools attach **additive, optional** fields to this base shape (absent for e
 | per-symbol `nodeRole` / `entryEdge` / `hopDistance` | `impact_analysis` |
 | per-symbol `cyclomatic` / `cognitive` / `maxLoopDepth` | `find_hotspots` |
 | `truncationReason` / `estimatedTokens` | `get_symbol_context` (with a `tokenBudget`) |
+| `heritage` (ancestors / interfaces / overrides) | `get_symbol_context` (class/interface/method target) |
+| `symbolInsights` (language / languageCoverage / modelDocumentation) | `get_symbol_context` |
 | `queryGraph` (ok / rows[] / rowCount / limit / truncated / unsupported) | `query_graph` |
+| `routeMap` (routes[] / totalFound) | `route_map` |
+| `tableTouch` (table / direction / touchers[] / totalFound) | `what_reads_table`, `what_writes_table` |
+| `eventChannel` (topic / direction / participants[] / totalFound) | `what_publishes_to`, `what_subscribes_to` |
 
 ## Authentication
 

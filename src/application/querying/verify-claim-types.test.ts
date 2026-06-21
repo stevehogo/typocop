@@ -43,6 +43,14 @@ describe("parseClaim", () => {
     if (!r.ok) expect(r.error).toMatch(/relation/i);
   });
 
+  it("parses an edge claim for the Wave 8 heritage relations (overrides / methodImplements)", () => {
+    for (const relation of ["overrides", "methodImplements"] as const) {
+      const r = parseClaim({ kind: "edge", from: "A", to: "B", relation });
+      expect(r.ok).toBe(true);
+      if (r.ok) expect(r.claim).toEqual({ kind: "edge", from: "A", to: "B", relation });
+    }
+  });
+
   it("rejects an edge claim missing endpoints", () => {
     const r = parseClaim({ kind: "edge", relation: "calls" });
     expect(r.ok).toBe(false);

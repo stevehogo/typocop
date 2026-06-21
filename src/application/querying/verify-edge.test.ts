@@ -104,4 +104,27 @@ describe("verifyEdge", () => {
     const a = await verifyEdge("A", "ghost", "calls", graph);
     expect(a.verdict).toBe("uncertain");
   });
+
+  // ── Wave 8 (T2): MRO-derived heritage relations ───────────────────────────
+  it("confirms an existing OVERRIDES edge for relation 'overrides'", async () => {
+    const graph = makeGraph(["Sub.m", "Base.m"], [{ from: "Sub.m", to: "Base.m", type: "OVERRIDES" }]);
+    const a = await verifyEdge("Sub.m", "Base.m", "overrides", graph);
+    expect(a.verdict).toBe("confirmed");
+    expect(a.basis).toBe("presence");
+  });
+
+  it("confirms an existing METHODIMPLEMENTS edge for relation 'methodImplements'", async () => {
+    const graph = makeGraph(["Impl.m", "Iface.m"], [{ from: "Impl.m", to: "Iface.m", type: "METHODIMPLEMENTS" }]);
+    const a = await verifyEdge("Impl.m", "Iface.m", "methodImplements", graph);
+    expect(a.verdict).toBe("confirmed");
+    expect(a.basis).toBe("presence");
+  });
+
+  it("refutes a claimed 'overrides' edge when only an INHERITS edge connects the endpoints", async () => {
+    const graph = makeGraph(["Sub.m", "Base.m"], [{ from: "Sub.m", to: "Base.m", type: "INHERITS" }]);
+    const a = await verifyEdge("Sub.m", "Base.m", "overrides", graph);
+    expect(a.verdict).toBe("refuted");
+    expect(a.basis).toBe("absence");
+    expect(a.evidence.join(" ")).toMatch(/inherits/i);
+  });
 });

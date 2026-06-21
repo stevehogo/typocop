@@ -11,13 +11,19 @@
 import { describe, it, expect } from "vitest";
 import type { GraphAdapter } from "../../core/ports/persistence.js";
 import { findDeadCode } from "./dead-code.js";
-import type { Visibility, SymbolKind } from "../../core/domain.js";
+import type { Visibility, SymbolKind, EntryPointKind } from "../../core/domain.js";
 
 interface FixtureNode {
   id: string;
   name: string;
   kind?: SymbolKind;
   visibility?: Visibility;
+  /** Persisted Wave 2 export flag ("true"/"false"); omit for pre-Wave-2 graphs. */
+  isExported?: "true" | "false";
+  /** Persisted Wave 2 entry-point classification; omit for non-entry-points. */
+  entryPointKind?: EntryPointKind;
+  /** Persisted Wave 2 entry-point explainability trail. */
+  entryPointReason?: string;
 }
 
 /** Build a mock GraphAdapter whose dead-code query returns `uncalled`. */
@@ -36,6 +42,9 @@ function makeGraph(uncalled: FixtureNode[]): GraphAdapter {
           endLine: "9",
           endColumn: "0",
           visibility: n.visibility ?? "private",
+          ...(n.isExported !== undefined ? { isExported: n.isExported } : {}),
+          ...(n.entryPointKind !== undefined ? { entryPointKind: n.entryPointKind } : {}),
+          ...(n.entryPointReason !== undefined ? { entryPointReason: n.entryPointReason } : {}),
         },
       },
     };
@@ -107,6 +116,60 @@ describe("findDeadCode", () => {
 
     const onlyVars = await findDeadCode(graph, { kind: "variable" });
     expect(onlyVars.candidates.map((c) => c.symbol.name)).toEqual(["scratchVar"]);
+  });
+
+  // ── Wave 8 (T1): real persisted fields with pre-Wave-2 fallback ───────────
+  it("excludes an uncalled symbol via the REAL persisted isExported field (private visibility)", async () => {
+    // visibility is private (the old proxy would flag it dead) but the
+    // language-level export flag is true → not dead.
+    const graph = makeGraph([
+      { id: "x1", name: "publicApiThing", kind: "function", visibility: "private", isExported: "true" },
+    ]);
+    const result = await findDeadCode(graph);
+    expect(result.candidates).toHaveLength(0);
+  });
+
+  it("flags a symbol whose persisted isExported is explicitly false (overrides public visibility)", async () => {
+    // visibility public (old proxy would KEEP it) but the language export flag
+    // is false → not part of the public surface → dead candidate.
+    const graph = makeGraph([
+      { id: "x2", name: "internalHelper", kind: "function", visibility: "public", isExported: "false" },
+    ]);
+    const result = await findDeadCode(graph);
+    expect(result.candidates.map((c) => c.symbol.name)).toEqual(["internalHelper"]);
+  });
+
+  it("excludes an entry point via persisted entryPointKind even when its NAME is not entry-point-shaped", async () => {
+    // "renderWidget" does NOT match the entry-point name regex; only the
+    // persisted entryPointKind keeps it out.
+    const graph = makeGraph([
+      {
+        id: "ep1",
+        name: "renderWidget",
+        kind: "function",
+        visibility: "private",
+        entryPointKind: "route",
+        entryPointReason: "base:2.00, framework:nextjs-api-route",
+      },
+    ]);
+    const result = await findDeadCode(graph);
+    expect(result.candidates).toHaveLength(0);
+    expect(result.keptEntryPoints).toHaveLength(1);
+    expect(result.keptEntryPoints[0]).toMatchObject({
+      name: "renderWidget",
+      entryPointKind: "route",
+      entryPointReason: "base:2.00, framework:nextjs-api-route",
+    });
+  });
+
+  it("still excludes entry-point-NAMED symbols on a pre-Wave-2 graph (regex fallback, no persisted reason)", async () => {
+    const graph = makeGraph([
+      { id: "m1", name: "main", kind: "function", visibility: "private" },
+    ]);
+    const result = await findDeadCode(graph);
+    expect(result.candidates).toHaveLength(0);
+    // No entryPointKind persisted → not surfaced in the "kept because" list.
+    expect(result.keptEntryPoints).toHaveLength(0);
   });
 
   it("caps results at maxResults but reports totalFound", async () => {

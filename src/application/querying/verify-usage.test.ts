@@ -16,6 +16,10 @@ interface FixtureNode {
   name?: string;
   kind?: string;
   visibility?: string;
+  /** Persisted Wave 2 export flag ("true"/"false"); omit for pre-Wave-2 graphs. */
+  isExported?: "true" | "false";
+  /** Persisted Wave 2 entry-point classification; omit for non-entry-points. */
+  entryPointKind?: string;
 }
 
 function makeGraph(nodes: FixtureNode[], callsEdges: Array<{ from: string; to: string }>): GraphAdapter {
@@ -35,6 +39,8 @@ function makeGraph(nodes: FixtureNode[], callsEdges: Array<{ from: string; to: s
           endLine: "9",
           endColumn: "0",
           visibility: n.visibility ?? "private",
+          ...(n.isExported !== undefined ? { isExported: n.isExported } : {}),
+          ...(n.entryPointKind !== undefined ? { entryPointKind: n.entryPointKind } : {}),
         },
       },
     };
@@ -127,5 +133,35 @@ describe("verifyUsage", () => {
     const a = await verifyUsage("ghost", graph);
     expect(a.verdict).toBe("uncertain");
     expect(a.evidence).toContain("realName");
+  });
+
+  // ── Wave 8 (T1): real persisted fields with pre-Wave-2 fallback ───────────
+  it("is uncertain for an uncalled symbol that is exported via the REAL persisted field (private visibility)", async () => {
+    // visibility private (proxy would CONFIRM dead) but the persisted export
+    // flag is true → uncertain, may be invoked externally.
+    const graph = makeGraph([{ id: "p", name: "publicThing", visibility: "private", isExported: "true" }], []);
+    const a = await verifyUsage("publicThing", graph);
+    expect(a.verdict).toBe("uncertain");
+    expect(a.dynamicReachable).toBe(true);
+  });
+
+  it("confirms dead for an uncalled symbol whose persisted isExported is false (overrides public visibility)", async () => {
+    // visibility public (proxy would say uncertain) but the export flag is
+    // false → not part of the public surface → confirmed dead.
+    const graph = makeGraph([{ id: "i", name: "internalThing", visibility: "public", isExported: "false" }], []);
+    const a = await verifyUsage("internalThing", graph);
+    expect(a.verdict).toBe("confirmed");
+  });
+
+  it("is uncertain for an uncalled symbol classified as an entry point by persisted entryPointKind (name not entry-shaped)", async () => {
+    // "renderWidget" does NOT match the entry-point name regex; only the
+    // persisted entryPointKind keeps it from being confirmed dead.
+    const graph = makeGraph(
+      [{ id: "w", name: "renderWidget", visibility: "private", entryPointKind: "route" }],
+      [],
+    );
+    const a = await verifyUsage("renderWidget", graph);
+    expect(a.verdict).toBe("uncertain");
+    expect(a.dynamicReachable).toBe(true);
   });
 });
