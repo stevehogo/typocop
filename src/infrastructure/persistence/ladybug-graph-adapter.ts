@@ -100,7 +100,7 @@ export class LadybugGraphAdapter implements GraphAdapter {
     for (const label of nodeLabels) {
       const tbl = this.prefixLabel(label);
       await this.exec(
-        `CREATE NODE TABLE IF NOT EXISTS ${tbl} (id STRING, name STRING, kind STRING, filePath STRING, startLine STRING, startColumn STRING, endLine STRING, endColumn STRING, visibility STRING, signature STRING, documentation STRING, cyclomatic STRING, cognitive STRING, maxLoopDepth STRING, responseKeys STRING, accessedKeys STRING, category STRING, confidence STRING, symbolCount STRING, entryPoint STRING, stepCount STRING, key STRING, timestamp STRING, aliases STRING, ecosystem STRING, PRIMARY KEY(id))`,
+        `CREATE NODE TABLE IF NOT EXISTS ${tbl} (id STRING, name STRING, kind STRING, filePath STRING, startLine STRING, startColumn STRING, endLine STRING, endColumn STRING, visibility STRING, signature STRING, documentation STRING, cyclomatic STRING, cognitive STRING, maxLoopDepth STRING, responseKeys STRING, accessedKeys STRING, isExported STRING, entryPointKind STRING, entryPointReason STRING, category STRING, confidence STRING, symbolCount STRING, entryPoint STRING, stepCount STRING, key STRING, timestamp STRING, aliases STRING, ecosystem STRING, PRIMARY KEY(id))`,
       );
     }
 
@@ -109,7 +109,11 @@ export class LadybugGraphAdapter implements GraphAdapter {
     // EXISTS` never alters an existing table, so add any missing columns now
     // (idempotent — "already exists" is swallowed). Extend this list whenever a
     // new persisted Symbol column is introduced.
-    const migratedColumns = ["cyclomatic", "cognitive", "maxLoopDepth", "responseKeys", "accessedKeys"];
+    const migratedColumns = [
+      "cyclomatic", "cognitive", "maxLoopDepth", "responseKeys", "accessedKeys",
+      // Wave 2: per-language export flag + entry-point classification props.
+      "isExported", "entryPointKind", "entryPointReason",
+    ];
     for (const label of nodeLabels) {
       const tbl = this.prefixLabel(label);
       for (const col of migratedColumns) {

@@ -38,6 +38,7 @@ const {
   mockResolveReferences,
   mockClusterSymbols,
   mockTraceProcesses,
+  mockAnnotateEntryPoints,
   mockBuildSearchIndex,
 } = vi.hoisted(() => ({
   mockWalkFileTree: vi.fn(),
@@ -45,6 +46,9 @@ const {
   mockResolveReferences: vi.fn(),
   mockClusterSymbols: vi.fn(),
   mockTraceProcesses: vi.fn(),
+  // Wave 2: pass-through by default (returns the symbols unchanged) so the
+  // pipeline's observable persisted shape under test is unaffected.
+  mockAnnotateEntryPoints: vi.fn((symbols: unknown) => symbols),
   mockBuildSearchIndex: vi.fn(),
 }));
 
@@ -52,7 +56,10 @@ vi.mock("./structure/index.js", () => ({ walkFileTree: mockWalkFileTree }));
 vi.mock("./parsing/index.js", () => ({ extractAllSymbols: mockExtractAllSymbols }));
 vi.mock("./resolution/index.js", () => ({ resolveReferences: mockResolveReferences }));
 vi.mock("./clustering/index.js", () => ({ clusterSymbols: mockClusterSymbols }));
-vi.mock("./processes/index.js", () => ({ traceProcesses: mockTraceProcesses }));
+vi.mock("./processes/index.js", () => ({
+  traceProcesses: mockTraceProcesses,
+  annotateEntryPoints: mockAnnotateEntryPoints,
+}));
 vi.mock("./search/index.js", () => ({ buildSearchIndex: mockBuildSearchIndex }));
 vi.mock("../../platform/config/index.js", () => ({
   configurationManager: { getPrefix: () => "tpc_" },
@@ -119,6 +126,8 @@ function setupDefaultMocks(): void {
   mockResolveReferences.mockReturnValue({ relationships: [], extNodes: new Map() });
   mockClusterSymbols.mockResolvedValue([]);
   mockTraceProcesses.mockReturnValue([]);
+  // Wave 2: keep annotateEntryPoints a pass-through after clearAllMocks.
+  mockAnnotateEntryPoints.mockImplementation((symbols: unknown) => symbols);
   mockBuildSearchIndex.mockResolvedValue({
     keywords: new Map(), symbolCount: 1, embeddings: [],
     embeddingStats: { attempts: 0, successes: 0, failures: 0 },

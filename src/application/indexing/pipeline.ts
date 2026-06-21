@@ -30,7 +30,7 @@ import { PARSE_VERSION } from "../../infrastructure/parsing/parse-version.js";
 import { sha256Hex } from "../../platform/utils/hash.js";
 import { resolveReferences } from "./resolution/index.js";
 import { clusterSymbols, type AIClient } from "./clustering/index.js";
-import { traceProcesses } from "./processes/index.js";
+import { traceProcesses, annotateEntryPoints } from "./processes/index.js";
 import { buildSearchIndex, type EmbeddingResult } from "./search/index.js";
 import { EMBEDDING_CONCURRENCY } from "../../platform/utils/limits.js";
 import { createMetricsCollector, formatMetrics, type IndexingMetrics } from "./metrics.js";
@@ -202,7 +202,9 @@ export async function runIndexingPipeline(config: PipelineConfig): Promise<Pipel
   // (purely additive — see {@link attachAccessedKeys}). All later phases see the
   // augmented list; the added optional prop is ignored by resolution/clustering,
   // so the graph stays byte-identical apart from the new Symbol prop.
-  const symbols = attachAccessedKeys(phase2Symbols, hints);
+  // `let` (not `const`): Wave 2 re-binds it after Phase 5 with the additive
+  // entry-point annotation (see {@link annotateEntryPoints}).
+  let symbols = attachAccessedKeys(phase2Symbols, hints);
   metrics.set("skippedFiles", skippedFiles);
   metrics.set("filesParsed", phase2.filesParsed);
   metrics.set("symbolCount", symbols.length);
@@ -265,6 +267,12 @@ export async function runIndexingPipeline(config: PipelineConfig): Promise<Pipel
   // Phase 5: Trace processes (Req 3.5)
   metrics.startPhase("processes");
   const processes = traceProcesses(symbols, relationships);
+  // Wave 2 (1.1): annotate entry-point symbols with `entryPointKind` /
+  // `entryPointReason` so the persisted Symbol node carries them. Purely
+  // additive — symbols below the entry-point threshold are returned unchanged,
+  // so search/clustering/persisted shape stay identical where no metadata
+  // applies (the new optional props are ignored by every downstream phase).
+  symbols = annotateEntryPoints(symbols, relationships);
   metrics.endPhase("processes");
   metrics.set("processCount", processes.length);
   if (verbose) console.error(`[pipeline] Phase 5 complete: ${processes.length} processes traced`);
@@ -934,6 +942,14 @@ async function storeInDatabases(
       // countPersistRows is unaffected (props, not rows).
       responseKeys: JSON.stringify(s.responseKeys ?? []),
       accessedKeys: JSON.stringify(s.accessedKeys ?? []),
+      // Wave 2: export flag + entry-point classification props (string, empty
+      // when absent). countPersistRows is unaffected (props, not rows).
+      // Tri-state isExported: persist "" when the export checker abstained
+      // (undefined) so the read side leaves it undefined and the
+      // `isExported ?? visibility` fallback still fires — never collapse to "false".
+      isExported: s.isExported === undefined ? "" : s.isExported ? "true" : "false",
+      entryPointKind: s.entryPointKind ?? "",
+      entryPointReason: s.entryPointReason ?? "",
     })),
     countNodes,
     nodeEvents,

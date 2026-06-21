@@ -7,6 +7,8 @@ import { generateSymbolId } from "./symbol-id.js";
 import { generateLogicalKey, OrdinalAllocator } from "./logical-key.js";
 import { computeComplexity } from "./complexity.js";
 import { extractNamedBindings } from "./named-bindings.js";
+import { extractMethodSignature } from "./signature.js";
+import { isNodeExported } from "./export-detection.js";
 
 /**
  * `@definition.*` capture suffixes that denote a callable (function / method /
@@ -291,9 +293,17 @@ export function extractSymbolsWithQueries(
       // concrete value so non-callable symbols (and symbols where the grammar
       // exposes nothing useful) carry no empty keys — keeping the Symbol shape
       // identical to pre-E1 wherever no info exists (golden output unchanged).
-      const parameterCount = extractParameterCount(defNode);
-      const returnType = extractReturnType(defNode);
+      // Wave 2 (1.2): one variadic-aware signature pass replaces the old
+      // extractParameterCount/extractReturnType pair — variadic arities yield
+      // `parameterCount: undefined`, which the conditional spread below drops.
+      const { parameterCount, returnType } = extractMethodSignature(defNode);
       const ownerId = extractOwnerId(defNode, filePath);
+
+      // Wave 2 (1.3): per-language export detection — ORTHOGONAL to
+      // `visibility` below. `isNodeExported` always returns a concrete boolean
+      // for a known language, so the field is always attached for definition
+      // symbols (the PARSE_VERSION bump re-emits warm-cache files).
+      const isExported = isNodeExported(defNode, name, language);
 
       // E2: complexity is only meaningful for callables (function/method/
       // constructor). Computed as a pure subtree walk over the live tree-sitter
@@ -329,6 +339,7 @@ export function extractSymbolsWithQueries(
         ...(returnType !== undefined ? { returnType } : {}),
         ...(ownerId !== undefined ? { ownerId } : {}),
         ...(complexity !== undefined ? { complexity } : {}),
+        isExported,
       });
     }
 
@@ -460,67 +471,10 @@ function assignLogicalKeys(symbols: Symbol[]): Symbol[] {
 }
 
 // ─── E1 callable / call metadata extraction (language-agnostic, best-effort) ──
-
-/** Parameter-list node types across the supported grammars. */
-const PARAM_LIST_TYPES: ReadonlySet<string> = new Set([
-  "formal_parameters",   // ts/js
-  "parameters",          // python, rust, go (params)
-  "parameter_list",      // java, c#, go, c, cpp
-  "argument_list",       // python class superclasses (not params — excluded by child filter)
-]);
-
-/** Child node types that count as a single declared parameter. */
-const PARAM_NODE_TYPES: ReadonlySet<string> = new Set([
-  "required_parameter", "optional_parameter", "parameter", "formal_parameter",
-  "spread_parameter", "typed_parameter", "default_parameter",
-  "typed_default_parameter", "self_parameter", "variadic_parameter",
-  "simple_parameter", "property_promotion_parameter",
-]);
-
-/**
- * Count declared parameters of a callable definition node. Returns `undefined`
- * when the node exposes no recognisable parameter list (so non-callables and
- * grammars we don't model carry no `parameterCount`). Best-effort and additive —
- * never affects which edges are emitted.
- */
-function extractParameterCount(defNode: Parser.SyntaxNode): number | undefined {
-  const list = defNode.namedChildren.find(
-    (c) => PARAM_LIST_TYPES.has(c.type) && c.type !== "argument_list",
-  ) ?? findDescendantParamList(defNode);
-  if (!list) return undefined;
-  let count = 0;
-  for (const child of list.namedChildren) {
-    if (PARAM_NODE_TYPES.has(child.type) || child.type.endsWith("_parameter")) count++;
-    else if (child.type === "identifier" || child.type === "typed_parameter") count++;
-  }
-  return count;
-}
-
-/** Shallow search for a parameter list nested one level down (e.g. C/C++ declarators). */
-function findDescendantParamList(defNode: Parser.SyntaxNode): Parser.SyntaxNode | undefined {
-  for (const child of defNode.namedChildren) {
-    const nested = child.namedChildren.find(
-      (c) => PARAM_LIST_TYPES.has(c.type) && c.type !== "argument_list",
-    );
-    if (nested) return nested;
-  }
-  return undefined;
-}
-
-/**
- * Extract the raw return-type text of a callable definition node, if the grammar
- * annotates one (TS `: T`, Python `-> T`, Rust `-> T`, etc.). Returns `undefined`
- * otherwise. The text is trimmed of a leading `:`/`->` marker.
- */
-function extractReturnType(defNode: Parser.SyntaxNode): string | undefined {
-  // tree-sitter exposes the return type via a `return_type` field on most
-  // grammars; fall back to a `type_annotation` named child (TS arrow/lexical).
-  const byField = defNode.childForFieldName("return_type");
-  const node = byField ?? defNode.namedChildren.find((c) => c.type === "type_annotation");
-  if (!node) return undefined;
-  const text = node.text.replace(/^\s*(?::|->)\s*/, "").trim();
-  return text.length > 0 ? text : undefined;
-}
+//
+// Parameter-count + return-type extraction moved to `signature.ts` in Wave 2
+// (1.2) — `extractMethodSignature` adds variadic detection + broad return-type
+// coverage. `ownerId`/receiver/enclosing helpers remain here.
 
 /** Definition node types that own methods/constructors (E1 `ownerId`). */
 const OWNER_NODE_TYPES: ReadonlySet<string> = new Set([

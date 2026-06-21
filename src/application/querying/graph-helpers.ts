@@ -5,7 +5,7 @@
  */
 import type { GraphNode } from "../../core/ports/persistence.js";
 import { prop } from "../../core/ports/persistence.js";
-import type { Symbol, SymbolKind, Visibility } from "../../core/domain.js";
+import type { Symbol, SymbolKind, Visibility, EntryPointKind } from "../../core/domain.js";
 
 /** Shape returned by Cypher queries that project a single `n` node. */
 export interface CypherNodeRow {
@@ -37,5 +37,16 @@ export function graphNodeToSymbol(node: GraphNode): Symbol {
     signature: node.properties["signature"] as string | undefined,
     visibility: prop(node, "visibility", "public") as Visibility,
     modifiers: [],
+    // Wave 2: read back the export flag + entry-point classification props.
+    // `isExported` is left UNDEFINED for pre-Wave-2 graphs (the column is absent
+    // → `prop` returns ""), so consumers fall back to the `visibility`-based
+    // heuristic. `entryPointKind`/`entryPointReason` are undefined when empty.
+    ...(prop(node, "isExported") === "true"
+      ? { isExported: true }
+      : prop(node, "isExported") === "false"
+        ? { isExported: false }
+        : {}),
+    ...(prop(node, "entryPointKind") ? { entryPointKind: prop(node, "entryPointKind") as EntryPointKind } : {}),
+    ...(prop(node, "entryPointReason") ? { entryPointReason: prop(node, "entryPointReason") } : {}),
   };
 }

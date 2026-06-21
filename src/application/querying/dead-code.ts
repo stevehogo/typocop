@@ -46,9 +46,13 @@ const DEFAULT_MAX_RESULTS = 100;
 /**
  * True when a symbol is considered "exported" — part of the public surface, so
  * an in-repo caller is not required for it to be live.
+ *
+ * Wave 2: prefer the real per-language `isExported` signal (1.3) when present,
+ * falling back to the pre-Wave-2 `visibility === "public" || kind === "export"`
+ * heuristic for graphs indexed before the field existed.
  */
 function isExported(symbol: Symbol): boolean {
-  return symbol.visibility === "public" || symbol.kind === "export";
+  return symbol.isExported ?? (symbol.visibility === "public" || symbol.kind === "export");
 }
 
 /**

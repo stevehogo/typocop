@@ -75,7 +75,43 @@ export interface Symbol {
    * `shape_check` to flag reads of keys no route returns.
    */
   readonly accessedKeys?: readonly string[];
+  // ── Wave 2 export-detection carrier (OPTIONAL; additive) ─────────────────
+  /**
+   * Whether the symbol is exported/public in its language, as determined by the
+   * per-language export-detection table (`infrastructure/parsing/export-detection.ts`).
+   * ORTHOGONAL to {@link visibility} — `isExported` answers "is this reachable
+   * from outside its module/file?" (TS `export`, Go uppercase, Rust `pub`,
+   * Python non-`_`, C non-`static`), whereas `visibility` answers the
+   * access-modifier axis (`public`/`private`/…). Absent ⇒ consumers fall back to
+   * the pre-Wave-2 `visibility === "public"` heuristic (golden output unchanged).
+   * Feeds the entry-point export ×2 multiplier and dead-code detection.
+   */
+  readonly isExported?: boolean;
+  // ── Wave 2 entry-point classification carriers (OPTIONAL; additive) ──────
+  /**
+   * Classification of an entry-point symbol (1.1). Populated only for symbols
+   * that score above the entry-point threshold; absent everywhere else, so the
+   * Symbol shape stays pre-Wave-2 identical. Persisted as the `entryPointKind`
+   * node prop.
+   */
+  readonly entryPointKind?: EntryPointKind;
+  /**
+   * Human-readable explainability trail for an entry-point symbol's score (1.1),
+   * e.g. `base:2.00, exported, entry-pattern, framework:nextjs-api-route`.
+   * Populated alongside {@link entryPointKind}; persisted as the
+   * `entryPointReason` node prop.
+   */
+  readonly entryPointReason?: string;
 }
+
+/**
+ * Entry-point kind classification (Wave 2, 1.1). Produced by
+ * `inferEntryPointKind` (`platform/utils/entry-point-names.ts`) from a symbol's
+ * name, file path, and scoring reasons. Surfaced on {@link Symbol.entryPointKind}
+ * and persisted as a node property.
+ */
+export type EntryPointKind =
+  | "main" | "route" | "task" | "event" | "lifecycle" | "test";
 
 /**
  * Complexity metrics for a callable symbol (E2). Computed as a pure tree-sitter

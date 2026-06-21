@@ -11,7 +11,7 @@ import { findEntryPoints, buildCallGraph } from "./entry-points.js";
 import { traceAllExecutions } from "./trace.js";
 import { analyzeDataFlow, inferProcessName } from "./data-flow.js";
 
-export { findEntryPoints, buildCallGraph, calculateEntryPointScore } from "./entry-points.js";
+export { findEntryPoints, annotateEntryPoints, buildCallGraph, calculateEntryPointScore } from "./entry-points.js";
 export { traceExecution, traceAllExecutions, buildProcessSteps, MIN_PROCESS_STEPS } from "./trace.js";
 export { analyzeDataFlow, inferProcessName } from "./data-flow.js";
 

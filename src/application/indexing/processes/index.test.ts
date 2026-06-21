@@ -136,31 +136,35 @@ describe("Property 8: Process Minimum Length", () => {
 // ─── Unit tests: calculateEntryPointScore ────────────────────────────────────
 
 describe("calculateEntryPointScore", () => {
-  it("returns 0 when calleeCount is 0", () => {
-    expect(calculateEntryPointScore("main", true, 0, 0)).toBe(0);
+  // Wave 2: signature is now (name, language, isExported, callerCount,
+  // calleeCount, filePath?) → { score, reasons, kind }. `filePath` is omitted
+  // here so the path-based framework multiplier stays neutral (1.0) and these
+  // assertions isolate the base × export × name factors.
+  it("returns score 0 when calleeCount is 0", () => {
+    expect(calculateEntryPointScore("main", "typescript", true, 0, 0).score).toBe(0);
   });
 
   it("exported functions score higher than unexported", () => {
-    const exported = calculateEntryPointScore("handleRequest", true, 0, 3);
-    const unexported = calculateEntryPointScore("handleRequest", false, 0, 3);
+    const exported = calculateEntryPointScore("handleRequest", "typescript", true, 0, 3).score;
+    const unexported = calculateEntryPointScore("handleRequest", "typescript", false, 0, 3).score;
     expect(exported).toBeGreaterThan(unexported);
   });
 
   it("entry point name patterns boost score", () => {
-    const handler = calculateEntryPointScore("handleLogin", true, 1, 3);
-    const generic = calculateEntryPointScore("doSomething", true, 1, 3);
+    const handler = calculateEntryPointScore("handleLogin", "typescript", true, 1, 3).score;
+    const generic = calculateEntryPointScore("doSomething", "typescript", true, 1, 3).score;
     expect(handler).toBeGreaterThan(generic);
   });
 
   it("utility name patterns reduce score", () => {
-    const util = calculateEntryPointScore("getUser", true, 0, 3);
-    const normal = calculateEntryPointScore("processOrder", true, 0, 3);
+    const util = calculateEntryPointScore("getUser", "typescript", true, 0, 3).score;
+    const normal = calculateEntryPointScore("processOrder", "typescript", true, 0, 3).score;
     expect(util).toBeLessThan(normal);
   });
 
   it("higher callee/caller ratio increases score", () => {
-    const highRatio = calculateEntryPointScore("run", true, 0, 10);
-    const lowRatio = calculateEntryPointScore("run", true, 10, 1);
+    const highRatio = calculateEntryPointScore("run", "typescript", true, 0, 10).score;
+    const lowRatio = calculateEntryPointScore("run", "typescript", true, 10, 1).score;
     expect(highRatio).toBeGreaterThan(lowRatio);
   });
 });
