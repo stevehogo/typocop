@@ -178,6 +178,20 @@ export interface PipelineConfig {
    * `TYPOCOP_DATA_TOUCH_SINGLE_MODEL_FALLBACK`.
    */
   readonly dataTouchSingleModelFallback?: boolean;
+  /**
+   * Wave 4 (Task 5) refuse-on-ambiguity call-resolution discipline. **Default
+   * `false`.** Derived from `TYPOCOP_CALL_REFUSE_AMBIGUOUS` at the composition
+   * root (see {@link isCallRefuseAmbiguousEnabled}). When `true`, Phase 3's
+   * call-target selector narrows candidates by callable-kind + arity +
+   * receiver-type and emits a `calls` edge ONLY when exactly one survives
+   * (otherwise no edge), raising precision at a bounded recall cost. When off,
+   * the selector runs the byte-identical legacy `candidates[0]` / global-fallback
+   * path and the Wave-4 filters never execute → emitted graph is byte-identical
+   * to pre-Wave-4. The additive `argCount`/`callForm` hint fields (Tasks 1-4) are
+   * harmless when this is off. Reversible: flag off restores prior behaviour
+   * exactly.
+   */
+  readonly callRefuseAmbiguous?: boolean;
 }
 
 /**
@@ -340,10 +354,13 @@ export async function runIndexingPipeline(config: PipelineConfig): Promise<Pipel
   // so Phase 3 stays tier-agnostic (no extra Phase-3 change beyond Tier B). When
   // both are off, no hint carries `receiverType` and this is a no-op.
   const consumeReceiverType = (config.typeEnvResolution ?? false) || (config.lspTypes ?? false);
+  // Wave 4 (Task 5): forward the refuse-on-ambiguity flag to Phase 3. Default OFF
+  // → byte-identical pre-Wave-4 selection.
+  const callRefuseAmbiguous = config.callRefuseAmbiguous ?? false;
   // `let` (not `const`): the Wave 5 data-touch pass (below) re-binds both with
   // the additive synthetic Symbols + data-touch edges before clustering/persist.
   const resolution = await metrics.time("resolution", () =>
-    resolveReferences(symbols, hints, sourcePath, fileNodes.map((f) => f.path), consumeReceiverType),
+    resolveReferences(symbols, hints, sourcePath, fileNodes.map((f) => f.path), consumeReceiverType, callRefuseAmbiguous),
   );
   let relationships = resolution.relationships;
   const { extNodes, dependsOnStats } = resolution;

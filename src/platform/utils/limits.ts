@@ -234,6 +234,24 @@ export function isDataTouchSingleModelFallbackEnabled(): boolean {
   return isEnvTruthy(DATA_TOUCH_SINGLE_MODEL_FALLBACK_ENV);
 }
 
+/** Environment opt-in for the Wave 4 refuse-on-ambiguity call discipline ({@link isCallRefuseAmbiguousEnabled}). */
+export const CALL_REFUSE_AMBIGUOUS_ENV = "TYPOCOP_CALL_REFUSE_AMBIGUOUS";
+
+/**
+ * Whether the Wave 4 (Task 5) refuse-on-ambiguity call-resolution discipline is
+ * enabled. **OPT-IN — default `false`.** When `true`, Phase 3's call-target
+ * selector narrows candidates by callable-kind + arity + receiver-type and emits
+ * a `calls` edge ONLY when exactly one candidate survives (otherwise no edge),
+ * trading bounded recall for precision. When unset, the selector runs the
+ * byte-identical legacy `candidates[0]` / global-fallback path and the Wave-4
+ * filters never execute → emitted graph is byte-identical to pre-Wave-4. Derived
+ * at the composition root into `PipelineConfig.callRefuseAmbiguous`; mirrors the
+ * {@link isTypeEnvEnabled} reader pattern.
+ */
+export function isCallRefuseAmbiguousEnabled(): boolean {
+  return isEnvTruthy(CALL_REFUSE_AMBIGUOUS_ENV);
+}
+
 /**
  * Bounded concurrency for Phase 6 embedding generation (Phase C).
  *

@@ -40,6 +40,15 @@ export interface CachedRelationshipHint {
   // DROP it on a cache-reuse run, disabling Tier-B member-call resolution for
   // unchanged files. Kept structurally in sync.
   readonly receiverType?: string;
+  // ── Wave 4 call-resolution precision carriers (OPTIONAL; additive; `call`) ──
+  // Mirror of `RawRelationshipHint.argCount` / `callForm`. Without these the
+  // incremental cache would silently DROP them on a cache-reuse run, disabling
+  // Wave 4's arity / callable-kind filtering for unchanged files. The literal
+  // union is re-stated here (not imported) so `core/` stays a leaf; it assigns
+  // freely against `RawRelationshipHint.callForm` under structural typing. Kept
+  // structurally in sync.
+  readonly argCount?: number;
+  readonly callForm?: "free" | "member" | "constructor";
   // ── Wave 1 named-binding carrier (OPTIONAL; additive; `import` hints only) ──
   // Mirror of `RawRelationshipHint.namedBindings`. Without this field the
   // incremental cache would silently DROP named bindings on a cache-reuse run,

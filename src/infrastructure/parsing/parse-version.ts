@@ -28,6 +28,14 @@
  *          the new `Symbol` field is part of the cached per-file `Symbol[]` shape
  *          (`CachedFileEntry.symbols` stores Symbols as JSON), so a warm cache
  *          must re-emit to stay shape-consistent (cross-cutting-checklist §0).
+ *   5 → 6  Wave 4 (call-resolution precision): `call` hints may now carry optional
+ *          `argCount` (direct argument count, `undefined` when not cheaply
+ *          countable) and `callForm` (`free`/`member`/`constructor`). The
+ *          resolver reads them for callable-kind / arity / receiver-type
+ *          filtering, so unchanged files must re-emit to carry them on a warm
+ *          cache (cross-cutting-checklist §0–§1). The fields are additive and the
+ *          Task-5 refuse-on-ambiguity behaviour is flag-gated default-OFF, so when
+ *          the flag is off this bump is the only on-the-wire change.
  *
  * NOT bumped for Wave 3 Tier A1 (TS-compiler-API receiver types): A1 reuses the
  * existing `receiverType` field and runs as a post-Phase-2, whole-corpus pass on
@@ -36,4 +44,4 @@
  * so it re-runs on warm-cache files every run with no cache plumbing. No new
  * cached/persisted field, so no bump is required (cross-cutting-checklist §0–§1).
  */
-export const PARSE_VERSION = 5;
+export const PARSE_VERSION = 6;

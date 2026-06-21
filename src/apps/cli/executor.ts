@@ -20,7 +20,7 @@ import { executeObsidianExport } from "../../application/export-render/index.js"
 import { createFileWatcher, type FileWatcher } from "../../infrastructure/watch/file-watcher.js";
 import { augment } from "../../application/querying/augment.js";
 import { mergeTypocopHook, type ClaudeSettings } from "./setup.js";
-import { isTypeEnvEnabled, isLspTypesEnabled, isDataTouchEnabled, isDataTouchEventsEnabled, isDataTouchSingleModelFallbackEnabled } from "../../platform/utils/limits.js";
+import { isTypeEnvEnabled, isLspTypesEnabled, isDataTouchEnabled, isDataTouchEventsEnabled, isDataTouchSingleModelFallbackEnabled, isCallRefuseAmbiguousEnabled } from "../../platform/utils/limits.js";
 
 /**
  * A5: build the disk-backed parse + embedding caches for a prefix.
@@ -194,6 +194,9 @@ export async function executeIndexingPipeline(
       dataTouch: isDataTouchEnabled(),
       dataTouchEvents: isDataTouchEventsEnabled(),
       dataTouchSingleModelFallback: isDataTouchSingleModelFallbackEnabled(),
+      // Wave 4 (Task 5): derive the refuse-on-ambiguity flag from env. Default
+      // OFF (the wave is byte-identical until enabled).
+      callRefuseAmbiguous: isCallRefuseAmbiguousEnabled(),
     };
 
     const result = await runIndexingPipeline(pipelineConfig);
@@ -380,6 +383,8 @@ export async function executeWatch(
       dataTouch: isDataTouchEnabled(),
       dataTouchEvents: isDataTouchEventsEnabled(),
       dataTouchSingleModelFallback: isDataTouchSingleModelFallbackEnabled(),
+      // Wave 4 (Task 5): refuse-on-ambiguity flag (default OFF) on the watch path too.
+      callRefuseAmbiguous: isCallRefuseAmbiguousEnabled(),
     };
     try {
       const result = await reindexChangedFiles(batch, pipelineConfig);

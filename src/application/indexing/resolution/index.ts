@@ -252,6 +252,14 @@ export function resolveHints(
    * in Phase 2, so this is doubly safe — the zero-code rollback lever).
    */
   typeEnvResolution = false,
+  /**
+   * Wave 4 (Task 5): when `true`, the call-target selector narrows candidates by
+   * callable-kind + arity + receiver-type and emits an edge ONLY when exactly one
+   * survives (refuse-on-ambiguity). Default `false` → byte-identical pre-Wave-4
+   * behaviour (the legacy `candidates[0]` / global-fallback path runs and the
+   * Wave-4 filters never execute). The zero-code rollback lever.
+   */
+  callRefuseAmbiguous = false,
 ): ResolveHintsResult {
   const symbolMap = buildSymbolMap(symbols);
   const extNodes = new Map<string, ExternalDependencyNode>();
@@ -306,8 +314,10 @@ export function resolveHints(
   // HINTS (independent of edge resolution, so available before the hint loop).
   const mroLinear = buildMroLinearizationFromHints(hints, symbols, symbolById);
 
-  // Shared selector deps (parity selector + per-language resolvers).
-  const callDeps: CallResolutionDeps = { ctx, symbolById, symbolMap };
+  // Shared selector deps (parity selector + per-language resolvers). Wave 4: the
+  // refuse-on-ambiguity flag rides here so the selector can switch between the
+  // byte-identical legacy path (off) and the filtered single-survivor path (on).
+  const callDeps: CallResolutionDeps = { ctx, symbolById, symbolMap, refuseAmbiguous: callRefuseAmbiguous };
 
   // DEPENDS_ON external-dependency fan-out reporting (behavior unchanged; count only).
   let dependsOnEdgeCount = 0;
@@ -440,10 +450,23 @@ export function resolveHints(
             );
           }
 
-          // ── Parity selector (today's behaviour, byte-identical) ─────────────
+          // ── Parity selector (today's behaviour byte-identical when the Wave-4
+          // refuse flag is off; filtered single-survivor path when on). Wave 4
+          // threads the call's `argCount`/`callForm` and the (typeEnv-gated)
+          // `receiverType` so the selector can narrow by kind/arity/owning-type.
+          // `teReceiverType` is already gated on `typeEnvResolution`, so when that
+          // flag is off the receiver-type branch stays dark. ──────────────────
           if (!target) {
             target = resolver.selectCallTarget(
-              { calleeName: hint.targetName, receiverText: hint.receiverText, caller, sourceFile: hint.sourceFile },
+              {
+                calleeName: hint.targetName,
+                receiverText: hint.receiverText,
+                caller,
+                sourceFile: hint.sourceFile,
+                argCount: hint.argCount,
+                callForm: hint.callForm,
+                receiverType: teReceiverType,
+              },
               callDeps,
             );
           }
@@ -638,12 +661,19 @@ export async function resolveReferences(
    * `false` → byte-identical pre-Wave-3 (the zero-code rollback lever).
    */
   typeEnvResolution = false,
+  /**
+   * Wave 4 (Task 5): forwarded to {@link resolveHints} to enable refuse-on-
+   * ambiguity call-target selection (callable-kind + arity + receiver-type
+   * filtering, single-survivor-or-nothing). Default `false` → byte-identical
+   * pre-Wave-4 behaviour (the zero-code rollback lever).
+   */
+  callRefuseAmbiguous = false,
 ): Promise<ResolveHintsResult> {
   if (hints && hints.length > 0) {
     const languageConfigs = repoRoot
       ? await loadLanguageConfigs(repoRoot)
       : undefined;
-    return resolveHints(hints, symbols, languageConfigs, allFiles, typeEnvResolution);
+    return resolveHints(hints, symbols, languageConfigs, allFiles, typeEnvResolution, callRefuseAmbiguous);
   }
 
   // Legacy path: derive relationships from symbol kinds and signatures

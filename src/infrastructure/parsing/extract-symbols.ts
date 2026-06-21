@@ -7,6 +7,7 @@ import { generateSymbolId } from "./symbol-id.js";
 import { generateLogicalKey, OrdinalAllocator } from "./logical-key.js";
 import { computeComplexity } from "./complexity.js";
 import { extractNamedBindings } from "./named-bindings.js";
+import { countCallArguments, inferCallForm, type CallForm } from "./call-extractors.js";
 import { extractMethodSignature } from "./signature.js";
 import { isNodeExported } from "./export-detection.js";
 import { isTypeEnvEnabled } from "../../platform/utils/limits.js";
@@ -65,6 +66,28 @@ export interface RawRelationshipHint {
    * (`core/ports/index-cache.ts`) or it is dropped on the incremental path.
    */
   readonly receiverType?: string;
+  // ── Wave 4 call-resolution precision carriers (OPTIONAL; additive; `call`) ──
+  /**
+   * Wave 4: the number of DIRECT arguments at the call site, computed by
+   * {@link countCallArguments}. `undefined` (NEVER `0`) when the argument
+   * container can't be located cheaply — that `undefined` is the signal Phase 3's
+   * arity filter uses to SKIP arity narrowing for this call entirely. Lets the
+   * resolver disambiguate same-name overloads by `parameterCount === argCount`.
+   * Absent for non-call hints.
+   * MUST stay structurally mirrored in `CachedRelationshipHint`
+   * (`core/ports/index-cache.ts`) or it is dropped on the incremental path.
+   */
+  readonly argCount?: number;
+  /**
+   * Wave 4: the call-site form (`free` / `member` / `constructor`), computed by
+   * {@link inferCallForm}. Lets Phase 3's callable-kind filter target the right
+   * kinds (constructor-form calls resolve to the `class`, others to
+   * `function`/`method`). `undefined` when the form can't be determined. Absent
+   * for non-call hints.
+   * MUST stay structurally mirrored in `CachedRelationshipHint`
+   * (`core/ports/index-cache.ts`) or it is dropped on the incremental path.
+   */
+  readonly callForm?: CallForm;
   // ── Wave 1 named-binding carrier (OPTIONAL; additive; `import` hints only) ──
   /**
    * For a named import (`import { User as U } from './models'`): the
@@ -293,6 +316,9 @@ export function extractSymbolsWithQueries(
     // pattern, so no query change is needed.
     const importStmtCapture = match.captures.find((c) => c.name === "import");
     const callNameCapture = match.captures.find((c) => c.name === "call.name");
+    // Wave 4: the enclosing `@call` node (paired with every `@call.name` capture
+    // in the queries) — the call-form / argument-count classifiers run on it.
+    const callCapture = match.captures.find((c) => c.name === "call");
     const memberAccessCapture = match.captures.find((c) => c.name === "member.access");
     const memberObjectCapture = match.captures.find((c) => c.name === "member.object");
     const heritageExtendsCapture = match.captures.find((c) => c.name === "heritage.extends");
@@ -411,6 +437,15 @@ export function extractSymbolsWithQueries(
           typeEnvEnabled && receiverText !== undefined && isBareReceiver(receiverText)
             ? getTypeEnv().lookup(receiverText, callNameCapture.node)
             : undefined;
+        // Wave 4: the call node is the `@call` capture (paired with `@call.name`
+        // in every query); fall back to the name node's parent chain on the rare
+        // path where only `@call.name` is present. `argCount` stays `undefined`
+        // (not `0`) when the argument container can't be located — the resolver's
+        // arity filter relies on that to skip narrowing. `callForm` discriminates
+        // free/member/constructor for the callable-kind filter.
+        const callNode = callCapture?.node ?? findEnclosingCallNode(callNameCapture.node);
+        const argCount = countCallArguments(callNode);
+        const callForm = callNode ? inferCallForm(callNode, callNameCapture.node) : undefined;
         hints.push({
           kind: "call",
           sourceFile: filePath,
@@ -420,6 +455,8 @@ export function extractSymbolsWithQueries(
           ...(receiverText !== undefined ? { receiverText } : {}),
           ...(enclosingSymbolId !== undefined ? { enclosingSymbolId } : {}),
           ...(receiverType !== undefined ? { receiverType } : {}),
+          ...(argCount !== undefined ? { argCount } : {}),
+          ...(callForm !== undefined ? { callForm } : {}),
         });
       }
     }
@@ -566,6 +603,29 @@ function extractOwnerId(defNode: Parser.SyntaxNode, filePath: string): string | 
  * a bare-identifier call. Best-effort across grammars — looks one level up at the
  * member-access node and takes its object/leading child.
  */
+/**
+ * Wave 4 fallback: locate the enclosing call node for a `@call.name` node when no
+ * sibling `@call` capture is present (rare — the queries pair them). Walks up at
+ * most a few levels to the nearest call-expression-like node and returns it (or
+ * `undefined`). `countCallArguments` / `inferCallForm` then run on it.
+ */
+function findEnclosingCallNode(callNameNode: Parser.SyntaxNode): Parser.SyntaxNode | undefined {
+  const CALL_NODE_TYPES = new Set([
+    "call_expression", "call", "method_invocation", "function_call_expression",
+    "member_call_expression", "nullsafe_member_call_expression", "scoped_call_expression",
+    "object_creation_expression", "new_expression", "constructor_invocation",
+    "implicit_object_creation_expression", "composite_literal", "struct_expression",
+    "qualified_identifier",
+  ]);
+  let cur: Parser.SyntaxNode | null = callNameNode.parent;
+  // Bounded walk: call name → (member/access wrapper) → call node.
+  for (let depth = 0; cur && depth < 3; depth++) {
+    if (CALL_NODE_TYPES.has(cur.type)) return cur;
+    cur = cur.parent;
+  }
+  return undefined;
+}
+
 function extractReceiverText(callNameNode: Parser.SyntaxNode): string | undefined {
   const access = callNameNode.parent;
   if (!access) return undefined;
