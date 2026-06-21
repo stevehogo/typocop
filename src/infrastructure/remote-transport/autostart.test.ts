@@ -146,6 +146,59 @@ describe("DefaultAutostartManager", () => {
     expect(release).toHaveBeenCalledOnce();
   });
 
+  it("force-kills a wedged spawned server, drops its DB lock, and respawns until healthy", async () => {
+    const release = vi.fn().mockResolvedValue(undefined);
+    // top(false), after-lock(false), attempt-1 while(false), attempt-2 while(true)
+    const checkHealth = vi
+      .fn()
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true);
+    const spawnServer = vi
+      .fn()
+      .mockResolvedValueOnce({ pid: 1001 }) // wedges
+      .mockResolvedValueOnce({ pid: 1002 }); // healthy
+    const writeDiscovery = vi.fn().mockResolvedValue(undefined);
+    const forceKillPid = vi.fn();
+    const clearDbLock = vi.fn();
+
+    const manager = new DefaultAutostartManager({
+      checkHealth,
+      readDiscovery: vi.fn().mockResolvedValue(null),
+      listDiscoveryFiles: vi.fn().mockResolvedValue([]),
+      acquireLock: vi.fn().mockResolvedValue(release),
+      spawnServer,
+      writeDiscovery,
+      forceKillPid,
+      clearDbLock,
+      sleep: vi.fn().mockResolvedValue(undefined),
+      isPidAlive: vi.fn().mockReturnValue(false),
+      // startupTimeoutMs 30s → perAttempt 10s. Sequence walks attempt 1 past its
+      // window (10001), then attempt 2 connects (10200), all under 30000.
+      now: vi
+        .fn()
+        .mockReturnValueOnce(0) // overallDeadline base → 30000
+        .mockReturnValueOnce(0) // attempt-1 attemptDeadline base → 10000
+        .mockReturnValueOnce(200) // attempt-1 while #1 (<10000)
+        .mockReturnValueOnce(10_001) // attempt-1 while #2 (exit window)
+        .mockReturnValueOnce(10_001) // attempt-1 overall-deadline check (<30000)
+        .mockReturnValueOnce(10_001) // attempt-2 attemptDeadline base → 20001
+        .mockReturnValueOnce(10_200), // attempt-2 while #1 (<20001) → healthy
+    });
+
+    await manager.ensureServer({ ...baseConfig, startupTimeoutMs: 30_000 });
+
+    expect(spawnServer).toHaveBeenCalledTimes(2);
+    expect(forceKillPid).toHaveBeenCalledWith(1001); // the wedged server
+    expect(clearDbLock).toHaveBeenCalledWith(baseConfig.dbPath);
+    expect(writeDiscovery).toHaveBeenCalledWith(
+      baseConfig.discoveryPath,
+      expect.objectContaining({ pid: 1002 }), // the healthy respawn
+    );
+    expect(release).toHaveBeenCalledOnce();
+  });
+
   describe("Phase E — liveness/identity gate before killing a wrong-prefix pid", () => {
     const mismatchDiscovery: DiscoveryFile = {
       pid: 4242,

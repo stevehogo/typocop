@@ -1,6 +1,7 @@
 import type { LadybugClientConfig } from "../../platform/config/types.js";
 import type { EmbeddingAdapter } from "../../core/ports/persistence.js";
 import { readdir } from "node:fs/promises";
+import { rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { writeDiscoveryFile } from "./discovery.js";
@@ -26,6 +27,17 @@ const POLL_INTERVAL_MS = 200;
  */
 const RESTART_AWAIT_DEADLINE_MS = 3_000;
 
+/**
+ * A freshly-spawned server that never becomes healthy within its window is
+ * presumed WEDGED (stuck in the native DB-open path), not merely slow. Rather
+ * than waiting out the whole startup budget on one hung process, we force-kill
+ * it and respawn up to {@link MAX_SPAWN_ATTEMPTS} times within the overall
+ * budget — a fresh server usually opens cleanly. A healthy server becomes ready
+ * in well under a second, so {@link SPAWN_ATTEMPT_FLOOR_MS} is generous.
+ */
+const MAX_SPAWN_ATTEMPTS = 3;
+const SPAWN_ATTEMPT_FLOOR_MS = 8_000;
+
 interface AutostartDependencies {
   readonly checkHealth?: (
     config: LadybugClientConfig,
@@ -39,6 +51,20 @@ interface AutostartDependencies {
   readonly now?: () => number;
   readonly listDiscoveryFiles?: () => Promise<readonly string[]>;
   readonly killPid?: (pid: number) => void;
+  /**
+   * Force-terminate a wedged spawned server (SIGKILL). A process stuck in a
+   * synchronous native call won't run a SIGTERM handler, so the graceful
+   * `killPid` (SIGTERM) is insufficient here. Injectable for tests.
+   */
+  readonly forceKillPid?: (pid: number) => void;
+  /**
+   * Drop the DB file-lock a force-killed (hung) server may still hold, so the
+   * next spawn can open the DB immediately instead of blocking on the stale lock
+   * for the full stale window. Default removes the proper-lockfile
+   * `<dbPath>.lock.lock` directory (mirrors `releaseFileLockSync`); injectable
+   * so this layer needs no cross-infra import. Best-effort.
+   */
+  readonly clearDbLock?: (dbPath: string) => void;
   /**
    * Liveness probe for a discovered pid. Default uses `process.kill(pid, 0)`,
    * which is a no-op signal that throws `ESRCH` when the pid is gone. Injectable
@@ -68,6 +94,8 @@ export class DefaultAutostartManager implements AutostartManager {
   private readonly nowFn: () => number;
   private readonly listDiscoveryFilesFn: () => Promise<readonly string[]>;
   private readonly killPidFn: (pid: number) => void;
+  private readonly forceKillPidFn: (pid: number) => void;
+  private readonly clearDbLockFn: (dbPath: string) => void;
   private readonly isPidAliveFn: (pid: number) => boolean;
 
   constructor(deps: AutostartDependencies = {}) {
@@ -80,6 +108,8 @@ export class DefaultAutostartManager implements AutostartManager {
     this.nowFn = deps.now || Date.now;
     this.listDiscoveryFilesFn = deps.listDiscoveryFiles || listDefaultDiscoveryFiles;
     this.killPidFn = deps.killPid || ((pid) => process.kill(pid, "SIGTERM"));
+    this.forceKillPidFn = deps.forceKillPid || defaultForceKillPid;
+    this.clearDbLockFn = deps.clearDbLock || defaultClearDbLock;
     this.isPidAliveFn = deps.isPidAlive || defaultIsPidAlive;
   }
 
@@ -155,31 +185,64 @@ export class DefaultAutostartManager implements AutostartManager {
         return;
       }
 
-      console.error(`[typocop] Spawning connection server at ${config.serverUrl}...`);
-      const spawned = await this.spawnServerFn(config);
-      console.error(`[typocop] Server spawned with PID ${spawned.pid}`);
-      
-      const startedAt = new Date().toISOString();
-      const deadline = this.nowFn() + config.startupTimeoutMs;
-      let attempts = 0;
+      // Spawn → wait-for-health, retrying with a fresh server if the spawned one
+      // wedges (stuck in the native DB-open path). Each attempt gets a bounded
+      // window; on timeout the hung server is force-killed and its DB lock
+      // dropped so the next spawn opens cleanly. Total work is bounded by
+      // `startupTimeoutMs` across at most MAX_SPAWN_ATTEMPTS spawns.
+      const overallDeadline = this.nowFn() + config.startupTimeoutMs;
+      const perAttemptMs = Math.max(
+        SPAWN_ATTEMPT_FLOOR_MS,
+        Math.floor(config.startupTimeoutMs / MAX_SPAWN_ATTEMPTS),
+      );
 
-      while (this.nowFn() < deadline) {
-        await this.sleepFn(POLL_INTERVAL_MS);
-        attempts++;
-        if (await this.checkHealthFn(config, 1_000)) {
-          console.error(`[typocop] Server became healthy after ${attempts} attempts`);
-          await this.writeDiscoveryFn(config.discoveryPath, {
-            pid: spawned.pid ?? -1,
-            startedAt,
-            prefix: config.prefix,
-            dbPath: config.dbPath,
-            url: config.serverUrl,
-          });
-          return;
+      for (let spawnAttempt = 1; spawnAttempt <= MAX_SPAWN_ATTEMPTS; spawnAttempt++) {
+        const label = spawnAttempt === 1 ? "" : ` (attempt ${spawnAttempt}/${MAX_SPAWN_ATTEMPTS})`;
+        console.error(`[typocop] Spawning connection server at ${config.serverUrl}${label}...`);
+        const spawned = await this.spawnServerFn(config);
+        const spawnedPid = spawned.pid ?? -1;
+        console.error(`[typocop] Server spawned with PID ${spawned.pid}`);
+
+        const startedAt = new Date().toISOString();
+        const attemptDeadline = Math.min(this.nowFn() + perAttemptMs, overallDeadline);
+        let attempts = 0;
+
+        while (this.nowFn() < attemptDeadline) {
+          await this.sleepFn(POLL_INTERVAL_MS);
+          attempts++;
+          if (await this.checkHealthFn(config, 1_000)) {
+            console.error(`[typocop] Server became healthy after ${attempts} attempts`);
+            await this.writeDiscoveryFn(config.discoveryPath, {
+              pid: spawnedPid,
+              startedAt,
+              prefix: config.prefix,
+              dbPath: config.dbPath,
+              url: config.serverUrl,
+            });
+            return;
+          }
         }
+
+        // Wedged: force-kill it, drop the DB lock it may hold, and respawn.
+        console.error(
+          `[typocop] Spawned server pid ${spawnedPid} did not become healthy within ${perAttemptMs}ms; force-killing and respawning`,
+        );
+        if (spawnedPid > 0) {
+          try {
+            this.forceKillPidFn(spawnedPid);
+          } catch {
+            // Best-effort — the process may already be gone.
+          }
+        }
+        this.clearDbLockFn(config.dbPath);
+
+        if (this.nowFn() >= overallDeadline) break;
+        await this.sleepFn(POLL_INTERVAL_MS); // brief settle before respawn
       }
 
-      console.error(`[typocop] Server health check failed after ${attempts} attempts over ${config.startupTimeoutMs}ms`);
+      console.error(
+        `[typocop] Server failed to become healthy after up to ${MAX_SPAWN_ATTEMPTS} spawn attempt(s) over ${config.startupTimeoutMs}ms`,
+      );
       throw new ServerStartupTimeoutError(config.startupTimeoutMs);
     } finally {
       await release();
@@ -327,6 +390,28 @@ async function listDefaultDiscoveryFiles(): Promise<readonly string[]> {
  * exists and throws `ESRCH` when it does not. `EPERM` means the process exists
  * but is owned by another user — still "alive" for our purposes.
  */
+/** Force-terminate a wedged spawned server. SIGKILL can't be caught/blocked, so
+ *  it kills even a process stuck in a synchronous native call. */
+function defaultForceKillPid(pid: number): void {
+  try {
+    process.kill(pid, "SIGKILL");
+  } catch {
+    // Already gone — nothing to do.
+  }
+}
+
+/** Drop the DB file-lock a force-killed server may still hold. proper-lockfile's
+ *  real lock is the `<dbPath>.lock.lock` directory (see file-lock.ts
+ *  releaseFileLockSync); removing it lets the next spawn acquire immediately
+ *  instead of waiting out the stale window. Best-effort. */
+function defaultClearDbLock(dbPath: string): void {
+  try {
+    rmSync(`${dbPath}.lock.lock`, { force: true, recursive: true });
+  } catch {
+    // Best-effort cleanup.
+  }
+}
+
 function defaultIsPidAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
