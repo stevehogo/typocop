@@ -67,27 +67,7 @@ Get 360° context for a symbol: callers, callees, clusters, and processes.
 }
 ```
 
-### 2. find_dependents
-
-Find all direct and transitive dependents (callers) of a symbol.
-
-**Parameters:**
-- `symbolName` (required): Name of the symbol to analyze
-- `maxDepth` (optional): Maximum traversal depth
-- `maxResults` (optional): Maximum number of results (default: 100)
-
-**Example:**
-```json
-{
-  "method": "find_dependents",
-  "params": {
-    "symbolName": "UserService::save",
-    "maxDepth": 3
-  }
-}
-```
-
-### 3. trace_data_flow
+### 2. trace_data_flow
 
 Trace data flow from API endpoint through services to database models.
 
@@ -107,13 +87,14 @@ Trace data flow from API endpoint through services to database models.
 }
 ```
 
-### 4. impact_analysis
+### 3. impact_analysis
 
-Analyze blast radius: affected symbols, flows, and risk level.
+Blast-radius analysis: all direct and transitive dependents (callers) of a symbol, affected flows, and risk level. (Answers both "who depends on / calls X?" and "what breaks if I change X?".)
 
 **Parameters:**
 - `symbolName` (required): Name of the symbol to analyze
 - `changeType` (optional): Type of change - "modify", "delete", or "rename" (default: "modify")
+- `maxDepth` (optional): Maximum traversal depth for transitive dependents (default: unlimited, capped at 20)
 - `maxResults` (optional): Maximum number of results (default: 100)
 
 **Example:**

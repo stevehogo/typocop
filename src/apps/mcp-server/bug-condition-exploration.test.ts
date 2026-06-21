@@ -120,7 +120,7 @@ describe("Concurrent tool calls through DatabaseAdapter", () => {
 
     const [r1, r2, r3] = await Promise.all([
       executeTool("get_symbol_context", { symbolName: "A" }, adapter),
-      executeTool("find_dependents", { symbolName: "B" }, adapter),
+      executeTool("impact_analysis", { symbolName: "B" }, adapter),
       executeTool("trace_data_flow", { entryPoint: "C" }, adapter),
     ]);
 

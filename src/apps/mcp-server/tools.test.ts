@@ -77,14 +77,6 @@ describe("executeTool", () => {
       expect(result).toHaveProperty("confidence");
     });
 
-    it("routes find_dependents to impact analysis", async () => {
-      const result = await executeTool("find_dependents", { symbolName: "bar" }, adapter);
-
-      expect(adapter.getGraphAdapter).toHaveBeenCalled();
-      expect(result).toHaveProperty("summary");
-      expect(result.summary).toContain("bar");
-    });
-
     it("routes trace_data_flow to data flow trace", async () => {
       const result = await executeTool("trace_data_flow", { entryPoint: "apiHandler" }, adapter);
 
@@ -161,17 +153,15 @@ describe("executeTool", () => {
     it("throws for unknown tool name", async () => {
       await expect(executeTool("nonexistent_tool", {}, adapter)).rejects.toThrow("Unknown tool: nonexistent_tool");
     });
+
+    it("no longer exposes find_dependents (merged into impact_analysis)", async () => {
+      await expect(executeTool("find_dependents", { symbolName: "x" }, adapter)).rejects.toThrow(/Unknown tool/);
+    });
   });
 
   describe("adapter method calls", () => {
     it("calls graphAdapter.runCypher for get_symbol_context", async () => {
       await executeTool("get_symbol_context", { symbolName: "test" }, adapter);
-
-      expect(adapter._graph.runCypher).toHaveBeenCalled();
-    });
-
-    it("calls graphAdapter.runCypher for find_dependents", async () => {
-      await executeTool("find_dependents", { symbolName: "test" }, adapter);
 
       expect(adapter._graph.runCypher).toHaveBeenCalled();
     });
@@ -212,7 +202,7 @@ describe("executeTool", () => {
     });
 
     it("returns empty symbols when no graph data exists", async () => {
-      const result = await executeTool("find_dependents", { symbolName: "nonexistent" }, adapter);
+      const result = await executeTool("impact_analysis", { symbolName: "nonexistent" }, adapter);
 
       expect(result.symbols).toEqual([]);
     });

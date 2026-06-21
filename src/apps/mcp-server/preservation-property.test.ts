@@ -120,17 +120,6 @@ describe("Preservation — single successful call (Req 3.1)", () => {
     expect(adapter.getGraphAdapter).toHaveBeenCalled();
   });
 
-  it("should return a valid MCPToolResponse with summary for find_dependents", async () => {
-    const adapter = createMockAdapter();
-    const { executeTool } = await import("./tools.js");
-
-    const result = await executeTool("find_dependents", { symbolName: "MySymbol" }, adapter);
-
-    expect(result).toHaveProperty("summary");
-    expect(typeof result.summary).toBe("string");
-    expect(adapter.getGraphAdapter).toHaveBeenCalled();
-  });
-
   it("should return a valid MCPToolResponse with summary for trace_data_flow", async () => {
     const adapter = createMockAdapter();
     const { executeTool } = await import("./tools.js");
@@ -175,7 +164,7 @@ describe("Preservation — error propagation (Req 3.2)", () => {
     ).rejects.toThrow("query failed");
   });
 
-  it("should propagate error for find_dependents", async () => {
+  it("should propagate error for impact_analysis", async () => {
     const { executeImpactAnalysis } = await import("../../application/querying/impact-analysis.js");
     vi.mocked(executeImpactAnalysis).mockRejectedValueOnce(new Error("Impact analysis failed"));
 
@@ -183,7 +172,7 @@ describe("Preservation — error propagation (Req 3.2)", () => {
     const { executeTool } = await import("./tools.js");
 
     await expect(
-      executeTool("find_dependents", { symbolName: "BrokenSymbol" }, adapter),
+      executeTool("impact_analysis", { symbolName: "BrokenSymbol" }, adapter),
     ).rejects.toThrow("Impact analysis failed");
   });
 
@@ -214,7 +203,6 @@ describe("Preservation — property: sequential call sequences behave correctly"
         fc.array(
           fc.constantFrom(
             "get_symbol_context",
-            "find_dependents",
             "trace_data_flow",
             "impact_analysis",
           ),
@@ -248,7 +236,6 @@ describe("Preservation — property: sequential call sequences behave correctly"
       fc.asyncProperty(
         fc.constantFrom(
           "get_symbol_context",
-          "find_dependents",
           "trace_data_flow",
           "impact_analysis",
         ),
@@ -258,7 +245,7 @@ describe("Preservation — property: sequential call sequences behave correctly"
           if (failingTool === "get_symbol_context") {
             const { executeContextRetrieval } = await import("../../application/querying/context-retrieval.js");
             vi.mocked(executeContextRetrieval).mockRejectedValueOnce(new Error("query error"));
-          } else if (failingTool === "find_dependents" || failingTool === "impact_analysis") {
+          } else if (failingTool === "impact_analysis") {
             const { executeImpactAnalysis } = await import("../../application/querying/impact-analysis.js");
             vi.mocked(executeImpactAnalysis).mockRejectedValueOnce(new Error("query error"));
           } else {

@@ -85,23 +85,6 @@ export function validateToolParams(
       }
       break;
 
-    case "find_dependents":
-      if (!params.symbolName || typeof params.symbolName !== "string") {
-        throw new MCPValidationError(
-          "find_dependents requires 'symbolName' parameter",
-          "MISSING_PARAMETER",
-          { tool: toolName, missing: "symbolName" },
-        );
-      }
-      if (params.maxDepth !== undefined && typeof params.maxDepth !== "number") {
-        throw new MCPValidationError(
-          "find_dependents 'maxDepth' must be a number",
-          "INVALID_PARAMETER_TYPE",
-          { tool: toolName, parameter: "maxDepth", expected: "number" },
-        );
-      }
-      break;
-
     case "trace_data_flow":
       if (!params.entryPoint || typeof params.entryPoint !== "string") {
         throw new MCPValidationError(

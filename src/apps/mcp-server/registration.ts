@@ -52,28 +52,6 @@ const TOOL_DEFINITIONS = [
     },
   },
   {
-    name: "find_dependents",
-    description: "Find all direct and transitive dependents (callers) of a symbol",
-    inputSchema: {
-      type: "object",
-      properties: {
-        symbolName: {
-          type: "string",
-          description: "Name of the symbol to analyze",
-        },
-        maxDepth: {
-          type: "number",
-          description: "Maximum traversal depth (default: unlimited)",
-        },
-        maxResults: {
-          type: "number",
-          description: "Maximum number of results to return (default: 100)",
-        },
-      },
-      required: ["symbolName"],
-    },
-  },
-  {
     name: "trace_data_flow",
     description: "Trace data flow from API endpoint through services to database models",
     inputSchema: {

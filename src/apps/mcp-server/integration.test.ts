@@ -97,9 +97,9 @@ describe("MCP Server Integration", () => {
       }
     });
 
-    it("handles find_dependents request", async () => {
+    it("handles impact_analysis request with maxDepth (folded in from find_dependents)", async () => {
       const request = {
-        method: "find_dependents",
+        method: "impact_analysis",
         params: { symbolName: "testFunction", maxDepth: 3 },
       };
 
@@ -194,7 +194,7 @@ describe("MCP Server Integration", () => {
     });
 
     it("includes human-readable summary in every response", async () => {
-      const tools = ["get_symbol_context", "find_dependents", "trace_data_flow", "impact_analysis"];
+      const tools = ["get_symbol_context", "trace_data_flow", "impact_analysis"];
 
       for (const tool of tools) {
         const request = {
@@ -228,7 +228,7 @@ describe("MCP Server Integration", () => {
       const state1 = mockContext.connectionStates.get(sessionId);
 
       await handleMCPRequest(
-        { method: "find_dependents", params: { symbolName: "test2" } },
+        { method: "impact_analysis", params: { symbolName: "test2" } },
         mockContext,
         sessionId,
       );

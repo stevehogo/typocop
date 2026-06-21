@@ -123,52 +123,6 @@ async function executeGetSymbolContext(
 }
 
 /**
- * Execute find_dependents tool.
- * Requirements: 15.1, 15.5, 15.6, 15.8, 7.1, 2.1, 2.3, 2.4, 3.1, 3.3
- */
-async function executeFindDependents(
-  params: Record<string, unknown>,
-  adapter: DatabaseAdapter,
-): Promise<MCPToolResponse> {
-  const symbolName = params.symbolName as string;
-  const maxResults = (params.maxResults as number) || DEFAULT_MAX_RESULTS;
-  // D3: thread the previously-dead maxDepth into the traversal (clamped inside
-  // executeImpactAnalysis to MAX_TRAVERSAL_DEPTH).
-  const maxDepth = typeof params.maxDepth === "number" ? params.maxDepth : undefined;
-  const graphAdapter = adapter.getGraphAdapter();
-  const result = await executeImpactAnalysis(symbolName, maxResults, graphAdapter, maxDepth);
-
-  const resolution = result.resolution;
-
-  if (resolution.kind === "not_found") {
-    const suggestions = resolution.suggestions.length > 0
-      ? `Did you mean: ${resolution.suggestions.join(", ")}?`
-      : "No similar symbols found.";
-    return formatMCPResponse(result, `Symbol '${symbolName}' not found. ${suggestions}`);
-  }
-
-  const { byId, digest } = buildExplainability(result);
-
-  const baseSummary = `Found ${result.symbols.length} dependents of '${symbolName}'. ` +
-    `Risk level: ${result.riskLevel.toUpperCase()}. ` +
-    `Affected flows: ${result.affectedFlows.length}. ` +
-    `Confidence: ${(result.confidence * 100).toFixed(0)}%.` + digest;
-  const summary = result.targetKind === "externalDependency"
-    ? `External package '${result.targetName ?? symbolName}': ${result.symbols.length} dependent symbols. ` +
-      `Risk level: ${result.riskLevel.toUpperCase()}. ` +
-      `Affected flows: ${result.affectedFlows.length}. ` +
-      `Confidence: ${(result.confidence * 100).toFixed(0)}%.`
-    : baseSummary;
-
-  if (resolution.kind === "fuzzy") {
-    const fuzzyPrefix = `Fuzzy matched '${symbolName}' → '${resolution.matchedName}'. `;
-    return formatMCPResponse(result, fuzzyPrefix + summary, byId);
-  }
-
-  return formatMCPResponse(result, summary, byId);
-}
-
-/**
  * Execute trace_data_flow tool.
  * Requirements: 15.1, 15.5, 15.6, 15.8, 7.1, 2.1, 2.3, 2.4, 3.1, 3.3, 4.2
  */
@@ -269,8 +223,6 @@ export async function executeTool(
   switch (toolName) {
     case "get_symbol_context":
       return executeGetSymbolContext(params, adapter);
-    case "find_dependents":
-      return executeFindDependents(params, adapter);
     case "trace_data_flow":
       return executeTraceDataFlow(params, adapter);
     case "impact_analysis":

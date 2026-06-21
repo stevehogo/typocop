@@ -105,21 +105,6 @@ describe("validateToolParams", () => {
     });
   });
 
-  describe("find_dependents", () => {
-    it("accepts valid params", () => {
-      expect(() => validateToolParams("find_dependents", { symbolName: "test" })).not.toThrow();
-      expect(() => validateToolParams("find_dependents", { symbolName: "test", maxDepth: 5 })).not.toThrow();
-    });
-
-    it("throws for missing symbolName", () => {
-      expect(() => validateToolParams("find_dependents", {})).toThrow(MCPValidationError);
-    });
-
-    it("throws for non-number maxDepth", () => {
-      expect(() => validateToolParams("find_dependents", { symbolName: "test", maxDepth: "5" })).toThrow(MCPValidationError);
-    });
-  });
-
   describe("trace_data_flow", () => {
     it("accepts valid params", () => {
       expect(() => validateToolParams("trace_data_flow", { entryPoint: "test" })).not.toThrow();
