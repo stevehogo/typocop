@@ -1,7 +1,7 @@
 /**
  * PHP PSR-4 import resolution (Wave 1).
  *
- * Ported from grapuco-cli `src/parser/ingestion/resolvers/php.ts`, reusing
+ * Ported from the legacy parser's `resolvers/php.ts`, reusing
  * typocop's `ComposerConfig` (`{ psr4: ReadonlyMap }`). Resolves `use`-statement
  * targets via composer PSR-4 autoload mappings (longest-prefix wins) with a
  * suffix-index fallback when no composer config is present.

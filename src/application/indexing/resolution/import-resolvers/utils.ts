@@ -1,7 +1,7 @@
 /**
  * Shared utilities for import-path resolution (Wave 1).
  *
- * Ported verbatim from grapuco-cli `src/parser/ingestion/resolvers/utils.ts`
+ * Ported verbatim from the legacy parser's `resolvers/utils.ts`
  * (typocop's pre-refactor parser lineage). Pure functions over plain strings /
  * Sets — no tree-sitter, no I/O. Builds an O(1)-ish path-suffix index for
  * `endsWith`-style import resolution.
@@ -11,8 +11,8 @@
 export const EXTENSIONS = [
   "",
   // TypeScript/JavaScript
-  // (`.js`/`.mjs`/`.cjs` + their /index variants were absent from grapuco's
-  // table — added so plain JS relative imports `./right` → `right.js` resolve.)
+  // (`.js`/`.mjs`/`.cjs` + their /index variants were absent from the legacy
+  // parser's table — added so plain JS relative imports `./right` → `right.js` resolve.)
   ".tsx", ".ts", ".jsx", ".js", ".mjs", ".cjs", "",
   "/index.tsx", "/index.ts", "/index.jsx", "/index.js", "/index",
   // Python

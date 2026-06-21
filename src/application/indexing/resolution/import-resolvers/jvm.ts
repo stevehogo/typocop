@@ -1,8 +1,8 @@
 /**
  * JVM (Java) import resolution (Wave 1).
  *
- * Ported from grapuco-cli `src/parser/ingestion/resolvers/jvm.ts`, restricted to
- * Java (`.java`). grapuco's Kotlin support (`KOTLIN_EXTENSIONS`,
+ * Ported from the legacy parser's `resolvers/jvm.ts`, restricted to
+ * Java (`.java`). The legacy parser's Kotlin support (`KOTLIN_EXTENSIONS`,
  * `appendKotlinWildcard`, the Kotlin→Java cross-language fallback) is a
  * ── Wave 7 seam ── : typocop's `Language` union has no `"kotlin"` member yet,
  * so this port resolves Java only.
@@ -13,7 +13,7 @@
  */
 import type { SuffixIndex } from "./utils.js";
 
-/** Java source extension(s). Kept as an array to mirror grapuco's `extensions` param. */
+/** Java source extension(s). Kept as an array to mirror the legacy parser's `extensions` param. */
 const JAVA_EXTENSIONS: readonly string[] = [".java"];
 
 /**

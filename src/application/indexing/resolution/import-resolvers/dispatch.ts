@@ -1,7 +1,7 @@
 /**
  * Per-language import-specifier dispatch (Wave 1).
  *
- * Ported from grapuco-cli `src/parser/ingestion/import-processor.ts`
+ * Ported from the legacy parser's `import-processor.ts`
  * `resolveLanguageImport` + the `ImportResult` type + `buildImportResolutionContext`.
  *
  * Routes a raw module specifier to the right resolver by `Language`:
@@ -12,7 +12,7 @@
  *   PEP-328, generic suffix).
  *
  * ── Wave 7 seam ──: rust / csharp / kotlin / swift / ruby get their own
- * dispatch branches in grapuco; they are intentionally NOT ported here (this
+ * dispatch branches in the legacy parser; they are intentionally NOT ported here (this
  * wave ships the 6 languages typocop already resolves). Their specifiers fall
  * through to `resolveImportPath`, which returns `null` for bare external
  * specifiers — never a wrong edge.
@@ -78,7 +78,7 @@ export function resolveImportSpecifier(
   const { tsconfig, goModule, composer } = configs;
 
   // ── Java: wildcards and member imports ──────────────────────────────────────
-  // Wave 7: Kotlin shares this branch in grapuco (KOTLIN_EXTENSIONS + a
+  // Wave 7: Kotlin shares this branch in the legacy parser (KOTLIN_EXTENSIONS + a
   // Kotlin→Java fallback); deferred until "kotlin" joins the Language union.
   if (language === "java") {
     if (rawSpecifier.endsWith(".*")) {

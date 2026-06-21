@@ -1,12 +1,12 @@
 /**
  * Standard import-path resolution (Wave 1).
  *
- * Ported from grapuco-cli `src/parser/ingestion/resolvers/standard.ts`. Handles
+ * Ported from the legacy parser's `resolvers/standard.ts`. Handles
  * relative imports (`./`, `../`), TS/JS tsconfig path-alias rewriting, Python
  * PEP-328 dotted relatives, and generic suffix matching. Used as the fallback
  * when language-specific resolvers don't match.
  *
- * Vocabulary remap (README convention #2): grapuco's `SupportedLanguages` enum
+ * Vocabulary remap (README convention #2): the legacy parser's `SupportedLanguages` enum
  * comparisons become typocop's lowercase `Language` string union, and the
  * TS-alias `TsconfigPaths` is typocop's `language-config.ts` shape
  * (`{ aliases: ReadonlyMap, baseUrl }`) so the already-loaded config flows in.
@@ -29,8 +29,8 @@ export const RESOLVE_CACHE_CAP = 100_000;
  * Java wildcards and Go package imports are handled separately in the dispatch
  * (they resolve to multiple files / a package directory).
  *
- * Wave 7: Rust `crate::`/grouped-import preprocessing belongs here (grapuco has
- * a `resolveRustImport` branch); deferred until the Rust resolver is ported.
+ * Wave 7: Rust `crate::`/grouped-import preprocessing belongs here (the legacy
+ * parser has a `resolveRustImport` branch); deferred until the Rust resolver is ported.
  */
 export const resolveImportPath = (
   currentFile: string,

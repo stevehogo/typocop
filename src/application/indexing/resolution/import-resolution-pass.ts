@@ -1,7 +1,7 @@
 /**
  * Import-resolution sub-pass (Wave 1).
  *
- * Ported from grapuco-cli `import-processor.ts` `processImportsFromExtracted` +
+ * Ported from the legacy parser's `import-processor.ts` `processImportsFromExtracted` +
  * `applyImportResult` — the "fast path" that resolves PRE-EXTRACTED imports
  * without re-parsing, which is exactly typocop's hint-driven shape.
  *
@@ -12,7 +12,7 @@
  * `ResolutionContext`. The existing hint loop in `resolveHints` then reads those
  * maps through `ctx.resolve`, activating Tiers 2a / 2a-named / 2b.
  *
- * What it does NOT do: emit graph edges. grapuco's `applyImportResult` also
+ * What it does NOT do: emit graph edges. The legacy parser's `applyImportResult` also
  * called `graph.addRelationship` for `IMPORTS`; typocop emits `imports`/`calls`
  * edges in the existing hint loop, so that half is intentionally DROPPED here.
  * This keeps map population separate from edge emission (additive + gateable).
@@ -140,7 +140,7 @@ export function populateImportMaps(
 
       // Named bindings → namedImportMap (Tier 2a-named), ONLY when the specifier
       // resolved to exactly ONE file (a multi-file resolve can't attribute a
-      // local name to a single source — matches grapuco's guard).
+      // local name to a single source — matches the legacy parser's guard).
       if (bindings.length > 0 && result.files.length === 1) {
         const resolvedFile = result.files[0];
         let fileBindings = namedImportMap.get(filePath);

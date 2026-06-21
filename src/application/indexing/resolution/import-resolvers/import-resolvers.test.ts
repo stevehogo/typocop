@@ -216,7 +216,7 @@ describe("Java JVM resolver", () => {
   const idx = index(files);
 
   it("member import com.example.Foo → …/Foo.java", () => {
-    // grapuco treats a lowercase/ALL_CAPS last segment as a member; a class
+    // the legacy parser treats a lowercase/ALL_CAPS last segment as a member; a class
     // import like com.example.Foo.method strips to com.example.Foo.
     expect(resolveJvmMemberImport("com.example.Foo.method", norm, files, idx)).toBe("src/com/example/Foo.java");
   });

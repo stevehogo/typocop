@@ -1,7 +1,7 @@
 /**
  * Named-import binding extraction (Wave 1, Phase 2 / infrastructure layer).
  *
- * Ported from grapuco-cli `src/parser/ingestion/named-binding-extraction.ts`,
+ * Ported from the legacy parser's `ingestion/named-binding-extraction.ts`,
  * restricted to the in-scope languages TS/JS, Python, Java. These are AST-node
  * walkers (`namedChildren`, `childForFieldName`), so they live in the
  * infrastructure parsing layer (next to `extract-symbols.ts`), NOT in the pure
@@ -13,7 +13,7 @@
  * Returns `undefined` for default / namespace / wildcard / side-effect imports
  * (no false entries).
  *
- * ── Wave 7 seam ──: grapuco also has extractors for Kotlin / Rust / PHP / C#.
+ * ── Wave 7 seam ──: the legacy parser also has extractors for Kotlin / Rust / PHP / C#.
  * They are intentionally NOT ported here (PHP path resolution ships this wave,
  * but PHP *named* bindings can wait — the maps still get file-level Tier-2a
  * coverage without them). Kotlin has no typocop `Language` member.

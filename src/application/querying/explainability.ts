@@ -7,9 +7,9 @@
  * explainable {@link AffectedNodeExplanation}: a {@link NodeRole}, a confidence
  * score, and human-readable `reasons[]`.
  *
- * Ported from arbor `confidence.rs` / `impact.rs` (node-role + confidence
- * rules). Kept side-effect-free so the impact-analysis query layer can call it
- * once per affected node after it has gathered the degree aggregate.
+ * Implements the node-role + confidence rules. Kept side-effect-free so the
+ * impact-analysis query layer can call it once per affected node after it has
+ * gathered the degree aggregate.
  *
  * Requirements: 10.x explainability (additive to impact analysis).
  */
@@ -44,8 +44,7 @@ export interface NodeDegree {
 }
 
 /**
- * Classify a node's structural role from its hop-1 in/out degree (arbor
- * `NodeRole::from_analysis`).
+ * Classify a node's structural role from its hop-1 in/out degree.
  *
  * Rules:
  * - (in 0, out 0)            → Isolated   (no detected connections)
@@ -85,7 +84,7 @@ function clamp01(n: number): number {
  * Build the full explanation (role + confidence + reasons) for a single
  * affected node, given how it entered the blast radius and its connectivity.
  *
- * Confidence (ported/adapted from arbor `confidence.rs`):
+ * Confidence:
  * - direct callers (hopDistance 1) start high; confidence decays with distance
  *   (each extra hop adds uncertainty about whether the change truly propagates);
  * - an edge-backed entry (`calls`/`references`/`imports`) is more trustworthy

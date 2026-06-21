@@ -1,7 +1,7 @@
 /**
  * Go package import resolution (Wave 1).
  *
- * Ported from grapuco-cli `src/parser/ingestion/resolvers/go.ts`, reusing
+ * Ported from the legacy parser's `resolvers/go.ts`, reusing
  * typocop's `GoModuleConfig` (`{ modulePath }`).
  *
  * ─── PINNED DIR-SUFFIX CONVENTION (Tier 2b round-trip) ───────────────────────
@@ -9,7 +9,7 @@
  * (named-binding.ts) tests `filePath.includes(`/${dirSuffix}/`) ||
  * filePath.endsWith(`/${dirSuffix}`)` — it wraps the suffix in `/.../` and
  * matches on path-segment boundaries, BUT it does NOT prepend a `/` to the
- * file path (grapuco's variant did). typocop file paths are cwd-RELATIVE
+ * file path (the legacy parser's variant did). typocop file paths are cwd-RELATIVE
  * (e.g. `internal/auth/service.go`, no leading slash), so a multi-segment
  * suffix like `internal/auth` would never match a package that is itself the
  * leading path component.
