@@ -6,6 +6,27 @@ import type { RpcClientBundle } from "./remote-rpc-client.js";
 
 export const CONNECT_READY_TIMEOUT_MS = 2_000;
 
+/**
+ * Overall budget (per client) for establishing the gRPC channel, across retries
+ * + backoff. A single short `waitForReady` hard-fails ("Failed to connect before
+ * the deadline") when the server is cold/busy and needs more than one attempt to
+ * accept the channel; this budget lets a slow cold-start (or a transient blip)
+ * recover instead of failing the whole run. Override with `TYPOCOP_CONNECT_TIMEOUT_MS`.
+ */
+export const CONNECT_TOTAL_TIMEOUT_MS = 15_000;
+export const CONNECT_TIMEOUT_ENV = "TYPOCOP_CONNECT_TIMEOUT_MS";
+const CONNECT_RETRY_BACKOFF_MS = 250;
+
+/** Resolve the connect budget from {@link CONNECT_TIMEOUT_ENV} (positive int) or default. */
+export function getConnectTotalTimeoutMs(): number {
+  const raw = process.env[CONNECT_TIMEOUT_ENV];
+  if (raw !== undefined) {
+    const n = Number(raw);
+    if (Number.isInteger(n) && n > 0) return n;
+  }
+  return CONNECT_TOTAL_TIMEOUT_MS;
+}
+
 const TRANSIENT_GRPC_CODES = new Set<number>([
   grpc.status.UNAVAILABLE,
   grpc.status.DEADLINE_EXCEEDED,
@@ -66,6 +87,42 @@ export function waitForReady(
       (error) => (error ? reject(error) : resolve()),
     );
   });
+}
+
+/**
+ * Establish a gRPC channel, retrying {@link waitForReady} with exponential
+ * backoff up to a total budget. gRPC auto-reconnects the channel internally
+ * between attempts, so this tolerates a server whose cold-start exceeds a single
+ * attempt's deadline — the failure mode behind intermittent
+ * "Failed to connect before the deadline" on `parse`/`status`.
+ */
+export async function waitForReadyWithRetry(
+  client: { waitForReady(deadline: Date, callback: (error?: Error | null) => void): void },
+  opts: { perAttemptMs?: number; totalMs?: number; sleep?: (ms: number) => Promise<void> } = {},
+): Promise<void> {
+  const perAttemptMs = opts.perAttemptMs ?? CONNECT_READY_TIMEOUT_MS;
+  const totalMs = opts.totalMs ?? getConnectTotalTimeoutMs();
+  const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  const deadline = Date.now() + totalMs;
+  let backoff = CONNECT_RETRY_BACKOFF_MS;
+  let lastError: unknown;
+  for (;;) {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) break;
+    try {
+      await waitForReady(client, Math.min(perAttemptMs, remaining));
+      return;
+    } catch (error) {
+      lastError = error;
+      const left = deadline - Date.now();
+      if (left <= 0) break;
+      await sleep(Math.min(backoff, left));
+      backoff = Math.min(backoff * 2, CONNECT_READY_TIMEOUT_MS);
+    }
+  }
+  throw lastError instanceof Error
+    ? lastError
+    : new Error("gRPC channel did not become ready within the connect budget");
 }
 
 export function closeClients(clients: RpcClientBundle): void {

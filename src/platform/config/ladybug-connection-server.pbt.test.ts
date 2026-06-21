@@ -38,7 +38,7 @@ const ladybugDefaults = {
   serverMaxConcurrency: 4,
   serverMaxQueue: 256,
   serverAutostart: false,
-  serverStartupTimeoutMs: 10_000,
+  serverStartupTimeoutMs: 30_000,
   serverIdleTtlMs: 0,
 } as const;
 

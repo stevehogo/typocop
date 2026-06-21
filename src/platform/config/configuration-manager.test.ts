@@ -266,7 +266,7 @@ describe("ConfigurationManager", () => {
       expect(config.serverMaxConcurrency).toBe(4);
       expect(config.serverMaxQueue).toBe(256);
       expect(config.serverAutostart).toBe(false);
-      expect(config.serverStartupTimeoutMs).toBe(10_000);
+      expect(config.serverStartupTimeoutMs).toBe(30_000);
       expect(config.serverIdleTtlMs).toBe(0);
       expect(config.serverShutdownGraceMs).toBe(5_000);
       expect(config.serverShutdownHardMs).toBe(10_000);

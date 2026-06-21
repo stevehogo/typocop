@@ -61,7 +61,11 @@ const LADYBUG_SERVER_DEFAULTS = {
   serverMaxConcurrency: 4,
   serverMaxQueue: 256,
   serverAutostart: false,
-  serverStartupTimeoutMs: 10_000,
+  // Server cold-start (Kùzu DB open + WAL replay + native init + schema
+  // migration) can exceed 10s on a loaded machine; the client gave up while the
+  // server was still (successfully) booting. 30s tolerates a slow cold-start;
+  // override with LADYBUG_SERVER_STARTUP_TIMEOUT_MS.
+  serverStartupTimeoutMs: 30_000,
   serverIdleTtlMs: 0,
   serverShutdownGraceMs: DEFAULT_SHUTDOWN_GRACE_MS,
   serverShutdownHardMs: DEFAULT_SHUTDOWN_HARD_MS,

@@ -5,12 +5,11 @@ import * as grpc from "@grpc/grpc-js";
 import type { LadybugClientConfig } from "../../../platform/config/types.js";
 import { RemoteGraphAdapter } from "./remote-graph-adapter.js";
 import {
-  CONNECT_READY_TIMEOUT_MS,
   closeClients,
   createRpcClients,
   isTransientGrpcError,
   toGrpcTarget,
-  waitForReady,
+  waitForReadyWithRetry,
 } from "../remote-grpc.js";
 import {
   DEFAULT_RPC_TIMEOUT_MS,
@@ -66,8 +65,8 @@ export class RemoteDatabaseAdapter implements DatabaseAdapter, RemoteRpcClient {
       this.config.grpcMaxMessageBytes,
     );
     await Promise.all([
-      waitForReady(clients.graph, CONNECT_READY_TIMEOUT_MS),
-      waitForReady(clients.vector, CONNECT_READY_TIMEOUT_MS),
+      waitForReadyWithRetry(clients.graph),
+      waitForReadyWithRetry(clients.vector),
     ]);
 
     this.clients = clients;
@@ -167,8 +166,8 @@ export class RemoteDatabaseAdapter implements DatabaseAdapter, RemoteRpcClient {
       );
       try {
         await Promise.all([
-          waitForReady(next.graph, CONNECT_READY_TIMEOUT_MS),
-          waitForReady(next.vector, CONNECT_READY_TIMEOUT_MS),
+          waitForReadyWithRetry(next.graph),
+          waitForReadyWithRetry(next.vector),
         ]);
       } catch (error) {
         closeClients(next);
