@@ -123,7 +123,11 @@ export class LadybugGraphAdapter implements GraphAdapter {
     const proc = this.prefixLabel("Process");
 
     // Symbol → Symbol relationships
-    const symToSym = ["CALLS", "IMPORTS", "INHERITS", "IMPLEMENTS", "REFERENCES", "DEFINES"];
+    // OVERRIDES/METHODIMPLEMENTS are MRO-derived edges emitted by computeMRO
+    // (resolution/index.ts) and mapped from "overrides"/"methodImplements" relTypes
+    // in pipeline.ts; without their tables here, persisting any such edge hit a
+    // missing-table error.
+    const symToSym = ["CALLS", "IMPORTS", "INHERITS", "IMPLEMENTS", "REFERENCES", "DEFINES", "OVERRIDES", "METHODIMPLEMENTS"];
     for (const relType of symToSym) {
       const tbl = this.prefixType(relType);
       await this.exec(`CREATE REL TABLE IF NOT EXISTS ${tbl} (FROM ${sym} TO ${sym})`);
@@ -218,6 +222,8 @@ export class LadybugGraphAdapter implements GraphAdapter {
     IMPLEMENTS: ["Symbol", "Symbol"],
     REFERENCES: ["Symbol", "Symbol"],
     DEFINES: ["Symbol", "Symbol"],
+    OVERRIDES: ["Symbol", "Symbol"],
+    METHODIMPLEMENTS: ["Symbol", "Symbol"],
     CONTAINS: ["Cluster", "Symbol"],
     HAS_STEP: ["Process", "Symbol"],
     DEPENDS_ON: ["Symbol", "ExternalDependency"],
@@ -405,7 +411,7 @@ export class LadybugGraphAdapter implements GraphAdapter {
 
   /** Known node labels and relationship types that need prefixing in raw Cypher. */
   private static readonly KNOWN_LABELS = ["Symbol", "Cluster", "Process", "Metadata", "ExternalDependency"];
-  private static readonly KNOWN_REL_TYPES = ["CALLS", "IMPORTS", "INHERITS", "IMPLEMENTS", "CONTAINS", "HAS_STEP", "REFERENCES", "DEFINES", "DEPENDS_ON"];
+  private static readonly KNOWN_REL_TYPES = ["CALLS", "IMPORTS", "INHERITS", "IMPLEMENTS", "CONTAINS", "HAS_STEP", "REFERENCES", "DEFINES", "DEPENDS_ON", "OVERRIDES", "METHODIMPLEMENTS"];
 
   /**
    * Inject prefix into bare node labels and relationship types in a Cypher query.

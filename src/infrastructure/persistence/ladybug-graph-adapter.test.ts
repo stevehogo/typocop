@@ -254,6 +254,22 @@ describe("LadybugGraphAdapter", () => {
       expect(executedQueries.some((query) => query.includes("tpc_ExternalDependency"))).toBe(true);
       expect(executedQueries.some((query) => query.includes("tpc_DEPENDS_ON"))).toBe(true);
     });
+
+    it("creates OVERRIDES and METHODIMPLEMENTS rel tables (MRO-derived edges)", async () => {
+      // computeMRO emits "overrides"/"methodImplements" relTypes which the pipeline
+      // maps to OVERRIDES/METHODIMPLEMENTS Cypher labels; without these tables,
+      // persisting any such edge previously hit a missing-table error.
+      const adapter = createAdapter("tpc_") as LadybugGraphAdapter;
+      await adapter.initializeSchema();
+
+      const executedQueries = mockQuery.mock.calls.map((call) => call[0] as string);
+      expect(
+        executedQueries.some((q) => /CREATE REL TABLE IF NOT EXISTS tpc_OVERRIDES\b/.test(q)),
+      ).toBe(true);
+      expect(
+        executedQueries.some((q) => /CREATE REL TABLE IF NOT EXISTS tpc_METHODIMPLEMENTS\b/.test(q)),
+      ).toBe(true);
+    });
   });
 
   // ── queryNodes (Req 2.1, 2.2) ──────────────────────────────────────────
