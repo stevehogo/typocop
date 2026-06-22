@@ -48,6 +48,17 @@ function relId(relType: RelationType, source: string, target: string): string {
   return `${relType}:${source}->${target}`;
 }
 
+/**
+ * Last segment of a (possibly) fully-qualified type name — `\Vendor\AbstractIpn`
+ * → `AbstractIpn`, `ns::Foo` → `Foo`, `models.User` → `User`. The symbol map is
+ * keyed by simple name, so heritage/extends targets written fully-qualified must
+ * be reduced to match. Mirrors the import last-name fallback and return-type
+ * normalisation already in this layer.
+ */
+function lastNameSegment(name: string): string {
+  return name.split(/::|[.\\/]/).pop() ?? name;
+}
+
 // ─── Granular helpers (used by tests and internally) ─────────────────────────
 
 export function findImports(symbols: Symbol[]): Symbol[] {
@@ -493,7 +504,15 @@ export function resolveHints(
           const childCandidates = symbolMap.get(hint.childSymbolId) ?? [];
           const child = childCandidates.find((s) => s.location.filePath === hint.sourceFile) ?? childCandidates[0];
           if (!child) break;
-          const parent = (symbolMap.get(hint.targetName) ?? []).find((s) => s.id !== child.id);
+          // Try the name as written first (preserves any qualified-keyed match),
+          // then fall back to the simple last segment so a fully-qualified
+          // `extends \Ns\Class` resolves to the in-tree `Class` symbol.
+          const simpleTarget = lastNameSegment(hint.targetName);
+          const parent =
+            (symbolMap.get(hint.targetName) ?? []).find((s) => s.id !== child.id) ??
+            (simpleTarget !== hint.targetName
+              ? (symbolMap.get(simpleTarget) ?? []).find((s) => s.id !== child.id)
+              : undefined);
           if (!parent) break;
           // Wave 7 (§3.1, Task 1): decide inherits-vs-implements BEFORE building
           // the relId so the emitted edge AND `computeMRO`'s interfaceParent
@@ -510,7 +529,7 @@ export function resolveHints(
           // back to `inherits`. Trust the hint's kind for those.
           const relType: RelationType =
             heritageDisambiguation && !hint.heritageKind
-              ? resolveHeritageRelType(hint.targetName, hint.sourceFile, hint.language, symbolMap)
+              ? resolveHeritageRelType(simpleTarget, hint.sourceFile, hint.language, symbolMap)
               : hint.kind === "inherits" ? "inherits" : "implements";
           // Carry the Go-embed / Ruby-mixin flavor onto the edge metadata so the
           // `extend`-vs-`include`/`prepend` distinction is recorded (Task 4).
