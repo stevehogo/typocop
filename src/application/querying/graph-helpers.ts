@@ -5,7 +5,10 @@
  */
 import type { GraphAdapter, GraphNode } from "../../core/ports/persistence.js";
 import { prop } from "../../core/ports/persistence.js";
-import type { Symbol, SymbolKind, Visibility, EntryPointKind } from "../../core/domain.js";
+import type {
+  Symbol, SymbolKind, Visibility, EntryPointKind,
+  BasicBlock, BlockKind, TaintFinding, SinkKind,
+} from "../../core/domain.js";
 
 /**
  * True when an error is a Kùzu "Table <X> does not exist" binder error — i.e.
@@ -144,5 +147,50 @@ export function graphNodeToSymbol(node: GraphNode): Symbol {
     // Wave 5: read back the synthetic-Symbol tag (data-touch DB-model / API-endpoint
     // anchors). Absent / "" for real source-derived Symbols (left undefined).
     ...(prop(node, "synthetic") === "true" ? { synthetic: true } : {}),
+  };
+}
+
+/**
+ * Convert a persisted `BasicBlock` GraphNode back into the domain {@link BasicBlock}.
+ * Mirrors {@link graphNodeToSymbol}: every Kùzu column is STRING, so numerics are
+ * `parseInt`'d (default 0 when the column is absent) and `kind` is read straight.
+ */
+export function graphNodeToBasicBlock(node: GraphNode): BasicBlock {
+  return {
+    id: node.id,
+    functionId: prop(node, "functionId"),
+    blockIndex: parseInt(prop(node, "blockIndex", "0"), 10),
+    startLine: parseInt(prop(node, "startLine", "0"), 10),
+    endLine: parseInt(prop(node, "endLine", "0"), 10),
+    kind: (prop(node, "kind", "normal") as BlockKind),
+  };
+}
+
+/**
+ * Convert a persisted `TaintFinding` GraphNode back into the domain
+ * {@link TaintFinding}. `sanitized` persists as `"true"`/`"false"`; the
+ * BasicBlock-id `path` persists as the JSON STRING prop `pathJson` (a blank /
+ * absent / malformed value parses to `[]` — read-back is defensive, never throws).
+ */
+export function graphNodeToTaintFinding(node: GraphNode): TaintFinding {
+  const raw = prop(node, "pathJson");
+  let path: string[] = [];
+  if (raw) {
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      if (Array.isArray(parsed)) path = parsed.filter((p): p is string => typeof p === "string");
+    } catch {
+      path = [];
+    }
+  }
+  return {
+    id: node.id,
+    sinkKind: (prop(node, "sinkKind", "command") as SinkKind),
+    sourceId: prop(node, "sourceId"),
+    sinkId: prop(node, "sinkId"),
+    sourceLoc: prop(node, "sourceLoc"),
+    sinkLoc: prop(node, "sinkLoc"),
+    sanitized: prop(node, "sanitized") === "true",
+    path,
   };
 }
