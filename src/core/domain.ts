@@ -171,7 +171,20 @@ export type RelationType =
   // the persistence DDL (the graph schema is fixed, not flexible — arbitrary
   // edge props are dropped). `publishesEvent`/`subscribesTo` are declared so the
   // flow BFS can traverse them, but their heuristic detector is flag-gated OFF.
-  | "readsFromDb" | "writesToDb" | "handlesRoute" | "publishesEvent" | "subscribesTo";
+  | "readsFromDb" | "writesToDb" | "handlesRoute" | "publishesEvent" | "subscribesTo"
+  // ── Plan A (per-function PDG + taint) edges (ADDITIVE) ────────────────────
+  // PDG/taint edges. INVARIANT (program HARD RULE): none of these may have
+  // `Symbol` on BOTH endpoints except `sanitizes`, which the solver keeps
+  // in-memory and never persists into the default graph — so the untyped
+  // `(Symbol)-[]->(Symbol)` traversal in impact-analysis.ts stays unaffected.
+  //   hasBlock     Symbol      → BasicBlock     (a callable owns this block)
+  //   cfg          BasicBlock  → BasicBlock     (control-flow successor; edgeKind)
+  //   cdg          BasicBlock  → BasicBlock     (control dependence; branchSense, guard)
+  //   reachingDef  BasicBlock  → BasicBlock     (a def reaches a use; variable)
+  //   taintSource  Symbol      → TaintFinding   (finding's source anchor)
+  //   taintSink    TaintFinding→ Symbol         (finding's sink anchor)
+  //   sanitizes    Symbol      → Symbol         (sanitizer for a SinkKind; NOT persisted by Plan A)
+  | "hasBlock" | "cfg" | "cdg" | "reachingDef" | "taintSource" | "taintSink" | "sanitizes";
 
 export interface Relationship {
   readonly id: string;
@@ -179,6 +192,52 @@ export interface Relationship {
   readonly target: string;   // Symbol ID — must exist
   readonly relType: RelationType;
   readonly metadata: Record<string, string>; // "unresolved": "true" for unresolved imports
+}
+
+// ─── PDG / taint nodes (Plan A — per-function PDG + interprocedural taint) ──────
+// New node LABELS persisted in their own Kùzu tables (NOT on the Symbol table),
+// so PDG/taint data never enters the `(Symbol)-[]->(Symbol)` impact traversal.
+// All persisted props are STRING (Kùzu/Symbol convention); these TS shapes use
+// real types and the persistence boundary stringifies/parses (see graph-helpers).
+
+/** Kind of a CFG basic block (Plan B fills these in; Plan A only persists them). */
+export type BlockKind =
+  | "entry" | "exit" | "normal" | "branch" | "loop" | "switch" | "catch";
+
+/** Category of a dangerous taint sink (Plan D classifies; Plan A only stores). */
+export type SinkKind = "command" | "sql" | "path" | "xss" | "code";
+
+/**
+ * One CFG basic block of a callable. Persisted in the `BasicBlock` node table;
+ * owned by its callable via a `hasBlock` edge (`Symbol → BasicBlock`).
+ */
+export interface BasicBlock {
+  /** Stable id, `"<functionId>#<blockIndex>"`. Primary key. */
+  readonly id: string;
+  /** Owning callable Symbol's `logicalKey` (the `hasBlock` FROM endpoint). */
+  readonly functionId: string;
+  /** 0-based block ordinal within its function's CFG. */
+  readonly blockIndex: number;
+  readonly startLine: number;
+  readonly endLine: number;
+  readonly kind: BlockKind;
+}
+
+/**
+ * One source→sink taint path — a *finding*, not a code symbol. Persisted in the
+ * `TaintFinding` node table; anchored by `taintSource` (Symbol → TaintFinding)
+ * and `taintSink` (TaintFinding → Symbol) edges. `path` (BasicBlock ids) persists
+ * as the JSON STRING prop `pathJson`.
+ */
+export interface TaintFinding {
+  readonly id: string;
+  readonly sinkKind: SinkKind;
+  readonly sourceId: string;
+  readonly sinkId: string;
+  readonly sourceLoc: string;
+  readonly sinkLoc: string;
+  readonly sanitized: boolean;
+  readonly path: readonly string[];
 }
 
 export type PackageEcosystem =
