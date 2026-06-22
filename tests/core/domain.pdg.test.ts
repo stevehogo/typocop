@@ -5,8 +5,10 @@ import type {
   SinkKind,
   BasicBlock,
   TaintFinding,
-} from "./domain.js";
+} from "../../src/core/domain.js";
 
+// Lives in tests/ (not src/core/) because core-is-leaf forbids any src/core/ file
+// from importing outside core — including vitest. This is a pure type/union test.
 describe("PDG/taint domain (Plan A)", () => {
   it("RelationType union includes the seven PDG/taint edge types", () => {
     // A value-level array typed as RelationType[] only compiles if every member
