@@ -41,6 +41,66 @@ const VARIADIC_PARAM_TYPES: ReadonlySet<string> = new Set([
   "dictionary_splat_pattern",       // Python: **kwargs
 ]);
 
+/** A parameter that is the language's implicit receiver, not a real argument slot. */
+function isReceiverParam(param: Parser.SyntaxNode): boolean {
+  return (
+    param.text === "self" || param.text === "&self" || param.text === "&mut self" ||
+    param.type === "self_parameter"
+  );
+}
+
+/**
+ * The identifier text of a single parameter, best-effort across grammars
+ * (`name` field, then a representative identifier/variable descendant, then the
+ * raw text). Used only by {@link extractParameterNames} for the self-recursion
+ * "no argument progress" check; an imperfect extraction simply fails the
+ * positional equality (no false positive), never the reverse.
+ */
+function parameterIdentifierText(param: Parser.SyntaxNode): string {
+  const named = param.childForFieldName("name");
+  if (named) return named.text.trim();
+  const idTypes = new Set([
+    "identifier", "variable_name", "shorthand_property_identifier_pattern", "simple_identifier",
+  ]);
+  const descend = (n: Parser.SyntaxNode): Parser.SyntaxNode | undefined => {
+    if (idTypes.has(n.type)) return n;
+    for (const c of n.namedChildren) {
+      const hit = descend(c);
+      if (hit) return hit;
+    }
+    return undefined;
+  };
+  const id = descend(param);
+  return (id ?? param).text.trim();
+}
+
+/**
+ * Best-effort parameter identifier texts for a callable, aligned with
+ * {@link extractMethodSignature}'s count (skips a receiver `self`; returns
+ * `undefined` for variadic signatures or when no parameter list exists, so the
+ * no-progress check is skipped rather than guessed).
+ */
+export function extractParameterNames(
+  node: Parser.SyntaxNode | null | undefined,
+): string[] | undefined {
+  if (!node) return undefined;
+  const parameterList: Parser.SyntaxNode | null =
+    PARAM_LIST_TYPES.has(node.type) ? node : node.childForFieldName("parameters") ?? findParameterList(node);
+  if (!parameterList || !PARAM_LIST_TYPES.has(parameterList.type)) return undefined;
+
+  const names: string[] = [];
+  for (const param of parameterList.namedChildren) {
+    if (param.type === "comment") continue;
+    if (isReceiverParam(param)) continue;
+    if (VARIADIC_PARAM_TYPES.has(param.type)) return undefined; // variadic → not comparable
+    if (param.type === "required_parameter" || param.type === "optional_parameter") {
+      if (param.children.some((c) => c.type === "rest_pattern")) return undefined;
+    }
+    names.push(parameterIdentifierText(param));
+  }
+  return names;
+}
+
 /**
  * Find a parameter-list node by a two-pass walk: scan the direct children first
  * (shallow), then recurse into each child (deep). The shallow-before-deep order

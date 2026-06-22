@@ -12,13 +12,14 @@ function method(id: string, name: string, file: string, start: number, end: numb
 }
 function callHint(
   file: string, line: number, callee: string,
-  opts: { receiver?: string; argCount?: number; callText?: string; language?: Language } = {},
+  opts: { receiver?: string; argCount?: number; callText?: string; language?: Language; noProgress?: boolean } = {},
 ): RawRelationshipHint {
   return {
     kind: "call", sourceFile: file, targetName: callee, startLine: line, language: opts.language ?? "typescript",
     ...(opts.receiver ? { receiverText: opts.receiver } : {}),
     ...(opts.argCount !== undefined ? { argCount: opts.argCount } : {}),
     ...(opts.callText ? { callText: opts.callText } : {}),
+    ...(opts.noProgress ? { selfCallNoProgress: true } : {}),
   };
 }
 const overrides = (source: string, target: string): Relationship =>
@@ -82,5 +83,33 @@ describe("detectRecursionSuspects", () => {
     const get = method("m.getTransId", "getTransId", "M.php", 28, 31, 0);
     const out = detectRecursionSuspects([get], [callHint("M.php", 29, "getTransId", { receiver: "$this", argCount: 1, language: "php" })], []);
     expect(out).toEqual([{ callerId: "m.getTransId", callLine: 29, receiver: "this", language: "php", kind: "arity-mismatch" }]);
+  });
+
+  it("signal C: flags a no-progress self-call (no override, matching arity)", () => {
+    const reg = method("ipn.fail", "_registerPaymentFailure", "Ipn.php", 1, 9, 0);
+    const out = detectRecursionSuspects(
+      [reg],
+      [callHint("Ipn.php", 4, "_registerPaymentFailure", { receiver: "$this", argCount: 0, language: "php", noProgress: true })],
+      [],
+    );
+    expect(out).toEqual([{ callerId: "ipn.fail", callLine: 4, receiver: "this", language: "php", kind: "no-progress" }]);
+  });
+
+  it("does NOT flag a self-call without the no-progress flag (arg progress, e.g. tree walk)", () => {
+    const walk = method("u.walk", "walk", "U.ts", 1, 9, 1);
+    // argCount === parameterCount but progress is made (no flag) → not flagged.
+    expect(detectRecursionSuspects([walk], [callHint("U.ts", 5, "walk", { receiver: "this", argCount: 1 })], [])).toEqual([]);
+  });
+
+  it("prefers signal A over C", () => {
+    const d = method("d.save", "save", "D.ts", 10, 20, 0);
+    const out = detectRecursionSuspects([base, d], [callHint("D.ts", 15, "save", { receiver: "this", argCount: 0, noProgress: true })], [overrides("d.save", "base.save")]);
+    expect(out[0]?.kind).toBe("shadows-super");
+  });
+
+  it("prefers signal B over C", () => {
+    const get = method("m.get", "get", "M.php", 1, 9, 0);
+    const out = detectRecursionSuspects([get], [callHint("M.php", 3, "get", { receiver: "this", argCount: 2, noProgress: true })], []);
+    expect(out[0]?.kind).toBe("arity-mismatch");
   });
 });

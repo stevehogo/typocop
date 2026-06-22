@@ -41,17 +41,16 @@ const CALL_ARGUMENT_LIST_TYPES = new Set(["arguments", "argument_list", "value_a
  * - Handles the Kotlin/Swift `call_expression → call_suffix → value_arguments`
  *   nesting by searching one level deeper through named children.
  */
-export const countCallArguments = (callNode: Node | null | undefined): number | undefined => {
-  if (!callNode) return undefined;
-
-  // Direct field or direct child (most languages).
+/**
+ * Locate a call's argument-list container node across the supported grammars,
+ * including the Kotlin/Swift `call_suffix → value_arguments` nesting. Returns
+ * `undefined` when none can be found cheaply.
+ */
+const findArgumentListNode = (callNode: Node): Node | null | undefined => {
   let argsNode: Node | null | undefined =
     callNode.childForFieldName("arguments") ??
     callNode.children.find((child) => CALL_ARGUMENT_LIST_TYPES.has(child.type));
 
-  // Kotlin/Swift: call_expression → call_suffix → value_arguments. Search one
-  // level deeper through named children for grammars that wrap arguments in a
-  // suffix node.
   if (!argsNode) {
     for (const child of callNode.children) {
       if (!child.isNamed) continue;
@@ -62,7 +61,12 @@ export const countCallArguments = (callNode: Node | null | undefined): number | 
       }
     }
   }
+  return argsNode;
+};
 
+export const countCallArguments = (callNode: Node | null | undefined): number | undefined => {
+  if (!callNode) return undefined;
+  const argsNode = findArgumentListNode(callNode);
   if (!argsNode) return undefined;
 
   let count = 0;
@@ -73,6 +77,26 @@ export const countCallArguments = (callNode: Node | null | undefined): number | 
   }
 
   return count;
+};
+
+/**
+ * The trimmed source texts of a call's direct arguments (the named, non-comment
+ * children of its argument container). Returns `undefined` when the container
+ * can't be located — the same fail-safe path as {@link countCallArguments}, so
+ * a no-progress comparison can't be made and the call isn't flagged.
+ */
+export const extractCallArgumentTexts = (callNode: Node | null | undefined): string[] | undefined => {
+  if (!callNode) return undefined;
+  const argsNode = findArgumentListNode(callNode);
+  if (!argsNode) return undefined;
+
+  const texts: string[] = [];
+  for (const child of argsNode.children) {
+    if (!child.isNamed) continue;
+    if (child.type === "comment") continue;
+    texts.push(child.text.trim());
+  }
+  return texts;
 };
 
 /**

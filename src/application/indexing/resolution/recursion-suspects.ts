@@ -17,7 +17,7 @@
 import type { Symbol, SymbolKind, Relationship, Language } from "../../../core/domain.js";
 import type { RawRelationshipHint } from "../../../infrastructure/parsing/extract-symbols.js";
 
-export type RecursionSuspectKind = "shadows-super" | "arity-mismatch";
+export type RecursionSuspectKind = "shadows-super" | "arity-mismatch" | "no-progress";
 
 // The kinds a self-call's enclosing caller can be. Used to exclude the enclosing
 // CLASS, whose range covers the same line(s) as its single-line methods (a naive
@@ -111,6 +111,12 @@ export function detectRecursionSuspects(
       caller.parameterCount !== undefined && hint.argCount !== undefined && hint.argCount > caller.parameterCount
     ) {
       kind = "arity-mismatch";
+    } else if (hint.selfCallNoProgress === true) {
+      // Signal C: the self-call re-passes the method's parameters unchanged (no
+      // argument progress) — infinite recursion no override/arity signal can see.
+      // Needs no indexed parent, so it catches framework overrides whose super
+      // lives in an un-scanned vendor/.
+      kind = "no-progress";
     }
     if (!kind) continue;
 

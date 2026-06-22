@@ -7,8 +7,8 @@ import { generateSymbolId } from "./symbol-id.js";
 import { generateLogicalKey, OrdinalAllocator } from "./logical-key.js";
 import { computeComplexity } from "./complexity.js";
 import { extractNamedBindings } from "./named-bindings.js";
-import { countCallArguments, inferCallForm, type CallForm } from "./call-extractors.js";
-import { extractMethodSignature } from "./signature.js";
+import { countCallArguments, extractCallArgumentTexts, inferCallForm, type CallForm } from "./call-extractors.js";
+import { extractMethodSignature, extractParameterNames } from "./signature.js";
 import { isNodeExported } from "./export-detection.js";
 import { isTypeEnvEnabled, isHeritageDisambiguationEnabled } from "../../platform/utils/limits.js";
 import { buildTypeEnv, type TypeEnvironment } from "./type-env/type-env.js";
@@ -96,6 +96,14 @@ export interface RawRelationshipHint {
    * incremental parse-cache path (the self-recursion command never reads the cache).
    */
   readonly callText?: string;
+  /**
+   * True when this is a SELF-receiver call (`this`/`self`/`$this`) that passes
+   * its enclosing callable's parameters unchanged — no argument progress. Feeds
+   * the self-recursion report's "no-progress" signal (infinite recursion that no
+   * override/arity signal can see). Recompute-only: NOT mirrored in
+   * `CachedRelationshipHint`. Absent ⇒ treated as false.
+   */
+  readonly selfCallNoProgress?: boolean;
   // ── Wave 1 named-binding carrier (OPTIONAL; additive; `import` hints only) ──
   /**
    * For a named import (`import { User as U } from './models'`): the
@@ -486,6 +494,13 @@ export function extractSymbolsWithQueries(
         // Raw source of the call node for the self-recursion report's "Buggy call"
         // column. Same fallback path as `argCount`: absent when the node is missing.
         const callText = callNode ? callNode.text : undefined;
+        // Self-recursion "no-progress" signal: only computed for self-receiver
+        // calls (cheap guard), true when the call re-passes the enclosing
+        // callable's parameters unchanged.
+        const selfCallNoProgress =
+          receiverText !== undefined && SELF_RECEIVER_TEXTS.has(receiverText.trim())
+            ? selfCallMakesNoProgress(callNode, callNameCapture.node)
+            : false;
         hints.push({
           kind: "call",
           sourceFile: filePath,
@@ -498,6 +513,7 @@ export function extractSymbolsWithQueries(
           ...(argCount !== undefined ? { argCount } : {}),
           ...(callForm !== undefined ? { callForm } : {}),
           ...(callText !== undefined ? { callText } : {}),
+          ...(selfCallNoProgress ? { selfCallNoProgress } : {}),
         });
       }
     }
@@ -736,33 +752,58 @@ function extractReceiverText(callNameNode: Parser.SyntaxNode): string | undefine
   return text && text.length > 0 ? text : undefined;
 }
 
+const DEF_TYPES = new Set([
+  "function_declaration", "function_definition", "function_item",
+  "method_definition", "method_declaration", "constructor_declaration",
+  "arrow_function", "function_expression", "local_function_statement",
+]);
+
+/** Self-receiver tokens (raw, incl. PHP `$this`) — gates the no-progress probe. */
+const SELF_RECEIVER_TEXTS = new Set(["this", "self", "$this"]);
+
+/** The nearest enclosing callable-definition node, or undefined at module top level. */
+function findEnclosingDefNode(callNameNode: Parser.SyntaxNode): Parser.SyntaxNode | undefined {
+  let cur = callNameNode.parent;
+  while (cur) {
+    if (DEF_TYPES.has(cur.type)) return cur;
+    cur = cur.parent;
+  }
+  return undefined;
+}
+
 /**
  * Walk up from a call site to the nearest enclosing definition node and return
  * its intra-run `id` (E1 `enclosingSymbolId`). Returns `undefined` for calls at
  * module top level (no enclosing definition).
  */
 function extractEnclosingSymbolId(callNameNode: Parser.SyntaxNode, filePath: string): string | undefined {
-  const DEF_TYPES = new Set([
-    "function_declaration", "function_definition", "function_item",
-    "method_definition", "method_declaration", "constructor_declaration",
-    "arrow_function", "function_expression", "local_function_statement",
-  ]);
-  let cur = callNameNode.parent;
-  while (cur) {
-    if (DEF_TYPES.has(cur.type)) {
-      const nameNode = nameNodeOf(cur);
-      if (nameNode) {
-        return generateSymbolId(
-          filePath,
-          nameNode.text.trim(),
-          nameNode.startPosition.row,
-          nameNode.startPosition.column,
-        );
-      }
-    }
-    cur = cur.parent;
-  }
-  return undefined;
+  const def = findEnclosingDefNode(callNameNode);
+  if (!def) return undefined;
+  const nameNode = nameNodeOf(def);
+  if (!nameNode) return undefined;
+  return generateSymbolId(filePath, nameNode.text.trim(), nameNode.startPosition.row, nameNode.startPosition.column);
+}
+
+/**
+ * Whether a self-receiver call passes its enclosing callable's parameters
+ * UNCHANGED — i.e. makes no argument progress (the hallmark of self-shadowing /
+ * infinite recursion, e.g. `$this->f()` in a 0-param `f`, or `this.f(x)` in
+ * `f(x)`). Compares the call's argument texts to the enclosing callable's
+ * parameter identifier texts, positionally; both empty counts as no progress.
+ * Returns false (never throws) whenever either side can't be determined, so an
+ * imperfect extraction can only MISS, never produce a false positive.
+ */
+function selfCallMakesNoProgress(
+  callNode: Parser.SyntaxNode | undefined,
+  callNameNode: Parser.SyntaxNode,
+): boolean {
+  const def = findEnclosingDefNode(callNameNode);
+  if (!def) return false;
+  const params = extractParameterNames(def);
+  const args = extractCallArgumentTexts(callNode);
+  if (params === undefined || args === undefined) return false;
+  if (params.length !== args.length) return false;
+  return params.every((p, i) => p === args[i]);
 }
 
 /**
