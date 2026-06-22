@@ -1131,6 +1131,13 @@ export const RELTYPE_EDGE_LABEL: Partial<Record<RelationType, string>> = {
   handlesRoute: "HANDLES_ROUTE",
   publishesEvent: "PUBLISHES_EVENT",
   subscribesTo: "SUBSCRIBES_TO",
+  // Plan A: PDG / taint camelCase relTypes whose word boundaries collapse under
+  // toUpperCase(). cfg/cdg/sanitizes are single-word and round-trip cleanly, so
+  // they are intentionally NOT listed here.
+  hasBlock: "HAS_BLOCK",
+  reachingDef: "REACHING_DEF",
+  taintSource: "TAINT_SOURCE",
+  taintSink: "TAINT_SINK",
 };
 
 export function countPersistRows(
