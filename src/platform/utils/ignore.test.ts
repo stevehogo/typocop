@@ -31,6 +31,19 @@ describe("shouldIgnorePath", () => {
     it("ignores coverage/lcov.info", () => {
       expect(shouldIgnorePath("coverage/lcov.info")).toBe(true);
     });
+
+    it("ignores vendor/ by default", () => {
+      expect(shouldIgnorePath("vendor/magento/module-paypal/Ipn.php")).toBe(true);
+    });
+
+    it("includeVendor un-ignores the vendor segment only", () => {
+      expect(shouldIgnorePath("vendor/magento/module-paypal/Ipn.php", { includeVendor: true })).toBe(false);
+      // other dependency/build dirs stay ignored even with includeVendor
+      expect(shouldIgnorePath("node_modules/lodash/index.js", { includeVendor: true })).toBe(true);
+      expect(shouldIgnorePath("dist/app.js", { includeVendor: true })).toBe(true);
+      // a Python virtualenv 'venv' is NOT the PHP/Go vendor dir — still ignored
+      expect(shouldIgnorePath("venv/lib/foo.py", { includeVendor: true })).toBe(true);
+    });
   });
 
   // 2.2 Nested segment matching

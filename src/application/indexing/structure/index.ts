@@ -2,7 +2,7 @@ import * as fs from "fs/promises";
 import * as path from "path";
 import type { Language } from "../../../core/domain.js";
 import type { FileNode } from "../../../core/file-node.js";
-import { shouldIgnorePath } from "../../../platform/utils/ignore.js";
+import { shouldIgnorePath, type IgnoreOptions } from "../../../platform/utils/ignore.js";
 import { MAX_FILE_SIZE } from "../../../platform/utils/limits.js";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -66,6 +66,9 @@ export type WalkProgressCallback = (
   filePath: string
 ) => void;
 
+/** Options for {@link walkFileTree} — forwarded to the ignore filter. */
+export type WalkOptions = IgnoreOptions;
+
 /**
  * Phase 1 — Walk the file tree and return FileNode[] (path + size + language).
  * No file content is loaded into memory.
@@ -75,7 +78,8 @@ export type WalkProgressCallback = (
  */
 export const walkFileTree = async (
   rootPath: string,
-  onProgress?: WalkProgressCallback
+  onProgress?: WalkProgressCallback,
+  options: WalkOptions = {}
 ): Promise<FileNode[]> => {
   const relativePaths: string[] = [];
   
@@ -107,7 +111,7 @@ export const walkFileTree = async (
       // Make path relative to relativeBase
       const relativePath = path.relative(relativeBase, fullPath).replace(/\\/g, "/");
 
-      if (shouldIgnorePath(relativePath)) continue;
+      if (shouldIgnorePath(relativePath, options)) continue;
 
       if (entry.isDirectory()) {
         await collect(fullPath);

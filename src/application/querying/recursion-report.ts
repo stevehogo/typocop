@@ -29,8 +29,16 @@ const SELF_CALL: Partial<Record<Language, (m: string) => string>> = {
 };
 const defaultSelfCall = (m: string) => `this.${m}()`;
 
-export async function scanRecursionSuspects(rootPath: string): Promise<RecursionFinding[]> {
-  const fileNodes = await walkFileTree(rootPath);
+export interface ScanRecursionOptions {
+  /** Index `vendor/` too, so signal A can resolve framework base classes. Slow. */
+  readonly includeVendor?: boolean;
+}
+
+export async function scanRecursionSuspects(
+  rootPath: string,
+  options: ScanRecursionOptions = {},
+): Promise<RecursionFinding[]> {
+  const fileNodes = await walkFileTree(rootPath, undefined, { includeVendor: options.includeVendor });
   const { symbols, hints } = await extractAllSymbols(fileNodes, rootPath);
   const { relationships } = await resolveReferences(symbols, hints, rootPath, fileNodes.map((f) => f.path));
 

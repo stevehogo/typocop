@@ -621,8 +621,8 @@ export const TYPOCOP_AUGMENT_MARKER = "[typocop]";
  * the CLI exits 0 even when the DB is unavailable, locked, or empty.
  */
 /** `check-recursion` — report self-shadowing recursion (no DB). Returns exit code 0/1. */
-export async function executeCheckRecursion(rootPath: string, json: boolean): Promise<number> {
-  const findings = await scanRecursionSuspects(rootPath);
+export async function executeCheckRecursion(rootPath: string, json: boolean, includeVendor = false): Promise<number> {
+  const findings = await scanRecursionSuspects(rootPath, { includeVendor });
   console.log(formatRecursionReport(findings, { json }));
   return findings.length > 0 ? 1 : 0;
 }
@@ -775,7 +775,7 @@ export async function executeCLI(command: CLICommand): Promise<void> {
     }
 
     case "check-recursion": {
-      process.exitCode = await executeCheckRecursion(command.sourcePath, command.json);
+      process.exitCode = await executeCheckRecursion(command.sourcePath, command.json, command.includeVendor);
       break;
     }
 
