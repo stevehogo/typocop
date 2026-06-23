@@ -34,6 +34,7 @@ import { resolveReferences } from "./resolution/index.js";
 import { clusterSymbols, type AIClient } from "./clustering/index.js";
 import { traceProcesses, annotateEntryPoints } from "./processes/index.js";
 import { runDataTouchPass } from "./data-touch/index.js";
+import { runPdgPhase, type PdgPhaseResult } from "./pdg/pdg-phase.js";
 import { buildSearchIndex, type EmbeddingResult } from "./search/index.js";
 import { EMBEDDING_CONCURRENCY } from "../../platform/utils/limits.js";
 import { createMetricsCollector, formatMetrics, type IndexingMetrics } from "./metrics.js";
@@ -178,6 +179,16 @@ export interface PipelineConfig {
    * `TYPOCOP_DATA_TOUCH_SINGLE_MODEL_FALLBACK`.
    */
   readonly dataTouchSingleModelFallback?: boolean;
+  /**
+   * Source task #7 (`--pdg`). **Default `false`.** When true, a post-resolution
+   * phase builds a per-function PDG (CFG + control-dependence + reaching-defs)
+   * over callable symbols and solves taint, persisting BasicBlock/TaintFinding
+   * nodes + hasBlock/cfg/cdg/reachingDef/taintSource/taintSink edges — kept OUT
+   * of impact_analysis's traversal (program HARD RULE: no new edge is
+   * Symbol→Symbol; `sanitizes` is never persisted). OFF ⇒ byte-identical to a
+   * pre-feature run.
+   */
+  readonly pdg?: boolean;
   /**
    * Wave 4 (Task 5) refuse-on-ambiguity call-resolution discipline. **Default
    * `false`.** Derived from `TYPOCOP_CALL_REFUSE_AMBIGUOUS` at the composition
@@ -459,6 +470,32 @@ export async function runIndexingPipeline(config: PipelineConfig): Promise<Pipel
     }
   }
 
+  // ── Phase 3.6: PDG + taint (source task #7) ─────────────────────────────────
+  // GLOBAL post-resolution pass, gated behind `config.pdg` (default OFF —
+  // byte-identical when off). Builds a per-function PDG (CFG → control-dependence
+  // → reaching-defs) over callable symbols and solves taint, then persists
+  // BasicBlock/TaintFinding nodes + PDG/taint edges (Phase 7). NO Symbol→Symbol
+  // edge is produced (HARD RULE), so impact_analysis is unaffected. The PDG rows
+  // are persisted via the same write helpers but are NOT folded into
+  // countPersistRows (the progress-bar total), keeping the default-path
+  // drift-guard byte-identical. `symbols`/`relationships` are NOT mutated here
+  // (unlike data-touch), so clustering/search are unchanged. `FileNode` carries
+  // no source text, so read it on demand via the Phase-1 `readFileContents` util.
+  let pdgResult: PdgPhaseResult | null = null;
+  if (config.pdg) {
+    const contentByPath = await readFileContents(sourcePath, fileNodes.map((f) => f.path));
+    const pdgFiles = [...contentByPath].map(([path, content]) => ({ path, content }));
+    pdgResult = await metrics.time("pdg", () => runPdgPhase(symbols, relationships, pdgFiles));
+    metrics.set("pdgBlockCount", pdgResult.blocks.length);
+    metrics.set("pdgFindingCount", pdgResult.findings.length);
+    if (verbose) {
+      console.error(
+        `[pipeline] Phase 3.6 (pdg): ${pdgResult.blocks.length} basic block(s), ` +
+          `${pdgResult.findings.length} taint finding(s)`,
+      );
+    }
+  }
+
   if (verbose) console.error("[pipeline] Starting Phase 4: Clustering");
 
   // Phase 4: Cluster symbols (Req 3.4)
@@ -724,6 +761,7 @@ export async function runIndexingPipeline(config: PipelineConfig): Promise<Pipel
       metrics,
       keyOf,
       advancePersistProgress,
+      pdgResult, // Plan E: null unless --pdg
     );
 
     // Write the `lastIndexed` Metadata node (A4 / pre-existing bug 0.4): `status`
@@ -1182,6 +1220,7 @@ async function storeInDatabases(
   // (synthetic) endpoints fall through unchanged.
   keyOf: (id: string) => string,
   onRows?: (count: number) => void,
+  pdg?: PdgPhaseResult | null,
 ): Promise<void> {
   // NOTE: Do NOT prepend prefix here — the GraphAdapter handles prefixing internally.
   const countNodes = (n: number): void => {
@@ -1330,4 +1369,55 @@ async function storeInDatabases(
     countEdges,
     relationshipEvents,
   );
+
+  // ── Plan E (#7): PDG / taint persistence (only when --pdg ran). All props are
+  // STRING (Plan A schema). NO Symbol→Symbol edge is written (HARD RULE): cfg/
+  // cdg/reachingDef are BasicBlock→BasicBlock, taintSource/taintSink anchor on
+  // the non-Symbol TaintFinding node, hasBlock is Symbol→BasicBlock. `sanitizes`
+  // is NEVER written. `keyOf` maps a callable's intra-run id to its logicalKey
+  // (the BasicBlock.functionId convention) for the hasBlock/taintSource/taintSink
+  // Symbol endpoints. These rows increment the graph*Writes metrics but are NOT
+  // routed through `onRows`, so they stay OUT of the persist-progress total —
+  // keeping the default-path (pdg:false) drift-guard byte-identical.
+  if (pdg) {
+    const countPdgNodes = (n: number): void => metrics.incr("graphNodeWrites", n);
+    const countPdgEdges = (n: number): void => metrics.incr("graphEdgeWrites", n);
+    await writeNodeGroup(
+      graphAdapter, "BasicBlock",
+      pdg.blocks.map((b) => ({
+        id: b.id, functionId: b.functionId, blockIndex: String(b.blockIndex),
+        startLine: String(b.startLine), endLine: String(b.endLine), kind: b.kind,
+      })),
+      countPdgNodes, nodeEvents,
+    );
+    await writeNodeGroup(
+      graphAdapter, "TaintFinding",
+      pdg.findings.map((f) => ({
+        id: f.id, sinkKind: f.sinkKind, sourceId: f.sourceId, sinkId: f.sinkId,
+        sourceLoc: f.sourceLoc, sinkLoc: f.sinkLoc,
+        sanitized: f.sanitized ? "true" : "false", pathJson: JSON.stringify(f.path),
+      })),
+      countPdgNodes, nodeEvents,
+    );
+    // hasBlock: Symbol(callable) → BasicBlock. functionId IS the logicalKey.
+    await writeRelationshipGroup(
+      graphAdapter, "HAS_BLOCK",
+      pdg.blocks.map((b) => ({ fromId: b.functionId, toId: b.id, properties: {} })),
+      countPdgEdges, relationshipEvents,
+    );
+    await writeRelationshipGroup(graphAdapter, "CFG", pdg.cfgEdges.map((e) => ({ fromId: e.fromId, toId: e.toId, properties: e.props })), countPdgEdges, relationshipEvents);
+    await writeRelationshipGroup(graphAdapter, "CDG", pdg.cdgEdges.map((e) => ({ fromId: e.fromId, toId: e.toId, properties: e.props })), countPdgEdges, relationshipEvents);
+    await writeRelationshipGroup(graphAdapter, "REACHING_DEF", pdg.reachingDefEdges.map((e) => ({ fromId: e.fromId, toId: e.toId, properties: e.props })), countPdgEdges, relationshipEvents);
+    // taintSource: Symbol → TaintFinding ; taintSink: TaintFinding → Symbol.
+    await writeRelationshipGroup(
+      graphAdapter, "TAINT_SOURCE",
+      pdg.findings.map((f) => ({ fromId: keyOf(f.sourceId), toId: f.id, properties: {} })),
+      countPdgEdges, relationshipEvents,
+    );
+    await writeRelationshipGroup(
+      graphAdapter, "TAINT_SINK",
+      pdg.findings.map((f) => ({ fromId: f.id, toId: keyOf(f.sinkId), properties: {} })),
+      countPdgEdges, relationshipEvents,
+    );
+  }
 }

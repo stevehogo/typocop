@@ -27,6 +27,9 @@ export type PhaseName =
   // exists in the closed `Record<PhaseName,...>` enum (the pass itself is wired in
   // a later stage).
   | "dataTouch"
+  // Plan E (source task #7): the post-resolution PDG + taint pass. Runs between
+  // resolution and clustering when `PipelineConfig.pdg` is on; stays 0 when off.
+  | "pdg"
   | "clustering"
   | "processes"
   | "search"
@@ -115,6 +118,13 @@ export interface IndexingMetrics {
   readonly dataTouchEdgeCount: number;
   /** Synthetic Symbols minted by the data-touch pass (dbmodel:/apiendpoint:). */
   readonly syntheticSymbolCount: number;
+
+  // ── Plan E (source task #7): PDG/taint pass counters ──
+  // Both stay 0 unless the (default-off) `--pdg` pass runs. Counts only.
+  /** BasicBlocks emitted by the PDG pass. */
+  readonly pdgBlockCount: number;
+  /** TaintFindings emitted by the PDG/taint solver. */
+  readonly pdgFindingCount: number;
 }
 
 /**
@@ -178,7 +188,10 @@ type CountField =
   | "oversizedRowCount"
   // Wave 5 data-touch counters. Stay 0 when the pass is off (flag default).
   | "dataTouchEdgeCount"
-  | "syntheticSymbolCount";
+  | "syntheticSymbolCount"
+  // Plan E PDG/taint counters. Stay 0 when the `--pdg` pass is off (flag default).
+  | "pdgBlockCount"
+  | "pdgFindingCount";
 
 /** Accumulating elapsed-millisecond fields. */
 type ElapsedField = "embeddingElapsedMs";
@@ -189,6 +202,7 @@ const PHASE_NAMES: readonly PhaseName[] = [
   "typeEnv",
   "resolution",
   "dataTouch",
+  "pdg",
   "clustering",
   "processes",
   "search",
@@ -206,6 +220,7 @@ export function createMetricsCollector(): MetricsCollector {
     typeEnv: 0,
     resolution: 0,
     dataTouch: 0,
+    pdg: 0,
     clustering: 0,
     processes: 0,
     search: 0,
@@ -222,6 +237,7 @@ export function createMetricsCollector(): MetricsCollector {
     typeEnv: 0,
     resolution: 0,
     dataTouch: 0,
+    pdg: 0,
     clustering: 0,
     processes: 0,
     search: 0,
@@ -258,6 +274,8 @@ export function createMetricsCollector(): MetricsCollector {
     oversizedRowCount: 0,
     dataTouchEdgeCount: 0,
     syntheticSymbolCount: 0,
+    pdgBlockCount: 0,
+    pdgFindingCount: 0,
   };
 
   const elapsed: Record<ElapsedField, number> = {
@@ -344,6 +362,8 @@ export function createMetricsCollector(): MetricsCollector {
         oversizedRowCount: counts.oversizedRowCount,
         dataTouchEdgeCount: counts.dataTouchEdgeCount,
         syntheticSymbolCount: counts.syntheticSymbolCount,
+        pdgBlockCount: counts.pdgBlockCount,
+        pdgFindingCount: counts.pdgFindingCount,
       };
     },
   };
