@@ -505,6 +505,22 @@ export const DEFAULT_GRPC_MAX_MESSAGE_BYTES = 64 * 1024 * 1024;
 export const GRPC_MAX_MESSAGE_BYTES_ENV = "LADYBUG_GRPC_MAX_MESSAGE_BYTES";
 
 /**
+ * gRPC keepalive (HTTP/2 PINGs) — keep an idle channel warm through long
+ * client-side compute windows (e.g. the `--pdg` PDG phase, which builds CFGs +
+ * re-parses files with NO DB traffic) so a later write doesn't race a server
+ * that idled/dropped the connection ("Failed to connect before the deadline").
+ *
+ * LOAD-BEARING PAIRING: the server's {@link GRPC_SERVER_MIN_PING_INTERVAL_MS}
+ * must be <= the client's {@link GRPC_KEEPALIVE_TIME_MS}, or the server replies
+ * GOAWAY("too_many_pings") and itself CAUSES the drop. 20s ping >= 10s min is safe.
+ */
+export const GRPC_KEEPALIVE_TIME_MS = 20_000;
+/** How long the client waits for a keepalive PING ack before considering the conn dead. */
+export const GRPC_KEEPALIVE_TIMEOUT_MS = 10_000;
+/** Server's minimum tolerated client ping interval (must be <= GRPC_KEEPALIVE_TIME_MS). */
+export const GRPC_SERVER_MIN_PING_INTERVAL_MS = 10_000;
+
+/**
  * Safety factor for application payloads inside a protobuf message. The batch
  * JSON field should stay below the transport ceiling to leave framing overhead.
  */

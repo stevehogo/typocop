@@ -108,6 +108,21 @@ export class RemoteDatabaseAdapter implements DatabaseAdapter, RemoteRpcClient {
     return this.embeddingAdapter;
   }
 
+  /**
+   * Re-ready both gRPC channels before a heavy write phase. Calling
+   * `waitForReady` forces gRPC to (re)connect an idle/stale channel, so a write
+   * that follows a long compute window with no DB traffic (the `--pdg` persist
+   * boundary) lands on a live connection instead of racing a reconnect past its
+   * deadline. Defense-in-depth alongside HTTP/2 keepalive.
+   */
+  async ensureReady(): Promise<void> {
+    const clients = this.requireClients();
+    await Promise.all([
+      waitForReadyWithRetry(clients.graph),
+      waitForReadyWithRetry(clients.vector),
+    ]);
+  }
+
   buildRequestMetadata(timeoutMs = this.defaultTimeoutMs): RpcRequestMetadata {
     return {
       requestId: randomUUID(),

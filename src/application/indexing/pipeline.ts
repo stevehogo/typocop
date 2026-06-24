@@ -751,6 +751,12 @@ export async function runIndexingPipeline(config: PipelineConfig): Promise<Pipel
     // changed+added subset on a delta write (full set otherwise); relationships,
     // clusters, processes, and external deps are always the full set.
     if (verbose) console.error("[pipeline] Storing results in graph database");
+    // Re-ready the connection before the graph write. In client/server mode the
+    // channel may have idled through the long, DB-silent compute phases (esp.
+    // `--pdg`, which builds thousands of CFGs and re-parses files with no DB
+    // traffic); warming it here keeps the first graph write off a stale channel.
+    // No-op in embedded mode (no `ensureReady`).
+    await adapter.ensureReady?.();
     await storeInDatabases(
       symbolsToInsert,
       relationships,
