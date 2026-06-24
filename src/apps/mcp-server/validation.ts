@@ -470,6 +470,43 @@ export function validateToolParams(
       break;
     }
 
+    case "pdg_query": {
+      const validModes = ["controls", "flows"];
+      if (!params.mode || typeof params.mode !== "string" || !validModes.includes(params.mode)) {
+        throw new MCPValidationError(
+          `pdg_query 'mode' must be one of: ${validModes.join(", ")}`,
+          "INVALID_PARAMETER_VALUE",
+          { tool: toolName, parameter: "mode", validValues: validModes },
+        );
+      }
+      if (!params.target || typeof params.target !== "string") {
+        throw new MCPValidationError(
+          "pdg_query requires a 'target' string parameter",
+          "MISSING_PARAMETER",
+          { tool: toolName, missing: "target" },
+        );
+      }
+      break;
+    }
+
+    case "explain": {
+      if (params.target !== undefined && typeof params.target !== "string") {
+        throw new MCPValidationError(
+          "explain 'target' must be a string",
+          "INVALID_PARAMETER_TYPE",
+          { tool: toolName, parameter: "target", expected: "string" },
+        );
+      }
+      if (params.limit !== undefined && (typeof params.limit !== "number" || params.limit <= 0)) {
+        throw new MCPValidationError(
+          "explain 'limit' must be a positive number",
+          "INVALID_PARAMETER_TYPE",
+          { tool: toolName, parameter: "limit", expected: "positive number" },
+        );
+      }
+      break;
+    }
+
     default:
       throw new MCPValidationError(
         `Unknown tool: ${toolName}`,
