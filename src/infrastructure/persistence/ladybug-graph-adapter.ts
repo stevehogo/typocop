@@ -356,13 +356,25 @@ export class LadybugGraphAdapter implements GraphAdapter {
 
     // Flatten each row to { fromId, toId, <allowed props> } so the prepared
     // statement binds a uniform struct shape.
-    const rels = relationships.map((rel) => {
+    //
+    // De-dup by (fromId, toId), keeping the LAST occurrence. This is load-bearing:
+    // LadybugDB SEGFAULTS when a single `UNWIND $rels ... MERGE (a)-[r]->(b)`
+    // batch contains two rows with the same endpoint pair — the second MERGE tries
+    // to match a relationship created earlier in the *same* UNWIND execution and
+    // crashes the native engine (observed on CDG, which emits multiple
+    // control-dependence edges between one block pair). Keeping the last row is
+    // semantically identical to what the MERGE would net out to anyway (ON CREATE
+    // then ON MATCH SET both overwrite with the later row's props), so this is a
+    // pure crash-safety guard, not a behavior change for callers without dups.
+    const byPair = new Map<string, Record<string, unknown>>();
+    for (const rel of relationships) {
       const flat: Record<string, unknown> = { fromId: rel.fromId, toId: rel.toId };
       for (const p of props) {
         flat[p] = rel.properties?.[p];
       }
-      return flat;
-    });
+      byPair.set(`${rel.fromId}\u0000${rel.toId}`, flat);
+    }
+    const rels = [...byPair.values()];
 
     // NOTE: Kùzu rejects struct-field access inside a node-pattern property map
     // (e.g. `(a {id: rel.fromId})`) for an UNWIND'd struct param — it throws
