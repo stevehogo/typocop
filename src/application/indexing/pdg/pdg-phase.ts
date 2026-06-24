@@ -63,8 +63,10 @@ function findDefNode(root: Parser.SyntaxNode, startLine: number): Parser.SyntaxN
   const stack: Parser.SyntaxNode[] = [root];
   while (stack.length > 0) {
     const n = stack.pop()!;
-    const nStart = n.startPosition.row + 1; // 1-based, matches Symbol.location
-    const nEnd = n.endPosition.row + 1;
+    // Symbol.location.startLine is the 0-based tree-sitter row (extract-symbols.ts
+    // stores `node.startPosition.row`), so compare in the SAME 0-based basis.
+    const nStart = n.startPosition.row;
+    const nEnd = n.endPosition.row;
     if (FN_NODE_TYPES.has(n.type) && nStart <= startLine && nEnd >= startLine) {
       if (!best || (n.endPosition.row - n.startPosition.row) <= (best.endPosition.row - best.startPosition.row)) {
         best = n;

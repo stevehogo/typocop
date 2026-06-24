@@ -25,7 +25,9 @@ describe("runPdgPhase", () => {
       `  exec(id);`,
       `}`,
     ].join("\n");
-    const sym = fn("inject.ts#handler", "handler", "inject.ts", 2, 5);
+    // startLine is the 0-based tree-sitter row (extract-symbols convention):
+    // `export function handler` is the 2nd content line ⇒ row 1.
+    const sym = fn("inject.ts#handler", "handler", "inject.ts", 1, 4);
     const res = await runPdgPhase([sym], [], [{ path: "inject.ts", content }]);
 
     expect(res.blocks.length).toBeGreaterThan(0);
@@ -41,7 +43,7 @@ describe("runPdgPhase", () => {
       `  return a + b;`,
       `}`,
     ].join("\n");
-    const sym = fn("clean.ts#add", "add", "clean.ts", 1, 3);
+    const sym = fn("clean.ts#add", "add", "clean.ts", 0, 2); // `export function add` is row 0
     const res = await runPdgPhase([sym], [], [{ path: "clean.ts", content }]);
     expect(res.blocks.length).toBeGreaterThan(0);
     expect(res.findings).toHaveLength(0);
@@ -56,7 +58,7 @@ describe("runPdgPhase", () => {
 
   it("HARD RULE: produces only BasicBlock-ended / TaintFinding-anchored edges (no Symbol→Symbol)", async () => {
     const content = `export function f() { const a = 1; return a; }`;
-    const sym = fn("e.ts#f", "f", "e.ts", 1, 1);
+    const sym = fn("e.ts#f", "f", "e.ts", 0, 0); // single-line function ⇒ row 0
     const res = await runPdgPhase([sym], [], [{ path: "e.ts", content }]);
     // cfg/cdg/reachingDef edges are BasicBlock→BasicBlock — their endpoints are
     // block ids ("<functionId>#<n>"), never bare Symbol ids.

@@ -8,9 +8,13 @@
  * name matching ⇒ expect false positives). NEVER auto-act on a finding; verify
  * first. Reference implementation: an open-source CFG/taint indexer.
  */
-import type { GraphAdapter, GraphNode } from "../../core/ports/persistence.js";
+import type { GraphAdapter } from "../../core/ports/persistence.js";
 import type { TaintFinding } from "../../core/domain.js";
 import { graphNodeToTaintFinding } from "./graph-helpers.js";
+
+/** A node-valued Cypher column as the adapter returns it: `{ labels, properties }`
+ * (id lives in properties.id, per rowToNode); a mock may add a top-level id. */
+interface RawNodeColumn { id?: string; labels?: string[]; properties?: Record<string, string> }
 
 export const TAINT_SOUNDNESS_CAVEAT =
   "Taint findings are heuristic (sound-but-over-reporting): closures/callbacks, " +
@@ -33,10 +37,17 @@ export async function explainFindings(
        RETURN f ORDER BY f.sinkKind, f.sinkLoc LIMIT $lim`
     : `MATCH (f:TaintFinding)
        RETURN f ORDER BY f.sinkKind, f.sinkLoc LIMIT $lim`;
-  const rows = await graph.runCypher<{ f: GraphNode }>(cypher, { lim: limit, ...(opts.target ? { t: opts.target } : {}) }) ?? [];
-  // Slice to `limit` as a defensive bound (the Cypher LIMIT is authoritative on a
-  // real adapter; this keeps the cap honoured if an adapter ignores it).
-  const findings = rows.map((r) => graphNodeToTaintFinding(r.f)).slice(0, limit);
+  const rows = await graph.runCypher<{ f: RawNodeColumn }>(cypher, { lim: limit, ...(opts.target ? { t: opts.target } : {}) }) ?? [];
+  // Normalize the node-valued `f` column to a GraphNode (id from properties.id,
+  // like rowToNode). Slice to `limit` as a defensive bound (the Cypher LIMIT is
+  // authoritative on a real adapter; this keeps the cap honoured if one ignores it).
+  const findings = rows
+    .map((r) => graphNodeToTaintFinding({
+      id: r.f.properties?.id ?? r.f.id ?? "",
+      labels: r.f.labels ?? ["TaintFinding"],
+      properties: r.f.properties ?? {},
+    }))
+    .slice(0, limit);
 
   if (findings.length === 0) {
     return { findings, summary: `No taint findings${opts.target ? ` for '${opts.target}'` : ""}. ${TAINT_SOUNDNESS_CAVEAT}` };
