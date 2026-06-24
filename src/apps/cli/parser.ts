@@ -27,6 +27,12 @@ export interface CLIConfig {
    * config literal need not set it; `parseArgs` always sets it explicitly.
    */
   incremental?: boolean;
+  /**
+   * Source task #7 (`--pdg`). **Default `false`.** Opt into per-function PDG +
+   * interprocedural taint analysis (persists BasicBlock/TaintFinding nodes +
+   * PDG/taint edges; OFF ⇒ baseline indexing is byte-identical).
+   */
+  pdg?: boolean;
 }
 
 export type CLICommand =
@@ -99,6 +105,7 @@ export function parseArgs(rawArgs: string[]): CLICommand {
     .option("-r, --refresh", "Clear and rebuild all graph and embeddings data", false)
     .option("--incremental", "Diff-based delta write: re-index only changed/added files (default)", true)
     .option("--full", "Full re-index: re-parse every file and rewrite the graph wholesale")
+    .option("--pdg", "Opt-in: build per-function PDG + interprocedural taint analysis (off by default)", false)
     .action((options) => {
       if (!fs.existsSync(options.path)) {
         throw new CLIValidationError(`Source path does not exist: ${options.path}`);
@@ -120,6 +127,7 @@ export function parseArgs(rawArgs: string[]): CLICommand {
           verbose: options.verbose,
           refresh: options.refresh,
           incremental,
+          pdg: options.pdg,
         }
       };
     });
