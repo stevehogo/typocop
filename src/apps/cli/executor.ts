@@ -19,7 +19,7 @@ import { FileEmbeddingCache } from "../../infrastructure/cache/embedding-cache.j
 import { executeObsidianExport } from "../../application/export-render/index.js";
 import { createFileWatcher, type FileWatcher } from "../../infrastructure/watch/file-watcher.js";
 import { augment } from "../../application/querying/augment.js";
-import { scanRecursionSuspects, formatRecursionReport } from "../../application/querying/recursion-report.js";
+import { scanRecursionSuspects, formatRecursionReport } from "../../application/indexing/recursion-report.js";
 import { stopConnectionServer } from "../../infrastructure/remote-transport/autostart-runtime.js";
 import { mergeTypocopHook, type ClaudeSettings } from "./setup.js";
 import { isTypeEnvEnabled, isLspTypesEnabled, isDataTouchEnabled, isDataTouchEventsEnabled, isDataTouchSingleModelFallbackEnabled, isCallRefuseAmbiguousEnabled, isFrameworkExtractionEnabled, isHeritageDisambiguationEnabled } from "../../platform/utils/limits.js";

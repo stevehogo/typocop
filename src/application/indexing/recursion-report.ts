@@ -5,10 +5,10 @@
  * the pure detector, and renders a compact table of suspect locations + the
  * offending call text. Read-only; persists nothing.
  */
-import { walkFileTree } from "../indexing/structure/index.js";
-import { extractAllSymbols } from "../indexing/parsing/index.js";
-import { resolveReferences } from "../indexing/resolution/index.js";
-import { detectRecursionSuspects } from "../indexing/resolution/recursion-suspects.js";
+import { walkFileTree } from "./structure/index.js";
+import { extractAllSymbols } from "./parsing/index.js";
+import { resolveReferences } from "./resolution/index.js";
+import { detectRecursionSuspects } from "./resolution/recursion-suspects.js";
 import type { Symbol, Language } from "../../core/domain.js";
 
 export interface RecursionFinding {

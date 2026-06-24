@@ -1,10 +1,10 @@
 import { describe, it, expect, vi } from "vitest";
-vi.mock("../../application/querying/recursion-report.js", () => ({
+vi.mock("../../application/indexing/recursion-report.js", () => ({
   scanRecursionSuspects: vi.fn(),
   formatRecursionReport: (f: unknown[]) => `formatted:${(f as unknown[]).length}`,
 }));
 import { executeCheckRecursion } from "./executor.js";
-import { scanRecursionSuspects } from "../../application/querying/recursion-report.js";
+import { scanRecursionSuspects } from "../../application/indexing/recursion-report.js";
 
 describe("executeCheckRecursion", () => {
   it("exit 0 + prints when clean", async () => {
