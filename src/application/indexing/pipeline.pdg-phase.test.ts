@@ -84,7 +84,9 @@ function makeRecordingAdapter(): {
 
 const handlerSymbol: Symbol = {
   ...STUB_SYMBOL, id: "inject.ts#handler", logicalKey: "inject.ts#handler", name: "handler", kind: "function",
-  location: { filePath: "inject.ts", startLine: 2, startColumn: 0, endLine: 2, endColumn: 0 },
+  // startLine is the 0-based tree-sitter row (extract-symbols convention): the
+  // handler is the 2nd content line ⇒ row 1.
+  location: { filePath: "inject.ts", startLine: 1, startColumn: 0, endLine: 1, endColumn: 0 },
 };
 
 function setupDefaultMocks(): void {
