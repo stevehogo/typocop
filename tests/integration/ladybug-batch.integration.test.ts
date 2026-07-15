@@ -86,4 +86,31 @@ describe("Ladybug batch writes — real-Kùzu integration", () => {
     // Metadata parses identically to the per-row path.
     expect(results[0].metadata).toEqual({ kind: "function" });
   });
+
+  it("survives duplicate (fromId,toId) pairs in one batch (regression: CDG MERGE segfault)", async () => {
+    // A single `UNWIND $rels ... MERGE (a)-[r]->(b)` batch containing two rows
+    // with the SAME endpoint pair used to SEGFAULT LadybugDB — the second MERGE
+    // matched a relationship created earlier in the same UNWIND. CDG naturally
+    // emits such duplicates (multiple control-dependence edges between one block
+    // pair), which crashed `--pdg` persistence at scale. createRelationships now
+    // de-dups by (fromId,toId) keeping the last row; this must not crash and must
+    // land exactly one edge carrying the last row's props.
+    const mkBlock = (id: string): Record<string, string> => ({
+      id, functionId: "fn1", blockIndex: "0", startLine: "1", endLine: "2", kind: "normal",
+    });
+    await graph.createNodes("BasicBlock", [mkBlock("bb0"), mkBlock("bb1")]);
+
+    await graph.createRelationships("CDG", [
+      { fromId: "bb0", toId: "bb1", properties: { branchSense: "T", guard: "first" } },
+      { fromId: "bb0", toId: "bb1", properties: { branchSense: "F", guard: "last" } },
+    ]);
+
+    const cdg = await graph.queryRelationships("CDG");
+    expect(cdg).toHaveLength(1);
+    expect(cdg[0].sourceId).toBe("bb0");
+    expect(cdg[0].targetId).toBe("bb1");
+    // Last row wins (matches MERGE ON MATCH SET semantics).
+    expect(cdg[0].properties.branchSense).toBe("F");
+    expect(cdg[0].properties.guard).toBe("last");
+  });
 });

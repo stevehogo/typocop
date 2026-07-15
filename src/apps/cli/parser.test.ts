@@ -24,6 +24,7 @@ describe("parseArgs", () => {
         verbose: true,
         refresh: false,
         incremental: true,
+        pdg: false,
       },
     });
   });
@@ -74,8 +75,22 @@ describe("parseArgs", () => {
         verbose: false,
         refresh: false,
         incremental: true,
+        pdg: false,
       },
     });
+  });
+
+  it("parse --pdg sets config.pdg true", () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    const cmd = parseArgs(["node", "typocop", "parse", "-p", "./src", "-l", "typescript", "--pdg"]);
+    expect(cmd.type).toBe("parse");
+    if (cmd.type === "parse") expect(cmd.config.pdg).toBe(true);
+  });
+
+  it("parse without --pdg defaults config.pdg to false", () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    const cmd = parseArgs(["node", "typocop", "parse", "-p", "./src", "-l", "typescript"]);
+    if (cmd.type === "parse") expect(cmd.config.pdg).toBe(false);
   });
 
   it("throws when --lang is omitted and detection fails", () => {
@@ -177,6 +192,7 @@ describe("parseArgs", () => {
         refresh: true,
         // --refresh is a clear-then-rebuild, which is inherently a full write.
         incremental: false,
+        pdg: false,
       },
     });
   });
@@ -195,6 +211,7 @@ describe("parseArgs", () => {
         verbose: false,
         refresh: true,
         incremental: false,
+        pdg: false,
       },
     });
   });
@@ -213,6 +230,7 @@ describe("parseArgs", () => {
         verbose: false,
         refresh: false,
         incremental: true,
+        pdg: false,
       },
     });
   });

@@ -404,6 +404,32 @@ const TOOL_DEFINITIONS = [
       required: ["topic"],
     },
   },
+  {
+    name: "pdg_query",
+    description:
+      "Query the per-function program-dependence graph (requires indexing with --pdg). mode:'controls' returns a callable's control-dependence + control-flow block structure; mode:'flows' returns the taint findings whose sink is that callable. Read-only.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        mode: { type: "string", enum: ["controls", "flows"], description: "'controls' (PDG control structure) or 'flows' (taint findings into the target)." },
+        target: { type: "string", description: "Target callable symbol name or id." },
+      },
+      required: ["mode", "target"],
+    },
+  },
+  {
+    name: "explain",
+    description:
+      "Explain interprocedural taint findings (source→sink paths) for humans (requires indexing with --pdg). Each finding carries its SinkKind (command|sql|path|xss|code) and whether a sanitizer was on the path. SOUND-BUT-OVER-REPORTING: expect false positives — verify before acting; NEVER auto-act on a finding. Read-only.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        target: { type: "string", description: "Optional: scope to findings whose sink is this callable (name or id)." },
+        limit: { type: "number", description: "Max findings to render (default 50)." },
+      },
+      required: [],
+    },
+  },
 ];
 
 /**

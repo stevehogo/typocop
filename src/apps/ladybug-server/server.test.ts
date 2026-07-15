@@ -3,7 +3,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_GRPC_MAX_MESSAGE_BYTES } from "../../platform/utils/limits.js";
+import {
+  DEFAULT_GRPC_MAX_MESSAGE_BYTES,
+  GRPC_SERVER_MIN_PING_INTERVAL_MS,
+} from "../../platform/utils/limits.js";
 
 vi.mock("@grpc/proto-loader", () => ({
   loadSync: vi.fn(() => ({
@@ -148,6 +151,9 @@ describe("startConnectionServer", () => {
       expect(grpcModule.__getLastServerOptions()).toMatchObject({
         "grpc.max_receive_message_length": DEFAULT_GRPC_MAX_MESSAGE_BYTES,
         "grpc.max_send_message_length": DEFAULT_GRPC_MAX_MESSAGE_BYTES,
+        // Keepalive: must accept idle client pings without GOAWAY("too_many_pings").
+        "grpc.keepalive_permit_without_calls": 1,
+        "grpc.http2.min_ping_interval_without_data_ms": GRPC_SERVER_MIN_PING_INTERVAL_MS,
       });
       await expect(access(discoveryPath)).resolves.toBeUndefined();
 

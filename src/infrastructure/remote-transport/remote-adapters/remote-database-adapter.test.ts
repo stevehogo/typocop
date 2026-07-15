@@ -152,6 +152,27 @@ describe("RemoteDatabaseAdapter", () => {
     expect(captured?.deadline.getTime()).toBeGreaterThan(Date.now());
   });
 
+  it("ensureReady re-readies both gRPC channels", async () => {
+    const graphClient = createNoopClient();
+    const vectorClient = createNoopClient();
+
+    const adapter = new RemoteDatabaseAdapter(baseConfig, {
+      createClients: () =>
+        ({ graph: graphClient, vector: vectorClient }) as unknown as RpcClientBundle,
+    });
+
+    await adapter.initialize();
+    // initialize() already waited for ready once on each channel.
+    expect(graphClient.waitForReady).toHaveBeenCalledTimes(1);
+    expect(vectorClient.waitForReady).toHaveBeenCalledTimes(1);
+
+    await adapter.ensureReady();
+
+    // ensureReady re-readies both — a second wait on each channel.
+    expect(graphClient.waitForReady).toHaveBeenCalledTimes(2);
+    expect(vectorClient.waitForReady).toHaveBeenCalledTimes(2);
+  });
+
   it("reconnects and retries once on transient gRPC errors", async () => {
     const firstGraph: FakeClient = {
       ...createNoopClient(),

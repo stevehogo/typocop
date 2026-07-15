@@ -13,7 +13,7 @@ import type { DiscoveryFile } from "../../infrastructure/remote-transport/types.
 import { releaseFileLockSync } from "../../infrastructure/persistence/file-lock.js";
 import { loadConnectionProtoPackage } from "../../infrastructure/remote-transport/proto-loader.js";
 import { logServerEvent } from "../../platform/logging/logger.js";
-import { withTimeoutOr } from "../../platform/utils/limits.js";
+import { withTimeoutOr, GRPC_SERVER_MIN_PING_INTERVAL_MS } from "../../platform/utils/limits.js";
 import { toServiceError } from "../../infrastructure/remote-transport/errors.js";
 import type { CrashRecord } from "./safety-net.js";
 import { installProcessSafetyNet } from "./safety-net.js";
@@ -60,6 +60,12 @@ export async function startConnectionServer(config: LadybugServerConfig): Promis
     const grpcServer = new grpc.Server({
       "grpc.max_receive_message_length": config.grpcMaxMessageBytes,
       "grpc.max_send_message_length": config.grpcMaxMessageBytes,
+      // Accept the client's idle keepalive pings (sent during the long --pdg
+      // compute gap with no active RPCs). min_ping_interval must be <= the
+      // client's keepalive_time_ms, or the server replies GOAWAY("too_many_pings")
+      // and itself causes the channel drop we're trying to prevent.
+      "grpc.keepalive_permit_without_calls": 1,
+      "grpc.http2.min_ping_interval_without_data_ms": GRPC_SERVER_MIN_PING_INTERVAL_MS,
     });
 
     const shutdownWaiter = deferred<void>();

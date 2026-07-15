@@ -16,6 +16,8 @@ import { executeFindDeadCode } from "./dead-code-tool.js";
 import { executeFindHotspots } from "./hotspots-tool.js";
 import { executeRenameTool } from "./rename-tool.js";
 import { executeShapeCheck } from "./shape-check-tool.js";
+import { executePdgQuery } from "./pdg-query-tool.js";
+import { executeExplain } from "./explain-tool.js";
 import { executeVerifyClaimTool } from "./verify-claim-tool.js";
 import { executeQueryGraph } from "./query-graph-tool.js";
 import { executeRouteMap } from "./route-map-tool.js";
@@ -384,6 +386,10 @@ export async function executeTool(
       }
       return executeDetectChanges(params, adapter, git);
     }
+    case "pdg_query":
+      return executePdgQuery(params, adapter);
+    case "explain":
+      return executeExplain(params, adapter);
     default:
       throw new Error(`Unknown tool: ${toolName}`);
   }

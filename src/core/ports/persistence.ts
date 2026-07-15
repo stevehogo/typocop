@@ -221,4 +221,14 @@ export interface DatabaseAdapter {
   getGraphAdapter(): GraphAdapter;
   getVectorAdapter(): VectorAdapter;
   getEmbeddingAdapter(): EmbeddingAdapter;
+
+  /**
+   * OPTIONAL: re-establish/warm the underlying connection so the next write
+   * lands on a live channel. Callers invoke this right before a heavy write
+   * phase that may follow a long compute window with no DB traffic (e.g. the
+   * `--pdg` persist boundary). The remote/gRPC adapter re-readies its channels;
+   * the embedded adapter has no channel to warm and omits it (callers use
+   * `ensureReady?.()` so the absence is a no-op).
+   */
+  ensureReady?(): Promise<void>;
 }

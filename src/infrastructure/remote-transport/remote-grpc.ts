@@ -1,6 +1,10 @@
 import * as grpc from "@grpc/grpc-js";
 
-import { DEFAULT_GRPC_MAX_MESSAGE_BYTES } from "../../platform/utils/limits.js";
+import {
+  DEFAULT_GRPC_MAX_MESSAGE_BYTES,
+  GRPC_KEEPALIVE_TIME_MS,
+  GRPC_KEEPALIVE_TIMEOUT_MS,
+} from "../../platform/utils/limits.js";
 import { loadConnectionProtoPackage } from "./proto-loader.js";
 import type { RpcClientBundle } from "./remote-rpc-client.js";
 
@@ -54,6 +58,13 @@ export function createGrpcClientOptions(
   return {
     "grpc.max_receive_message_length": maxMessageBytes,
     "grpc.max_send_message_length": maxMessageBytes,
+    // Keepalive: ping the server during long idle windows (the --pdg compute gap)
+    // so the channel stays warm and a later write doesn't hit a dropped conn.
+    // `permit_without_calls` is essential — the gap has NO active RPCs.
+    "grpc.keepalive_time_ms": GRPC_KEEPALIVE_TIME_MS,
+    "grpc.keepalive_timeout_ms": GRPC_KEEPALIVE_TIMEOUT_MS,
+    "grpc.keepalive_permit_without_calls": 1,
+    "grpc.http2.max_pings_without_data": 0,
   };
 }
 

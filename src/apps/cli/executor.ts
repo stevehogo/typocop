@@ -19,7 +19,7 @@ import { FileEmbeddingCache } from "../../infrastructure/cache/embedding-cache.j
 import { executeObsidianExport } from "../../application/export-render/index.js";
 import { createFileWatcher, type FileWatcher } from "../../infrastructure/watch/file-watcher.js";
 import { augment } from "../../application/querying/augment.js";
-import { scanRecursionSuspects, formatRecursionReport } from "../../application/querying/recursion-report.js";
+import { scanRecursionSuspects, formatRecursionReport } from "../../application/indexing/recursion-report.js";
 import { stopConnectionServer } from "../../infrastructure/remote-transport/autostart-runtime.js";
 import { mergeTypocopHook, type ClaudeSettings } from "./setup.js";
 import { isTypeEnvEnabled, isLspTypesEnabled, isDataTouchEnabled, isDataTouchEventsEnabled, isDataTouchSingleModelFallbackEnabled, isCallRefuseAmbiguousEnabled, isFrameworkExtractionEnabled, isHeritageDisambiguationEnabled } from "../../platform/utils/limits.js";
@@ -87,6 +87,9 @@ export async function executeIndexingPipeline(
   // the A5 classify/cache step; until that is wired, an incremental run with no
   // delta plan simply does a full INSERT (the MERGE-upsert keeps it correct).
   incremental = true,
+  // Source task #7: opt-in PDG/taint. Threaded from the `--pdg` CLI flag (NOT
+  // env-derived, unlike the wave flags) — default OFF.
+  pdg = false,
 ): Promise<IndexingStats> {
   const prefix = configurationManager.getPrefix();
   console.error(chalk.dim(`[typocop] Effective prefix: ${prefix}`));
@@ -199,6 +202,8 @@ export async function executeIndexingPipeline(
       // Wave 4 (Task 5): derive the refuse-on-ambiguity flag from env. Default
       // OFF (the wave is byte-identical until enabled).
       callRefuseAmbiguous: isCallRefuseAmbiguousEnabled(),
+      // Source task #7: opt-in PDG/taint, threaded from the `--pdg` flag. Default OFF.
+      pdg,
       // Wave 6: derive the framework-extraction flag from env. Default OFF
       // (DELIBERATE DEVIATION from the plan's default-ON, for program-wide
       // consistency + safety); the wave is byte-identical until enabled.
@@ -710,7 +715,7 @@ export async function executeCLI(command: CLICommand): Promise<void> {
       break;
     }
     case "parse": {
-      const { sourcePath, language, verbose, refresh, incremental } = command.config;
+      const { sourcePath, language, verbose, refresh, incremental, pdg } = command.config;
       console.error(chalk.blue(`Initializing indexing for ${language} codebase at ${sourcePath}`));
 
       const initialMessage = refresh
@@ -729,7 +734,7 @@ export async function executeCLI(command: CLICommand): Promise<void> {
           }
         }
 
-        const stats = await executeIndexingPipeline(sourcePath, language, verbose, refresh, incremental);
+        const stats = await executeIndexingPipeline(sourcePath, language, verbose, refresh, incremental, pdg ?? false);
 
         spinner.succeed(chalk.green("Indexing completed successfully."));
 

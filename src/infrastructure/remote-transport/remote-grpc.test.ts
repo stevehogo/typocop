@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
-import { waitForReadyWithRetry } from "./remote-grpc.js";
+import { waitForReadyWithRetry, createGrpcClientOptions } from "./remote-grpc.js";
+import { GRPC_KEEPALIVE_TIME_MS, GRPC_SERVER_MIN_PING_INTERVAL_MS } from "../../platform/utils/limits.js";
 
 /** Fake gRPC client whose `waitForReady` fails the first `failTimes` calls. */
 function fakeClient(failTimes: number): {
@@ -20,6 +21,23 @@ function fakeClient(failTimes: number): {
 }
 
 const instantSleep = vi.fn().mockResolvedValue(undefined);
+
+describe("createGrpcClientOptions", () => {
+  it("sets keepalive so an idle channel stays warm through long compute gaps", () => {
+    const opts = createGrpcClientOptions();
+    expect(opts["grpc.keepalive_time_ms"]).toBe(GRPC_KEEPALIVE_TIME_MS);
+    expect(opts["grpc.keepalive_timeout_ms"]).toBeGreaterThan(0);
+    // permit_without_calls is essential: the idle gap has no active RPCs.
+    expect(opts["grpc.keepalive_permit_without_calls"]).toBe(1);
+    expect(opts["grpc.http2.max_pings_without_data"]).toBe(0);
+    // still carries the message-size limits.
+    expect(opts["grpc.max_receive_message_length"]).toBeGreaterThan(0);
+  });
+
+  it("client ping cadence is not tighter than the server's min ping interval (no GOAWAY)", () => {
+    expect(GRPC_KEEPALIVE_TIME_MS).toBeGreaterThanOrEqual(GRPC_SERVER_MIN_PING_INTERVAL_MS);
+  });
+});
 
 describe("waitForReadyWithRetry", () => {
   it("retries past transient connect failures and resolves once ready", async () => {

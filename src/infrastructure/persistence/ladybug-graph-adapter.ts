@@ -123,6 +123,16 @@ export class LadybugGraphAdapter implements GraphAdapter {
       }
     }
 
+    // ── Plan A: PDG / taint node tables (all props STRING, mirroring Symbol). ──
+    // These live on their OWN node tables (NOT on Symbol) so PDG/taint data never
+    // enters the untyped `(Symbol)-[]->(Symbol)` impact traversal (program HARD RULE).
+    await this.exec(
+      `CREATE NODE TABLE IF NOT EXISTS ${this.prefixLabel("BasicBlock")} (id STRING, functionId STRING, blockIndex STRING, startLine STRING, endLine STRING, kind STRING, PRIMARY KEY(id))`,
+    );
+    await this.exec(
+      `CREATE NODE TABLE IF NOT EXISTS ${this.prefixLabel("TaintFinding")} (id STRING, sinkKind STRING, sourceId STRING, sinkId STRING, sourceLoc STRING, sinkLoc STRING, sanitized STRING, pathJson STRING, PRIMARY KEY(id))`,
+    );
+
     // Rel tables: each connects exactly one FROM table to one TO table (Kùzu requirement)
     const sym = this.prefixLabel("Symbol");
     const cls = this.prefixLabel("Cluster");
@@ -166,6 +176,22 @@ export class LadybugGraphAdapter implements GraphAdapter {
       const tbl = this.prefixType(relType);
       await this.exec(`CREATE REL TABLE IF NOT EXISTS ${tbl} (FROM ${sym} TO ${sym}, confidence STRING, reason STRING)`);
     }
+
+    // ── Plan A: PDG / taint rel tables. FROM/TO labels per the program README
+    // edge table. NONE is Symbol→Symbol except SANITIZES (the documented
+    // exception — declared so the schema is complete, but the solver keeps it
+    // in-memory and never persists it into the default graph). Prop columns MUST
+    // be declared here AND allow-listed in REL_SCHEMA_PROPS below, else Kùzu's
+    // strict per-type allow-list drops them on persist. ──────────────────────
+    const block = this.prefixLabel("BasicBlock");
+    const finding = this.prefixLabel("TaintFinding");
+    await this.exec(`CREATE REL TABLE IF NOT EXISTS ${this.prefixType("HAS_BLOCK")} (FROM ${sym} TO ${block})`);
+    await this.exec(`CREATE REL TABLE IF NOT EXISTS ${this.prefixType("CFG")} (FROM ${block} TO ${block}, edgeKind STRING)`);
+    await this.exec(`CREATE REL TABLE IF NOT EXISTS ${this.prefixType("CDG")} (FROM ${block} TO ${block}, branchSense STRING, guard STRING)`);
+    await this.exec(`CREATE REL TABLE IF NOT EXISTS ${this.prefixType("REACHING_DEF")} (FROM ${block} TO ${block}, variable STRING)`);
+    await this.exec(`CREATE REL TABLE IF NOT EXISTS ${this.prefixType("TAINT_SOURCE")} (FROM ${sym} TO ${finding})`);
+    await this.exec(`CREATE REL TABLE IF NOT EXISTS ${this.prefixType("TAINT_SINK")} (FROM ${finding} TO ${sym})`);
+    await this.exec(`CREATE REL TABLE IF NOT EXISTS ${this.prefixType("SANITIZES")} (FROM ${sym} TO ${sym}, sinkKind STRING)`);
 
     this.schemaInitialized = true;
   }
@@ -241,6 +267,12 @@ export class LadybugGraphAdapter implements GraphAdapter {
     HANDLES_ROUTE: new Set(["confidence", "reason"]),
     PUBLISHES_EVENT: new Set(["confidence", "reason"]),
     SUBSCRIBES_TO: new Set(["confidence", "reason"]),
+    // Plan A: PDG / taint edge props (only listed props are SET on persist).
+    // HAS_BLOCK/TAINT_SOURCE/TAINT_SINK carry no props (default empty Set applies).
+    CFG: new Set(["edgeKind"]),
+    CDG: new Set(["branchSense", "guard"]),
+    REACHING_DEF: new Set(["variable"]),
+    SANITIZES: new Set(["sinkKind"]),
   };
 
   /** Map relationship type to source/target node labels (Kùzu requires labels). */
@@ -263,6 +295,14 @@ export class LadybugGraphAdapter implements GraphAdapter {
     CONTAINS: ["Cluster", "Symbol"],
     HAS_STEP: ["Process", "Symbol"],
     DEPENDS_ON: ["Symbol", "ExternalDependency"],
+    // Plan A: PDG / taint edges (FROM/TO labels per the program README).
+    HAS_BLOCK: ["Symbol", "BasicBlock"],
+    CFG: ["BasicBlock", "BasicBlock"],
+    CDG: ["BasicBlock", "BasicBlock"],
+    REACHING_DEF: ["BasicBlock", "BasicBlock"],
+    TAINT_SOURCE: ["Symbol", "TaintFinding"],
+    TAINT_SINK: ["TaintFinding", "Symbol"],
+    SANITIZES: ["Symbol", "Symbol"],
   };
 
   async createRelationship(
@@ -316,13 +356,25 @@ export class LadybugGraphAdapter implements GraphAdapter {
 
     // Flatten each row to { fromId, toId, <allowed props> } so the prepared
     // statement binds a uniform struct shape.
-    const rels = relationships.map((rel) => {
+    //
+    // De-dup by (fromId, toId), keeping the LAST occurrence. This is load-bearing:
+    // LadybugDB SEGFAULTS when a single `UNWIND $rels ... MERGE (a)-[r]->(b)`
+    // batch contains two rows with the same endpoint pair — the second MERGE tries
+    // to match a relationship created earlier in the *same* UNWIND execution and
+    // crashes the native engine (observed on CDG, which emits multiple
+    // control-dependence edges between one block pair). Keeping the last row is
+    // semantically identical to what the MERGE would net out to anyway (ON CREATE
+    // then ON MATCH SET both overwrite with the later row's props), so this is a
+    // pure crash-safety guard, not a behavior change for callers without dups.
+    const byPair = new Map<string, Record<string, unknown>>();
+    for (const rel of relationships) {
       const flat: Record<string, unknown> = { fromId: rel.fromId, toId: rel.toId };
       for (const p of props) {
         flat[p] = rel.properties?.[p];
       }
-      return flat;
-    });
+      byPair.set(`${rel.fromId}\u0000${rel.toId}`, flat);
+    }
+    const rels = [...byPair.values()];
 
     // NOTE: Kùzu rejects struct-field access inside a node-pattern property map
     // (e.g. `(a {id: rel.fromId})`) for an UNWIND'd struct param — it throws
@@ -446,8 +498,8 @@ export class LadybugGraphAdapter implements GraphAdapter {
   }
 
   /** Known node labels and relationship types that need prefixing in raw Cypher. */
-  private static readonly KNOWN_LABELS = ["Symbol", "Cluster", "Process", "Metadata", "ExternalDependency"];
-  private static readonly KNOWN_REL_TYPES = ["CALLS", "IMPORTS", "INHERITS", "IMPLEMENTS", "CONTAINS", "HAS_STEP", "REFERENCES", "DEFINES", "DEPENDS_ON", "OVERRIDES", "METHODIMPLEMENTS", "READS_FROM_DB", "WRITES_TO_DB", "HANDLES_ROUTE", "PUBLISHES_EVENT", "SUBSCRIBES_TO"];
+  private static readonly KNOWN_LABELS = ["Symbol", "Cluster", "Process", "Metadata", "ExternalDependency", "BasicBlock", "TaintFinding"];
+  private static readonly KNOWN_REL_TYPES = ["CALLS", "IMPORTS", "INHERITS", "IMPLEMENTS", "CONTAINS", "HAS_STEP", "REFERENCES", "DEFINES", "DEPENDS_ON", "OVERRIDES", "METHODIMPLEMENTS", "READS_FROM_DB", "WRITES_TO_DB", "HANDLES_ROUTE", "PUBLISHES_EVENT", "SUBSCRIBES_TO", "HAS_BLOCK", "CFG", "CDG", "REACHING_DEF", "TAINT_SOURCE", "TAINT_SINK", "SANITIZES"];
 
   /**
    * Inject prefix into bare node labels and relationship types in a Cypher query.
