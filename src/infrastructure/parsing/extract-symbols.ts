@@ -6,6 +6,13 @@ import { LANGUAGE_QUERIES } from "./queries.js";
 import { generateSymbolId } from "./symbol-id.js";
 import { generateLogicalKey, OrdinalAllocator } from "./logical-key.js";
 import { computeComplexity } from "./complexity.js";
+import { extractNamedBindings } from "./named-bindings.js";
+import { countCallArguments, extractCallArgumentTexts, inferCallForm, type CallForm } from "./call-extractors.js";
+import { extractMethodSignature, extractParameterNames } from "./signature.js";
+import { isNodeExported } from "./export-detection.js";
+import { isTypeEnvEnabled, isHeritageDisambiguationEnabled } from "../../platform/utils/limits.js";
+import { buildTypeEnv, type TypeEnvironment } from "./type-env/type-env.js";
+import { typeConfigs } from "./type-env/extractors/index.js";
 
 /**
  * `@definition.*` capture suffixes that denote a callable (function / method /
@@ -46,6 +53,84 @@ export interface RawRelationshipHint {
    * true caller and lets chain-binding thread `returnType` through `a.b().c()`.
    */
   readonly enclosingSymbolId?: string;
+  /**
+   * Wave 3 (Tier B): for a member call `recv.method(...)` whose `recv` is a BARE
+   * local identifier (not `this`/`self`/a chain — those are handled by
+   * `resolveReceiverType`), the receiver variable's resolved type NAME from the
+   * per-file AST type-env (`typeEnv.lookup`). Phase 3 resolves it via
+   * `typeNameToSymbol` and searches `methodsByOwner`+`mroLinear` BEFORE the
+   * receiver-text path. Only populated when the Tier-B flag (`TYPOCOP_TYPE_ENV`)
+   * is on AND the language has a registered type-extractor config. Transient —
+   * NEVER persisted on a Symbol/Relationship.
+   * MUST stay structurally mirrored in `CachedRelationshipHint`
+   * (`core/ports/index-cache.ts`) or it is dropped on the incremental path.
+   */
+  readonly receiverType?: string;
+  // ── Wave 4 call-resolution precision carriers (OPTIONAL; additive; `call`) ──
+  /**
+   * Wave 4: the number of DIRECT arguments at the call site, computed by
+   * {@link countCallArguments}. `undefined` (NEVER `0`) when the argument
+   * container can't be located cheaply — that `undefined` is the signal Phase 3's
+   * arity filter uses to SKIP arity narrowing for this call entirely. Lets the
+   * resolver disambiguate same-name overloads by `parameterCount === argCount`.
+   * Absent for non-call hints.
+   * MUST stay structurally mirrored in `CachedRelationshipHint`
+   * (`core/ports/index-cache.ts`) or it is dropped on the incremental path.
+   */
+  readonly argCount?: number;
+  /**
+   * Wave 4: the call-site form (`free` / `member` / `constructor`), computed by
+   * {@link inferCallForm}. Lets Phase 3's callable-kind filter target the right
+   * kinds (constructor-form calls resolve to the `class`, others to
+   * `function`/`method`). `undefined` when the form can't be determined. Absent
+   * for non-call hints.
+   * MUST stay structurally mirrored in `CachedRelationshipHint`
+   * (`core/ports/index-cache.ts`) or it is dropped on the incremental path.
+   */
+  readonly callForm?: CallForm;
+  /**
+   * Raw source text of the enclosing `@call` node (e.g. `$this->getTransId(self::TRANS_ID)`).
+   * Used by the self-recursion report's "Buggy call" column. Absent when the call
+   * node can't be located (same fallback path as `argCount`). Recompute-only: NOT
+   * mirrored in `CachedRelationshipHint`, so it is intentionally dropped on the
+   * incremental parse-cache path (the self-recursion command never reads the cache).
+   */
+  readonly callText?: string;
+  /**
+   * True when this is a SELF-receiver call (`this`/`self`/`$this`) that passes
+   * its enclosing callable's parameters unchanged — no argument progress. Feeds
+   * the self-recursion report's "no-progress" signal (infinite recursion that no
+   * override/arity signal can see). Recompute-only: NOT mirrored in
+   * `CachedRelationshipHint`. Absent ⇒ treated as false.
+   */
+  readonly selfCallNoProgress?: boolean;
+  // ── Wave 1 named-binding carrier (OPTIONAL; additive; `import` hints only) ──
+  /**
+   * For a named import (`import { User as U } from './models'`): the
+   * `{ local, exported }` pairs extracted from the import AST node. `local` is
+   * the name visible in the importing file; `exported` is the original name in
+   * the source file. Lets Phase 3 populate `namedImportMap` so `walkBindingChain`
+   * (Tier 2a-named) fires for aliases + re-export chains. Absent for default /
+   * namespace / wildcard / side-effect imports (and for non-import hints).
+   * MUST stay structurally mirrored in `CachedRelationshipHint`
+   * (`core/ports/index-cache.ts`) or it is dropped on the incremental path.
+   */
+  readonly namedBindings?: { local: string; exported: string }[];
+  // ── Wave 7 (§3.1, Task 4) heritage-flavor carrier (OPTIONAL; additive) ──────
+  /**
+   * For a heritage hint produced by Go anonymous struct embedding or a Ruby
+   * `include`/`extend`/`prepend` mixin, the heritage FLAVOR. The hint `kind`
+   * stays the existing `inherits` (Go embedding) / `implements` (Ruby mixins) —
+   * NO new hint kind / relType is introduced. Phase 3 carries this onto the
+   * emitted edge's `metadata.heritage` so the `extend`-vs-`include`/`prepend`
+   * distinction (singleton vs instance methods → different MRO position) is
+   * recorded. Only populated when the Wave-7 heritage flag
+   * (`TYPOCOP_HERITAGE_DISAMBIGUATION`) is on in Phase 2; absent for ordinary
+   * `extends`/`implements` heritage and all non-heritage hints.
+   * MUST stay structurally mirrored in `CachedRelationshipHint`
+   * (`core/ports/index-cache.ts`) or it is dropped on the incremental path.
+   */
+  readonly heritageKind?: "embed" | "include" | "extend" | "prepend";
 }
 
 /** Combined result of query-based extraction */
@@ -239,11 +324,40 @@ export function extractSymbolsWithQueries(
   const symbols: Symbol[] = [];
   const hints: RawRelationshipHint[] = [];
 
+  // ── Wave 3 (Tier B): per-file AST type-env ──────────────────────────────────
+  // Built ONCE per file, lazily, ONLY when the Tier-B flag is on AND the language
+  // has a registered type-extractor config. Reuses the already-parsed tree (NO
+  // re-parse). Phase 2 has no global symbol index, so it passes localClassNames
+  // only (no cross-file source) — the common `new User()` case resolves locally;
+  // cross-file ctor verification is deferred to Phase 3. When the flag is off the
+  // env is never built and `receiverType` is never populated → byte-identical.
+  const typeEnvEnabled = isTypeEnvEnabled() && typeConfigs[language] !== undefined;
+  // ── Wave 7 (§3.1, Task 4): heritage-disambiguation flag, read IN-WORKER ─────
+  // Parse workers inherit `process.env`, so the worker and in-process paths
+  // agree (precedent: isTypeEnvEnabled / isFrameworkExtractionEnabled). Gates the
+  // Go anonymous-struct-embedding guard (skip NAMED fields) + the Ruby
+  // include/extend/prepend mixin heritage emission. When OFF, Go heritage emission
+  // is byte-identical to today (named fields still emit, as they do now) and Ruby
+  // mixins are never emitted as heritage → BYTE-IDENTICAL golden output.
+  const heritageDisambiguation = isHeritageDisambiguationEnabled();
+  let typeEnv: TypeEnvironment | undefined;
+  const getTypeEnv = (): TypeEnvironment => {
+    if (typeEnv === undefined) typeEnv = buildTypeEnv(tree, language);
+    return typeEnv;
+  };
+
   for (const match of matches) {
     const nameCapture = match.captures.find((c) => c.name === "name");
     const defCapture = match.captures.find((c) => c.name.startsWith("definition."));
     const importSourceCapture = match.captures.find((c) => c.name === "import.source");
+    // Full import statement node (`@import`) — used for named-binding extraction
+    // (Wave 1). Present alongside `@import.source` in every language's import
+    // pattern, so no query change is needed.
+    const importStmtCapture = match.captures.find((c) => c.name === "import");
     const callNameCapture = match.captures.find((c) => c.name === "call.name");
+    // Wave 4: the enclosing `@call` node (paired with every `@call.name` capture
+    // in the queries) — the call-form / argument-count classifiers run on it.
+    const callCapture = match.captures.find((c) => c.name === "call");
     const memberAccessCapture = match.captures.find((c) => c.name === "member.access");
     const memberObjectCapture = match.captures.find((c) => c.name === "member.object");
     const heritageExtendsCapture = match.captures.find((c) => c.name === "heritage.extends");
@@ -252,6 +366,12 @@ export function extractSymbolsWithQueries(
       (c) => c.name === "heritage.implements" || c.name === "heritage.trait",
     );
     const heritageClassCapture = match.captures.find((c) => c.name === "heritage.class");
+    // Wave 7 (§3.1, Task 4): Ruby include/extend/prepend mixin captures. The
+    // module constant being mixed in (`@heritage.mixin`) + the verb identifier
+    // (`@heritage.mixin_verb`). A mixin call has NO `heritage.class` anchor in the
+    // same match — the enclosing class/module is derived by a parent walk below.
+    const heritageMixinCapture = match.captures.find((c) => c.name === "heritage.mixin");
+    const heritageMixinVerbCapture = match.captures.find((c) => c.name === "heritage.mixin_verb");
 
     // ── Definition symbols ──────────────────────────────────────────────────
     if (nameCapture && defCapture) {
@@ -274,9 +394,17 @@ export function extractSymbolsWithQueries(
       // concrete value so non-callable symbols (and symbols where the grammar
       // exposes nothing useful) carry no empty keys — keeping the Symbol shape
       // identical to pre-E1 wherever no info exists (golden output unchanged).
-      const parameterCount = extractParameterCount(defNode);
-      const returnType = extractReturnType(defNode);
+      // Wave 2 (1.2): one variadic-aware signature pass replaces the old
+      // extractParameterCount/extractReturnType pair — variadic arities yield
+      // `parameterCount: undefined`, which the conditional spread below drops.
+      const { parameterCount, returnType } = extractMethodSignature(defNode);
       const ownerId = extractOwnerId(defNode, filePath);
+
+      // Wave 2 (1.3): per-language export detection — ORTHOGONAL to
+      // `visibility` below. `isNodeExported` always returns a concrete boolean
+      // for a known language, so the field is always attached for definition
+      // symbols (the PARSE_VERSION bump re-emits warm-cache files).
+      const isExported = isNodeExported(defNode, name, language);
 
       // E2: complexity is only meaningful for callables (function/method/
       // constructor). Computed as a pure subtree walk over the live tree-sitter
@@ -312,6 +440,7 @@ export function extractSymbolsWithQueries(
         ...(returnType !== undefined ? { returnType } : {}),
         ...(ownerId !== undefined ? { ownerId } : {}),
         ...(complexity !== undefined ? { complexity } : {}),
+        isExported,
       });
     }
 
@@ -319,12 +448,20 @@ export function extractSymbolsWithQueries(
     if (importSourceCapture) {
       const raw = importSourceCapture.node.text.replace(/['"]/g, "").trim();
       if (raw) {
+        // Wave 1: extract named bindings (`import { User as U }`) from the full
+        // import node so Phase 3 can populate `namedImportMap` (Tier 2a-named).
+        // Only attach when non-empty so default/namespace/wildcard imports keep
+        // the pre-wave hint shape (golden output unchanged).
+        const namedBindings = importStmtCapture
+          ? extractNamedBindings(importStmtCapture.node, language)
+          : undefined;
         hints.push({
           kind: "import",
           sourceFile: filePath,
           targetName: raw,
           startLine: importSourceCapture.node.startPosition.row,
           language,
+          ...(namedBindings !== undefined ? { namedBindings } : {}),
         });
       }
     }
@@ -338,6 +475,32 @@ export function extractSymbolsWithQueries(
         // and chain binding. Both optional — bare `fn()` carries no receiver.
         const receiverText = extractReceiverText(callNameCapture.node);
         const enclosingSymbolId = extractEnclosingSymbolId(callNameCapture.node, filePath);
+        // Wave 3 (Tier B): for a BARE local receiver (not this/self/chained —
+        // those are handled by resolveReceiverType), resolve its type via the
+        // per-file type-env so Phase 3 can target the right owning method.
+        const receiverType =
+          typeEnvEnabled && receiverText !== undefined && isBareReceiver(receiverText)
+            ? getTypeEnv().lookup(receiverText, callNameCapture.node)
+            : undefined;
+        // Wave 4: the call node is the `@call` capture (paired with `@call.name`
+        // in every query); fall back to the name node's parent chain on the rare
+        // path where only `@call.name` is present. `argCount` stays `undefined`
+        // (not `0`) when the argument container can't be located — the resolver's
+        // arity filter relies on that to skip narrowing. `callForm` discriminates
+        // free/member/constructor for the callable-kind filter.
+        const callNode = callCapture?.node ?? findEnclosingCallNode(callNameCapture.node);
+        const argCount = countCallArguments(callNode);
+        const callForm = callNode ? inferCallForm(callNode, callNameCapture.node) : undefined;
+        // Raw source of the call node for the self-recursion report's "Buggy call"
+        // column. Same fallback path as `argCount`: absent when the node is missing.
+        const callText = callNode ? callNode.text : undefined;
+        // Self-recursion "no-progress" signal: only computed for self-receiver
+        // calls (cheap guard), true when the call re-passes the enclosing
+        // callable's parameters unchanged.
+        const selfCallNoProgress =
+          receiverText !== undefined && SELF_RECEIVER_TEXTS.has(receiverText.trim())
+            ? selfCallMakesNoProgress(callNode, callNameCapture.node)
+            : false;
         hints.push({
           kind: "call",
           sourceFile: filePath,
@@ -346,6 +509,11 @@ export function extractSymbolsWithQueries(
           language,
           ...(receiverText !== undefined ? { receiverText } : {}),
           ...(enclosingSymbolId !== undefined ? { enclosingSymbolId } : {}),
+          ...(receiverType !== undefined ? { receiverType } : {}),
+          ...(argCount !== undefined ? { argCount } : {}),
+          ...(callForm !== undefined ? { callForm } : {}),
+          ...(callText !== undefined ? { callText } : {}),
+          ...(selfCallNoProgress ? { selfCallNoProgress } : {}),
         });
       }
     }
@@ -381,14 +549,34 @@ export function extractSymbolsWithQueries(
 
     // ── Heritage hints ──────────────────────────────────────────────────────
     if (heritageExtendsCapture && heritageClassCapture) {
-      hints.push({
-        kind: "inherits",
-        sourceFile: filePath,
-        targetName: heritageExtendsCapture.node.text.trim(),
-        childSymbolId: heritageClassCapture.node.text.trim(),
-        startLine: heritageExtendsCapture.node.startPosition.row,
-        language,
-      });
+      // Wave 7 (§3.1, Task 4): Go struct embedding is an ANONYMOUS field
+      // (`type Dog struct { Animal }`). A `field_declaration` that HAS a `name`
+      // child (`name string`) is an ordinary field, NOT inheritance — skip it.
+      // Only flag-gated (default OFF) so today's behaviour (named fields also
+      // emit a spurious `inherits`) stays byte-identical when the flag is off.
+      // Non-Go languages are unaffected (their extends captures aren't under a
+      // `field_declaration`). When this is an embedded field, tag the hint with
+      // `heritageKind: "embed"` so Phase 3 records it on the edge metadata.
+      let isGoNamedField = false;
+      let isGoEmbed = false;
+      if (heritageDisambiguation && language === "go") {
+        const fieldDecl = heritageExtendsCapture.node.parent;
+        if (fieldDecl?.type === "field_declaration") {
+          if (fieldDecl.childForFieldName("name")) isGoNamedField = true;
+          else isGoEmbed = true;
+        }
+      }
+      if (!isGoNamedField) {
+        hints.push({
+          kind: "inherits",
+          sourceFile: filePath,
+          targetName: heritageExtendsCapture.node.text.trim(),
+          childSymbolId: heritageClassCapture.node.text.trim(),
+          startLine: heritageExtendsCapture.node.startPosition.row,
+          language,
+          ...(isGoEmbed ? { heritageKind: "embed" as const } : {}),
+        });
+      }
     }
 
     if (heritageImplCapture && heritageClassCapture) {
@@ -400,6 +588,36 @@ export function extractSymbolsWithQueries(
         startLine: heritageImplCapture.node.startPosition.row,
         language,
       });
+    }
+
+    // ── Wave 7 (§3.1, Task 4): Ruby include/extend/prepend mixin heritage ─────
+    // A mixin call (`include M`) has no `heritage.class` anchor in its match, so
+    // the enclosing class/module name is derived by a parent walk. Emitted as an
+    // `implements` hint (mixins are interface/trait-style contracts → their
+    // methods become `methodImplements` targets). The verb (include/extend/
+    // prepend) is recorded as `heritageKind` so the `extend` (singleton) vs
+    // include/prepend (instance) distinction is preserved on the edge metadata.
+    // Flag-gated (default OFF) so today's behaviour (mixins fall through to the
+    // generic `call` capture only) stays byte-identical when the flag is off.
+    if (heritageDisambiguation && heritageMixinCapture && heritageMixinVerbCapture) {
+      const enclosing = enclosingRubyTypeName(heritageMixinCapture.node);
+      const mixinName = heritageMixinCapture.node.text.trim();
+      const verb = heritageMixinVerbCapture.node.text.trim();
+      if (
+        enclosing &&
+        mixinName &&
+        (verb === "include" || verb === "extend" || verb === "prepend")
+      ) {
+        hints.push({
+          kind: "implements",
+          sourceFile: filePath,
+          targetName: mixinName,
+          childSymbolId: enclosing,
+          startLine: heritageMixinCapture.node.startPosition.row,
+          language,
+          heritageKind: verb,
+        });
+      }
     }
   }
 
@@ -435,67 +653,10 @@ function assignLogicalKeys(symbols: Symbol[]): Symbol[] {
 }
 
 // ─── E1 callable / call metadata extraction (language-agnostic, best-effort) ──
-
-/** Parameter-list node types across the supported grammars. */
-const PARAM_LIST_TYPES: ReadonlySet<string> = new Set([
-  "formal_parameters",   // ts/js
-  "parameters",          // python, rust, go (params)
-  "parameter_list",      // java, c#, go, c, cpp
-  "argument_list",       // python class superclasses (not params — excluded by child filter)
-]);
-
-/** Child node types that count as a single declared parameter. */
-const PARAM_NODE_TYPES: ReadonlySet<string> = new Set([
-  "required_parameter", "optional_parameter", "parameter", "formal_parameter",
-  "spread_parameter", "typed_parameter", "default_parameter",
-  "typed_default_parameter", "self_parameter", "variadic_parameter",
-  "simple_parameter", "property_promotion_parameter",
-]);
-
-/**
- * Count declared parameters of a callable definition node. Returns `undefined`
- * when the node exposes no recognisable parameter list (so non-callables and
- * grammars we don't model carry no `parameterCount`). Best-effort and additive —
- * never affects which edges are emitted.
- */
-function extractParameterCount(defNode: Parser.SyntaxNode): number | undefined {
-  const list = defNode.namedChildren.find(
-    (c) => PARAM_LIST_TYPES.has(c.type) && c.type !== "argument_list",
-  ) ?? findDescendantParamList(defNode);
-  if (!list) return undefined;
-  let count = 0;
-  for (const child of list.namedChildren) {
-    if (PARAM_NODE_TYPES.has(child.type) || child.type.endsWith("_parameter")) count++;
-    else if (child.type === "identifier" || child.type === "typed_parameter") count++;
-  }
-  return count;
-}
-
-/** Shallow search for a parameter list nested one level down (e.g. C/C++ declarators). */
-function findDescendantParamList(defNode: Parser.SyntaxNode): Parser.SyntaxNode | undefined {
-  for (const child of defNode.namedChildren) {
-    const nested = child.namedChildren.find(
-      (c) => PARAM_LIST_TYPES.has(c.type) && c.type !== "argument_list",
-    );
-    if (nested) return nested;
-  }
-  return undefined;
-}
-
-/**
- * Extract the raw return-type text of a callable definition node, if the grammar
- * annotates one (TS `: T`, Python `-> T`, Rust `-> T`, etc.). Returns `undefined`
- * otherwise. The text is trimmed of a leading `:`/`->` marker.
- */
-function extractReturnType(defNode: Parser.SyntaxNode): string | undefined {
-  // tree-sitter exposes the return type via a `return_type` field on most
-  // grammars; fall back to a `type_annotation` named child (TS arrow/lexical).
-  const byField = defNode.childForFieldName("return_type");
-  const node = byField ?? defNode.namedChildren.find((c) => c.type === "type_annotation");
-  if (!node) return undefined;
-  const text = node.text.replace(/^\s*(?::|->)\s*/, "").trim();
-  return text.length > 0 ? text : undefined;
-}
+//
+// Parameter-count + return-type extraction moved to `signature.ts` in Wave 2
+// (1.2) — `extractMethodSignature` adds variadic detection + broad return-type
+// coverage. `ownerId`/receiver/enclosing helpers remain here.
 
 /** Definition node types that own methods/constructors (E1 `ownerId`). */
 const OWNER_NODE_TYPES: ReadonlySet<string> = new Set([
@@ -549,6 +710,29 @@ function extractOwnerId(defNode: Parser.SyntaxNode, filePath: string): string | 
  * a bare-identifier call. Best-effort across grammars — looks one level up at the
  * member-access node and takes its object/leading child.
  */
+/**
+ * Wave 4 fallback: locate the enclosing call node for a `@call.name` node when no
+ * sibling `@call` capture is present (rare — the queries pair them). Walks up at
+ * most a few levels to the nearest call-expression-like node and returns it (or
+ * `undefined`). `countCallArguments` / `inferCallForm` then run on it.
+ */
+function findEnclosingCallNode(callNameNode: Parser.SyntaxNode): Parser.SyntaxNode | undefined {
+  const CALL_NODE_TYPES = new Set([
+    "call_expression", "call", "method_invocation", "function_call_expression",
+    "member_call_expression", "nullsafe_member_call_expression", "scoped_call_expression",
+    "object_creation_expression", "new_expression", "constructor_invocation",
+    "implicit_object_creation_expression", "composite_literal", "struct_expression",
+    "qualified_identifier",
+  ]);
+  let cur: Parser.SyntaxNode | null = callNameNode.parent;
+  // Bounded walk: call name → (member/access wrapper) → call node.
+  for (let depth = 0; cur && depth < 3; depth++) {
+    if (CALL_NODE_TYPES.has(cur.type)) return cur;
+    cur = cur.parent;
+  }
+  return undefined;
+}
+
 function extractReceiverText(callNameNode: Parser.SyntaxNode): string | undefined {
   const access = callNameNode.parent;
   if (!access) return undefined;
@@ -568,29 +752,87 @@ function extractReceiverText(callNameNode: Parser.SyntaxNode): string | undefine
   return text && text.length > 0 ? text : undefined;
 }
 
+const DEF_TYPES = new Set([
+  "function_declaration", "function_definition", "function_item",
+  "method_definition", "method_declaration", "constructor_declaration",
+  "arrow_function", "function_expression", "local_function_statement",
+]);
+
+/** Self-receiver tokens (raw, incl. PHP `$this`) — gates the no-progress probe. */
+const SELF_RECEIVER_TEXTS = new Set(["this", "self", "$this"]);
+
+/** The nearest enclosing callable-definition node, or undefined at module top level. */
+function findEnclosingDefNode(callNameNode: Parser.SyntaxNode): Parser.SyntaxNode | undefined {
+  let cur = callNameNode.parent;
+  while (cur) {
+    if (DEF_TYPES.has(cur.type)) return cur;
+    cur = cur.parent;
+  }
+  return undefined;
+}
+
 /**
  * Walk up from a call site to the nearest enclosing definition node and return
  * its intra-run `id` (E1 `enclosingSymbolId`). Returns `undefined` for calls at
  * module top level (no enclosing definition).
  */
 function extractEnclosingSymbolId(callNameNode: Parser.SyntaxNode, filePath: string): string | undefined {
-  const DEF_TYPES = new Set([
-    "function_declaration", "function_definition", "function_item",
-    "method_definition", "method_declaration", "constructor_declaration",
-    "arrow_function", "function_expression", "local_function_statement",
-  ]);
-  let cur = callNameNode.parent;
+  const def = findEnclosingDefNode(callNameNode);
+  if (!def) return undefined;
+  const nameNode = nameNodeOf(def);
+  if (!nameNode) return undefined;
+  return generateSymbolId(filePath, nameNode.text.trim(), nameNode.startPosition.row, nameNode.startPosition.column);
+}
+
+/**
+ * Whether a self-receiver call passes its enclosing callable's parameters
+ * UNCHANGED — i.e. makes no argument progress (the hallmark of self-shadowing /
+ * infinite recursion, e.g. `$this->f()` in a 0-param `f`, or `this.f(x)` in
+ * `f(x)`). Compares the call's argument texts to the enclosing callable's
+ * parameter identifier texts, positionally; both empty counts as no progress.
+ * Returns false (never throws) whenever either side can't be determined, so an
+ * imperfect extraction can only MISS, never produce a false positive.
+ */
+function selfCallMakesNoProgress(
+  callNode: Parser.SyntaxNode | undefined,
+  callNameNode: Parser.SyntaxNode,
+): boolean {
+  const def = findEnclosingDefNode(callNameNode);
+  if (!def) return false;
+  const params = extractParameterNames(def);
+  const args = extractCallArgumentTexts(callNode);
+  if (params === undefined || args === undefined) return false;
+  if (params.length !== args.length) return false;
+  return params.every((p, i) => p === args[i]);
+}
+
+/**
+ * Whether a receiver expression is a BARE local-variable identifier — the only
+ * form the Wave-3 type-env fallback handles in Phase 2. Excludes `this`/`self`/
+ * `$this` and chained/`this.field` forms (those are covered by
+ * `resolveReceiverType` in Phase 3 — avoid double-handling, per the precision
+ * guardrail). Allows a leading `$` for PHP variables (`$repo`).
+ */
+function isBareReceiver(receiverText: string): boolean {
+  const text = receiverText.trim();
+  if (text === "this" || text === "self" || text === "$this") return false;
+  return /^\$?[A-Za-z_][\w$]*$/.test(text);
+}
+
+/**
+ * Wave 7 (§3.1, Task 4): walk up from a Ruby mixin-call node to the nearest
+ * enclosing `class`/`module` and return its NAME (the constant). Returns
+ * `undefined` for a top-level mixin (no enclosing type), so it is skipped. Used
+ * to anchor `include`/`extend`/`prepend` heritage to the class that receives it.
+ */
+function enclosingRubyTypeName(node: Parser.SyntaxNode): string | undefined {
+  let cur: Parser.SyntaxNode | null = node.parent;
   while (cur) {
-    if (DEF_TYPES.has(cur.type)) {
-      const nameNode = nameNodeOf(cur);
-      if (nameNode) {
-        return generateSymbolId(
-          filePath,
-          nameNode.text.trim(),
-          nameNode.startPosition.row,
-          nameNode.startPosition.column,
-        );
-      }
+    if (cur.type === "class" || cur.type === "module") {
+      const nameNode = cur.childForFieldName("name");
+      const text = nameNode?.text.trim();
+      if (text) return text;
+      return undefined;
     }
     cur = cur.parent;
   }

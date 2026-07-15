@@ -75,7 +75,56 @@ export interface Symbol {
    * `shape_check` to flag reads of keys no route returns.
    */
   readonly accessedKeys?: readonly string[];
+  // ── Wave 2 export-detection carrier (OPTIONAL; additive) ─────────────────
+  /**
+   * Whether the symbol is exported/public in its language, as determined by the
+   * per-language export-detection table (`infrastructure/parsing/export-detection.ts`).
+   * ORTHOGONAL to {@link visibility} — `isExported` answers "is this reachable
+   * from outside its module/file?" (TS `export`, Go uppercase, Rust `pub`,
+   * Python non-`_`, C non-`static`), whereas `visibility` answers the
+   * access-modifier axis (`public`/`private`/…). Absent ⇒ consumers fall back to
+   * the pre-Wave-2 `visibility === "public"` heuristic (golden output unchanged).
+   * Feeds the entry-point export ×2 multiplier and dead-code detection.
+   */
+  readonly isExported?: boolean;
+  // ── Wave 2 entry-point classification carriers (OPTIONAL; additive) ──────
+  /**
+   * Classification of an entry-point symbol (1.1). Populated only for symbols
+   * that score above the entry-point threshold; absent everywhere else, so the
+   * Symbol shape stays pre-Wave-2 identical. Persisted as the `entryPointKind`
+   * node prop.
+   */
+  readonly entryPointKind?: EntryPointKind;
+  /**
+   * Human-readable explainability trail for an entry-point symbol's score (1.1),
+   * e.g. `base:2.00, exported, entry-pattern, framework:nextjs-api-route`.
+   * Populated alongside {@link entryPointKind}; persisted as the
+   * `entryPointReason` node prop.
+   */
+  readonly entryPointReason?: string;
+  // ── Wave 5 synthetic-Symbol tag (OPTIONAL; additive) ─────────────────────
+  /**
+   * `true` for Symbols MINTED by the data-touch pass to stand in for entities
+   * that have no source-code Symbol of their own — a DB table reached only via
+   * an ORM call (id `dbmodel:<table>`, `kind:"class"`) or an HTTP endpoint with
+   * no framework route Symbol (id `apiendpoint:<METHOD>:<path>`, `kind:"function"`).
+   * They exist purely as edge anchors for the graph; they are EXCLUDED from
+   * clustering (`clustering/graph.ts`) and from the embed/keyword search loop
+   * (`search/index.ts`) so they never pollute community membership or vectors.
+   * Persisted as a STRING node prop (`"true"`/absent). Absent ⇒ a real,
+   * source-derived Symbol; the shape stays pre-Wave-5 identical.
+   */
+  readonly synthetic?: boolean;
 }
+
+/**
+ * Entry-point kind classification (Wave 2, 1.1). Produced by
+ * `inferEntryPointKind` (`platform/utils/entry-point-names.ts`) from a symbol's
+ * name, file path, and scoring reasons. Surfaced on {@link Symbol.entryPointKind}
+ * and persisted as a node property.
+ */
+export type EntryPointKind =
+  | "main" | "route" | "task" | "event" | "lifecycle" | "test";
 
 /**
  * Complexity metrics for a callable symbol (E2). Computed as a pure tree-sitter
@@ -112,7 +161,17 @@ export type RelationType =
   //   via the linearised (C3/MRO) ancestor chain. NEVER replaces `inherits`.
   // `methodImplements`: a concrete method satisfies an interface/trait method
   //   contract. NEVER replaces `implements`.
-  | "overrides" | "methodImplements";
+  | "overrides" | "methodImplements"
+  // ── Wave 5 data-touch / route / event edges (ADDITIVE) ───────────────────
+  // Emitted by the post-resolution data-touch pass (heuristic detection over the
+  // resolved `calls` graph). Each carries `metadata.confidence` (stringified
+  // float) + `metadata.reason`. They map to snake_case Cypher REL tables via an
+  // explicit relType→label map (camelCase does NOT round-trip through
+  // `toUpperCase()`), and each needs a `CREATE REL TABLE` + allow-list entry in
+  // the persistence DDL (the graph schema is fixed, not flexible — arbitrary
+  // edge props are dropped). `publishesEvent`/`subscribesTo` are declared so the
+  // flow BFS can traverse them, but their heuristic detector is flag-gated OFF.
+  | "readsFromDb" | "writesToDb" | "handlesRoute" | "publishesEvent" | "subscribesTo";
 
 export interface Relationship {
   readonly id: string;
@@ -257,6 +316,15 @@ export interface MCPToolResponse {
     responseKeys?: readonly string[];
     /** Consumer-read keys (consumer symbols, shape_check only). */
     accessedKeys?: readonly string[];
+    // ── Wave 8 (T7) edge confidence (ADDITIVE; populated by confidence-aware
+    //    tools — trace_data_flow / impact_analysis with a minConfidence). ──────
+    /**
+     * `[0,1]` confidence of the edge that pulled this symbol into the result,
+     * read off the relationship's `metadata.confidence` (data-touch edges carry
+     * it; CALLS edges do not). Absent for symbols reached via a confidence-less
+     * edge, so the wire shape is unchanged when no edge confidence exists.
+     */
+    edgeConfidence?: number;
   }>;
   clusters: Array<{
     id: string;
@@ -372,6 +440,164 @@ export interface MCPToolResponse {
     counterexample?: string;
     /** The actual answer surfaced on a refute (OQ3): caller set, hop path, … */
     trueAnswer?: string;
+  };
+  // ── Guarded read-only Cypher (ADDITIVE; only populated by `query_graph`,
+  //    Wave 8 · T9). Absent for all other tools → wire contract unchanged. ────
+  /**
+   * Raw rows from a guarded, read-only, row-capped Cypher query. `ok` is false
+   * when the query was rejected pre-execution (a write/DDL/multi-statement
+   * input never runs); `unsupported` then carries the reason. `labels[]` / rel
+   * `type` strings in rows have the persisted node/edge-label prefix stripped.
+   */
+  queryGraph?: {
+    /** True when the query passed the read-only guardrails and executed. */
+    ok: boolean;
+    /** Returned rows (column-alias → value), capped at `limit`. */
+    rows: ReadonlyArray<Record<string, unknown>>;
+    /** Number of rows returned. */
+    rowCount: number;
+    /** Effective row cap applied. */
+    limit: number;
+    /** True when rows were truncated to the cap. */
+    truncated: boolean;
+    /** Rejection reason when `ok` is false (prefixed `unsupported: …`). */
+    unsupported?: string;
+  };
+  // ── Heritage / MRO (ADDITIVE; only populated by `get_symbol_context` for a
+  //    class/interface/method target, Wave 8 · T6). Absent for all other tools
+  //    and for symbols with no heritage edges → wire contract unchanged. ──────
+  /**
+   * Inheritance / interface-implementation context for a symbol, reconstructed
+   * from the PERSISTED graph edges (INHERITS/IMPLEMENTS for the ancestor chain;
+   * OVERRIDES/METHODIMPLEMENTS for a method's resolved targets). NOTE: the full
+   * MRO ambiguity diagnostics (the linearised C3 order + per-method ambiguity
+   * `reason`) are NOT persisted — the resolver computes them but only emits the
+   * resolved edges — so this surface reflects what the graph holds (the edges),
+   * not the in-resolver linearisation. Surfacing those diagnostics would require
+   * persisting them in a future wave.
+   */
+  heritage?: {
+    /**
+     * Direct + transitive supertypes via INHERITS edges (the ancestor chain),
+     * nearest-first. Best-effort linearisation by graph distance — NOT the full
+     * C3 MRO (which is not persisted).
+     */
+    ancestors: Array<{ id: string; name: string; depth: number }>;
+    /** Interfaces/traits the target implements (direct IMPLEMENTS edges). */
+    interfaces: Array<{ id: string; name: string }>;
+    /**
+     * Methods the target overrides (OVERRIDES edges) and interface/trait methods
+     * it satisfies (METHODIMPLEMENTS edges), with the resolved ancestor member.
+     */
+    overrides: Array<{ id: string; name: string; relation: "overrides" | "methodImplements" }>;
+    /**
+     * True when the full C3 linearisation + ambiguity diagnostics are not
+     * available from the persisted graph (always true today). A hint to the
+     * agent that `ancestors` is distance-ordered, not C3-ordered.
+     */
+    mroDiagnosticsUnavailable: boolean;
+  };
+  // ── Language coverage + ORM-model insight (ADDITIVE; only populated by
+  //    `get_symbol_context`, Wave 8 · T8). Absent for all other tools. ────────
+  /**
+   * Per-symbol enrichment for `get_symbol_context`: the target symbol's language
+   * (derived from its file extension — there is NO persisted per-Symbol language
+   * column), a small language-coverage breakdown across the returned context
+   * symbols, and the ORM-model documentation summary (framework `fillable`/
+   * relations folded into `Symbol.documentation`) when present. Every field is
+   * optional/additive.
+   */
+  symbolInsights?: {
+    /** Language of the TARGET symbol, derived from its file extension. */
+    language?: Language;
+    /**
+     * Count of returned context symbols per derived language (a coverage
+     * snapshot across the 12 supported languages). Omitted when no symbol's
+     * language could be derived.
+     */
+    languageCoverage?: Record<string, number>;
+    /**
+     * The ORM-model documentation summary (e.g. the Eloquent
+     * `fillable`/relations digest) read off the target's persisted
+     * `documentation`. Present only when the target carries documentation.
+     */
+    modelDocumentation?: string;
+  };
+  // ── Route enumeration (ADDITIVE; only populated by `route_map`, Wave 8 · T4).
+  //    Absent for all other tools → wire contract unchanged. ──────────────────
+  /**
+   * All API routes the indexer linked a handler to, via the persisted
+   * `HANDLES_ROUTE` edges (W5/W6, incl. Laravel resource expansion). Empty when
+   * the data-touch pass did not run at index time (`TYPOCOP_DATA_TOUCH` off) —
+   * the REL table always exists, so an unfilled graph degrades to `routes: []`.
+   */
+  routeMap?: {
+    /** Every linked route, endpoint + serving handler. */
+    routes: Array<{
+      /** Endpoint id (synthetic `apiendpoint:<METHOD>:<path>` or a real route Symbol). */
+      endpointId: string;
+      /** Endpoint display name, e.g. `"GET /users"`. */
+      endpointName: string;
+      /** The handler Symbol id linked via `HANDLES_ROUTE`. */
+      handlerId: string;
+      /** The handler Symbol name. */
+      handlerName: string;
+      /** Handler file path. */
+      filePath: string;
+      /** `[0,1]` confidence of the route edge, when present. */
+      confidence?: number;
+      /** The edge's provenance reason (e.g. `decorator-Get`), when present. */
+      reason?: string;
+    }>;
+    /** Total routes found BEFORE the maxResults cap. */
+    totalFound: number;
+  };
+  // ── Data-access enumeration (ADDITIVE; only populated by `what_reads_table` /
+  //    `what_writes_table`, Wave 8 · T4). Absent for other tools. ─────────────
+  /**
+   * The code symbols that touch a given table/model, via the persisted
+   * `READS_FROM_DB` / `WRITES_TO_DB` edges. Empty when the data-touch pass did
+   * not run, or no symbol touches the resolved model (clear empty result).
+   */
+  tableTouch?: {
+    /** The resolved table name (lower-cased). */
+    table: string;
+    /** `reads` (READS_FROM_DB) or `writes` (WRITES_TO_DB). */
+    direction: "reads" | "writes";
+    /** Per-toucher edge provenance (the symbols themselves ride `symbols[]`). */
+    touchers: Array<{
+      symbolId: string;
+      /** `[0,1]` confidence of the touch edge, when present. */
+      confidence?: number;
+      /** The edge's provenance reason (e.g. `prisma-findMany`), when present. */
+      reason?: string;
+    }>;
+    /** Total touchers found BEFORE the maxResults cap. */
+    totalFound: number;
+  };
+  // ── Event-channel enumeration (ADDITIVE; only populated by `what_publishes_to`
+  //    / `what_subscribes_to`, Wave 8 · T5). Absent for other tools. ──────────
+  /**
+   * The code symbols that publish to / subscribe to a given event topic, via the
+   * persisted `PUBLISHES_EVENT` / `SUBSCRIBES_TO` edges. Empty when the event
+   * sub-flag (`TYPOCOP_DATA_TOUCH_EVENTS`, default OFF) was off at index time —
+   * a clear empty result, never an error.
+   */
+  eventChannel?: {
+    /** The queried event topic. */
+    topic: string;
+    /** `publishers` (PUBLISHES_EVENT) or `subscribers` (SUBSCRIBES_TO). */
+    direction: "publishers" | "subscribers";
+    /** Per-participant edge provenance (the symbols themselves ride `symbols[]`). */
+    participants: Array<{
+      symbolId: string;
+      /** `[0,1]` confidence of the event edge, when present. */
+      confidence?: number;
+      /** The edge's provenance reason (e.g. `decorator-OnEvent`), when present. */
+      reason?: string;
+    }>;
+    /** Total participants found BEFORE the maxResults cap. */
+    totalFound: number;
   };
 }
 

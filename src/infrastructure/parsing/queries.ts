@@ -460,6 +460,11 @@ export const RUBY_QUERIES = `
   name: (constant) @heritage.class
   superclass: (superclass
     (constant) @heritage.extends)) @heritage
+
+(call
+  method: (identifier) @heritage.mixin_verb
+  arguments: (argument_list (constant) @heritage.mixin)
+  (#match? @heritage.mixin_verb "^(include|extend|prepend)$")) @heritage.mixin_call
 `;
 
 export const SWIFT_QUERIES = `

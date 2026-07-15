@@ -30,4 +30,25 @@ describe("walkFileTree integration — ignore filtering", () => {
       await rm(tmpDir, { recursive: true, force: true });
     }
   });
+
+  it("excludes vendor/ by default but includes it with { includeVendor: true }", async () => {
+    const tmpDir = await mkdtemp(`${os.tmpdir()}/vendor-smoke-`);
+    try {
+      await mkdir(`${tmpDir}/vendor/acme/lib`, { recursive: true });
+      await writeFile(`${tmpDir}/vendor/acme/lib/Base.php`, "<?php class Base {}");
+      await mkdir(`${tmpDir}/src`, { recursive: true });
+      await writeFile(`${tmpDir}/src/App.php`, "<?php class App {}");
+      // node_modules must stay ignored even with includeVendor.
+      await mkdir(`${tmpDir}/node_modules`, { recursive: true });
+      await writeFile(`${tmpDir}/node_modules/foo.ts`, "");
+
+      const def = (await walkFileTree(tmpDir)).map((f) => f.path);
+      expect(def).toEqual(["src/App.php"]);
+
+      const withVendor = (await walkFileTree(tmpDir, undefined, { includeVendor: true })).map((f) => f.path).sort();
+      expect(withVendor).toEqual(["src/App.php", "vendor/acme/lib/Base.php"]);
+    } finally {
+      await rm(tmpDir, { recursive: true, force: true });
+    }
+  });
 });

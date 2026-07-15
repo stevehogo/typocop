@@ -66,6 +66,33 @@ describe("FileIndexCache", () => {
     expect(loaded.get("src/a.ts")).toEqual(input.get("src/a.ts"));
   });
 
+  it("round-trips a Wave-3 call hint carrying receiverType (Tier B cache mirror)", async () => {
+    const cache = new FileIndexCache(cachePath);
+    const entry = makeEntry({
+      parseVersion: 4,
+      hints: [
+        {
+          kind: "call",
+          sourceFile: "src/a.ts",
+          targetName: "save",
+          startLine: 2,
+          language: "typescript",
+          receiverText: "u",
+          receiverType: "User",
+        },
+      ],
+    });
+    const input = new Map<string, CachedFileEntry>([["src/a.ts", entry]]);
+
+    await cache.save(input);
+    const loaded = await cache.load();
+
+    // The receiverType field must survive the JSON round-trip (or Tier B silently
+    // no-ops on warm-cache files).
+    expect(loaded.get("src/a.ts")?.hints[0].receiverType).toBe("User");
+    expect(loaded).toEqual(input);
+  });
+
   it("creates parent directories on save (atomic temp + rename)", async () => {
     const cache = new FileIndexCache(cachePath);
     await cache.save(new Map([["x.ts", makeEntry()]]));

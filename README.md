@@ -11,7 +11,7 @@ Typocop is a high-performance indexing and query engine that avoids the slow, mu
 - **Hybrid Search**: Semantic search with LadybugDB vector storage combined with keyword indexing.
 - **Multi-Phase Indexing**: A robust 6-phase pipeline that walks, parses, resolves, clusters, traces, and indexes your code.
 - **Polyglot Support**: Native parsing for 12 languages including TypeScript, PHP (Magento 2 / Laravel), Python (FastAPI / Django), Java (Spring Boot), Go, Rust, and more.
-- **MCP Integration**: First-class Model Context Protocol (MCP) server exposing **11 read-only tools** — context, dependency/impact, tracing, dead-code, complexity hotspots, API-contract drift, rename preview, change blast-radius, and a **`verify_claim` grounding tool** that returns verdict + confidence + evidence so agents stop acting on false assumptions. Works with Kiro, Claude, Cursor, Windsurf, and Antigravity.
+- **MCP Integration**: First-class Model Context Protocol (MCP) server exposing **17 read-only tools** — context, dependency/impact, tracing, dead-code, complexity hotspots, API-contract drift, rename preview, change blast-radius, a **`verify_claim` grounding tool** that returns verdict + confidence + evidence so agents stop acting on false assumptions, a guarded read-only **`query_graph` Cypher tool**, and **data-touch enumeration** (routes, table readers/writers, event publishers/subscribers). Works with Kiro, Claude, Cursor, Windsurf, and Antigravity.
 - **Obsidian Export**: Export your knowledge graph as an interactive markdown vault with visual diagrams and bidirectional links.
 - **Remote Database Access**: Distributed architecture with gRPC connection server for multi-client access to the same knowledge graph.
 
@@ -52,11 +52,11 @@ graph TD
 
 ## 🔌 MCP Tools
 
-The MCP server exposes **11 read-only tools** (none mutate your code or the graph). Each returns a structured result plus a mandatory human-readable `summary`. See [`src/apps/mcp-server/README.md`](src/apps/mcp-server/README.md) for full parameters, response shape, and examples.
+The MCP server exposes **17 read-only tools** (none mutate your code or the graph). Each returns a structured result plus a mandatory human-readable `summary`. See [`src/apps/mcp-server/README.md`](src/apps/mcp-server/README.md) for full parameters, response shape, and examples.
 
 | Tool | What it answers |
 |------|-----------------|
-| `get_symbol_context` | 360° context for a symbol (callers, callees, clusters, processes); optional token-budgeted slicing |
+| `get_symbol_context` | 360° context for a symbol (callers, callees, clusters, processes, heritage/MRO); optional token-budgeted slicing |
 | `smart_search` | Find symbols by natural-language query (semantic/vector similarity) |
 | `impact_analysis` | Blast radius of a symbol — direct **and transitive** dependents, affected flows, risk, per-node role/edge/hop |
 | `trace` | Shortest call/containment path between two symbols (per-hop chain) |
@@ -67,6 +67,12 @@ The MCP server exposes **11 read-only tools** (none mutate your code or the grap
 | `rename` | **Preview** a coordinated rename (edge-backed edits + low-confidence regex); never writes |
 | `detect_changes` | Blast radius of uncommitted/git changes (CRITICAL for auth/payment/etc.) |
 | `verify_claim` | **Grounding / anti-hallucination** — verify a usage / edge / reachability claim → verdict + confidence + evidence; unprovable (dynamic dispatch / DI) → honest `uncertain`, never a false confirm/refute; a refute carries the true answer |
+| `query_graph` | Run a **guarded, read-only** Cypher query for questions the canned tools don't cover (writes/DDL rejected pre-execution; row-capped + time-bounded) |
+| `route_map` | List **all** API routes the indexer linked a handler to (`HANDLES_ROUTE`), incl. Laravel resource expansion |
+| `what_reads_table` / `what_writes_table` | Given a table, the code that **reads** / **writes** it (`READS_FROM_DB` / `WRITES_TO_DB`) — keyed on data edges, not calls |
+| `what_publishes_to` / `what_subscribes_to` | Given an event topic, its **publishers** / **subscribers** (`PUBLISHES_EVENT` / `SUBSCRIBES_TO`) |
+
+> The data-touch tools (`route_map`, `what_reads_table`/`what_writes_table`, `what_publishes_to`/`what_subscribes_to`) read edges that only exist when data-touch indexing was enabled at index time (`TYPOCOP_DATA_TOUCH`; events also need `TYPOCOP_DATA_TOUCH_EVENTS`, **off by default**). When that data is absent they return a clear empty result, not an error.
 
 ## 🛠️ Usage
 

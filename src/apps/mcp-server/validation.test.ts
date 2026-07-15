@@ -172,6 +172,54 @@ describe("validateToolParams", () => {
     });
   });
 
+  describe("minConfidence (T7)", () => {
+    it("accepts trace_data_flow / impact_analysis with a valid minConfidence", () => {
+      expect(() =>
+        validateToolParams("trace_data_flow", { entryPoint: "GET /users", minConfidence: 0.8 }),
+      ).not.toThrow();
+      expect(() =>
+        validateToolParams("impact_analysis", { symbolName: "X", minConfidence: 0 }),
+      ).not.toThrow();
+    });
+
+    it("rejects an out-of-range minConfidence", () => {
+      expect(() =>
+        validateToolParams("trace_data_flow", { entryPoint: "x", minConfidence: 1.5 }),
+      ).toThrow(MCPValidationError);
+      expect(() =>
+        validateToolParams("impact_analysis", { symbolName: "X", minConfidence: -0.1 }),
+      ).toThrow(MCPValidationError);
+    });
+
+    it("rejects a non-number minConfidence", () => {
+      expect(() =>
+        validateToolParams("trace_data_flow", { entryPoint: "x", minConfidence: "high" }),
+      ).toThrow(MCPValidationError);
+    });
+  });
+
+  describe("verify_claim", () => {
+    it("accepts an edge claim with a v1 relation", () => {
+      expect(() =>
+        validateToolParams("verify_claim", { kind: "edge", from: "A", to: "B", relation: "calls" }),
+      ).not.toThrow();
+    });
+
+    it("accepts an edge claim with the Wave 8 heritage relations (overrides / methodImplements)", () => {
+      for (const relation of ["overrides", "methodImplements"]) {
+        expect(() =>
+          validateToolParams("verify_claim", { kind: "edge", from: "A", to: "B", relation }),
+        ).not.toThrow();
+      }
+    });
+
+    it("throws for an unknown edge relation", () => {
+      expect(() =>
+        validateToolParams("verify_claim", { kind: "edge", from: "A", to: "B", relation: "frobnicates" }),
+      ).toThrow(MCPValidationError);
+    });
+  });
+
   describe("unknown tool", () => {
     it("throws for unknown tool", () => {
       expect(() => validateToolParams("unknown_tool", {})).toThrow(MCPValidationError);

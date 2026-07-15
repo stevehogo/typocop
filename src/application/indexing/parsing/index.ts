@@ -9,6 +9,10 @@
 import type { Symbol } from "../../../core/domain.js";
 import type { FileNode } from "../structure/index.js";
 import type { RawRelationshipHint } from "../../../infrastructure/parsing/extract-symbols.js";
+import type {
+  ExtractedRoute,
+  ExtractedEventSubscriber,
+} from "../../../infrastructure/parsing/frameworks/extracted-records.js";
 import {
   runParseTask,
   parseWorkerEntryPath,
@@ -35,6 +39,13 @@ export interface ParsingResult {
   readonly symbols: Symbol[];
   readonly hints: RawRelationshipHint[];
   readonly skippedFiles: number;
+  /**
+   * Wave 6 framework records, in original-file order (shared with Wave 5). Empty
+   * unless the framework pass ran (flag on AND a per-file gate hit). Additive: a
+   * pre-Wave-6 / flag-off run yields empty arrays.
+   */
+  readonly routes: ExtractedRoute[];
+  readonly eventSubscribers: ExtractedEventSubscriber[];
 }
 
 /**
@@ -109,6 +120,9 @@ interface FileSlot {
    * the file took the size-skip path inside `parseSourceFile` (never read).
    */
   contentHash?: string;
+  /** Wave 6 framework records for this file (absent unless the pass ran). */
+  routes?: ExtractedRoute[];
+  eventSubscribers?: ExtractedEventSubscriber[];
 }
 
 /**
@@ -121,6 +135,12 @@ export interface PerFileParseResult {
   readonly symbols: Symbol[];
   readonly hints: RawRelationshipHint[];
   readonly contentHash: string;
+  /**
+   * Wave 6 framework records for this file (absent unless the pass ran). Stored
+   * here so the parse cache can round-trip them per file on the incremental path.
+   */
+  readonly routes?: ExtractedRoute[];
+  readonly eventSubscribers?: ExtractedEventSubscriber[];
 }
 
 /** {@link extractAllSymbols} output extended with the per-file map (A2). */
@@ -147,7 +167,13 @@ function buildTask(fileNode: FileNode, index: number, relativeBase: string): Par
 /** Convert a worker/in-process {@link ParseTaskResult} into an ordered slot. */
 function resultToSlot(result: ParseTaskResult): FileSlot | null {
   if (isParseSkipped(result)) return null;
-  return { symbols: result.symbols, hints: result.hints, contentHash: result.contentHash };
+  return {
+    symbols: result.symbols,
+    hints: result.hints,
+    contentHash: result.contentHash,
+    routes: result.routes,
+    eventSubscribers: result.eventSubscribers,
+  };
 }
 
 /**
@@ -317,12 +343,9 @@ export async function extractAllSymbols(
   rootPath: string = process.cwd(),
   options: ExtractAllSymbolsOptions = {},
 ): Promise<ParsingResult> {
-  const { symbols, hints, skippedFiles } = await extractAllSymbolsWithPerFile(
-    fileNodes,
-    rootPath,
-    options,
-  );
-  return { symbols, hints, skippedFiles };
+  const { symbols, hints, skippedFiles, routes, eventSubscribers } =
+    await extractAllSymbolsWithPerFile(fileNodes, rootPath, options);
+  return { symbols, hints, skippedFiles, routes, eventSubscribers };
 }
 
 /**
@@ -391,17 +414,24 @@ export async function extractAllSymbolsWithPerFile(
   // hash (size-skipped inside parseSourceFile) so the cache only stores real reads.
   const allSymbols: Symbol[] = [];
   const allHints: RawRelationshipHint[] = [];
+  const allRoutes: ExtractedRoute[] = [];
+  const allEventSubscribers: ExtractedEventSubscriber[] = [];
   const perFile = new Map<string, PerFileParseResult>();
   for (let i = 0; i < slots.length; i++) {
     const slot = slots[i];
     if (slot === null) continue;
     allSymbols.push(...slot.symbols);
     allHints.push(...slot.hints);
+    // Framework records, slotted by ORIGINAL file index for order-stability.
+    if (slot.routes !== undefined) allRoutes.push(...slot.routes);
+    if (slot.eventSubscribers !== undefined) allEventSubscribers.push(...slot.eventSubscribers);
     if (slot.contentHash !== undefined) {
       perFile.set(fileNodes[i].path, {
         symbols: slot.symbols,
         hints: slot.hints,
         contentHash: slot.contentHash,
+        routes: slot.routes,
+        eventSubscribers: slot.eventSubscribers,
       });
     }
   }
@@ -410,6 +440,8 @@ export async function extractAllSymbolsWithPerFile(
     symbols: deduplicateById(allSymbols),
     hints: allHints,
     skippedFiles,
+    routes: allRoutes,
+    eventSubscribers: allEventSubscribers,
     perFile,
   };
 }

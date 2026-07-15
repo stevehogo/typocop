@@ -29,16 +29,21 @@ export interface SymbolExplanation {
 /**
  * Convert QueryResult to MCPToolResponse format.
  * `explanationsById` (D2) optionally attaches per-symbol role/edge/hop fields.
+ * `confidenceById` (Wave 8 · T7) optionally attaches the `[0,1]` edge confidence
+ * read off `metadata.confidence` (data-touch edges); absent leaves the symbol
+ * unchanged.
  * Requirements: 15.6, 15.8
  */
 export function formatMCPResponse(
   result: PartialQueryResult,
   summary: string,
   explanationsById?: ReadonlyMap<string, SymbolExplanation>,
+  confidenceById?: ReadonlyMap<string, number>,
 ): MCPToolResponse {
   return {
     symbols: result.symbols.map((s) => {
       const explanation = explanationsById?.get(s.id);
+      const edgeConfidence = confidenceById?.get(s.id);
       return {
         id: s.id,
         name: s.name,
@@ -55,6 +60,7 @@ export function formatMCPResponse(
               hopDistance: explanation.hopDistance,
             }
           : {}),
+        ...(edgeConfidence !== undefined ? { edgeConfidence } : {}),
       };
     }),
     clusters: result.clusters.map((c) => ({

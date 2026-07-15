@@ -14,6 +14,10 @@
  */
 import type { Symbol, Language } from "../../core/domain.js";
 import type { RawRelationshipHint } from "./extract-symbols.js";
+import type {
+  ExtractedRoute,
+  ExtractedEventSubscriber,
+} from "./frameworks/extracted-records.js";
 
 /**
  * One unit of parse work, addressed by its ORIGINAL index in the file list so
@@ -42,6 +46,15 @@ export interface ParseTaskSuccess {
   readonly symbols: Symbol[];
   readonly hints: RawRelationshipHint[];
   readonly contentHash: string;
+  /**
+   * Wave 6 framework extraction (OPTIONAL; additive). Populated only when the
+   * framework pass runs (flag on AND the per-file path/text gate hits); absent
+   * otherwise so non-framework output is byte-identical. Both are plain JSON,
+   * so they round-trip the structured-clone worker boundary unchanged. Shared
+   * with Wave 5 (its data-touch detector consumes these records).
+   */
+  readonly routes?: ExtractedRoute[];
+  readonly eventSubscribers?: ExtractedEventSubscriber[];
 }
 
 /**

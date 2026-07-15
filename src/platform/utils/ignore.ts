@@ -101,11 +101,23 @@ const IGNORED_FILES: ReadonlySet<string> = new Set([
 
 export { IGNORED_EXTENSIONS, IGNORED_FILES };
 
+/** Options for {@link shouldIgnorePath}. */
+export interface IgnoreOptions {
+  /**
+   * When true, the `vendor` directory segment (PHP Composer / Go vendoring) is
+   * NOT ignored, so framework/library source under `vendor/` is indexable. Other
+   * dependency dirs (`node_modules`, Python `venv`, build outputs) stay ignored.
+   * Off by default — `vendor/` is huge, so opt in only when its source is needed
+   * (e.g. to resolve a framework base class for self-recursion signal A).
+   */
+  readonly includeVendor?: boolean;
+}
+
 /**
  * Returns true if the given file path should be excluded from indexing.
  * Checks directory segments, exact filenames, extensions, and compound extensions.
  */
-export const shouldIgnorePath = (filePath: string): boolean => {
+export const shouldIgnorePath = (filePath: string, options: IgnoreOptions = {}): boolean => {
   const normalizedPath = filePath.replace(/\\/g, "/");
   const parts = normalizedPath.split("/");
   const fileName = parts[parts.length - 1];
@@ -113,6 +125,7 @@ export const shouldIgnorePath = (filePath: string): boolean => {
 
   // Check if any path segment is in the ignore list
   for (const part of parts) {
+    if (options.includeVendor && part === "vendor") continue;
     if (DEFAULT_IGNORE_LIST.has(part)) return true;
   }
 

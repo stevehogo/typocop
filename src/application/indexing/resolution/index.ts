@@ -16,6 +16,7 @@ import type { Language } from "../../../core/domain.js";
 import type { RawRelationshipHint } from "../parsing/index.js";
 import { buildSymbolTable, symbolMetadata } from "./symbol-table.js";
 import { createResolutionContext } from "./resolution-context.js";
+import { populateImportMaps } from "./import-resolution-pass.js";
 import { loadLanguageConfigs, type LanguageConfigs } from "../language-config.js";
 import {
   getOrCreateExtNode,
@@ -26,7 +27,8 @@ import type { CallResolutionDeps } from "./scope-resolver.js";
 // Side-effect import: registers the built-in per-language scope resolvers (E1).
 import "./resolvers/index.js";
 import { computeMRO, c3Linearize, gatherAncestors } from "./mro.js";
-import { resolveReceiverType, type ChainBindingDeps } from "./chain-binding.js";
+import { resolveHeritageRelType } from "./heritage-type.js";
+import { resolveReceiverType, typeNameToSymbol, type ChainBindingDeps } from "./chain-binding.js";
 
 // ─── Symbol map ───────────────────────────────────────────────────────────────
 
@@ -44,6 +46,17 @@ export function buildSymbolMap(symbols: Symbol[]): Map<string, Symbol[]> {
 
 function relId(relType: RelationType, source: string, target: string): string {
   return `${relType}:${source}->${target}`;
+}
+
+/**
+ * Last segment of a (possibly) fully-qualified type name — `\Vendor\AbstractIpn`
+ * → `AbstractIpn`, `ns::Foo` → `Foo`, `models.User` → `User`. The symbol map is
+ * keyed by simple name, so heritage/extends targets written fully-qualified must
+ * be reduced to match. Mirrors the import last-name fallback and return-type
+ * normalisation already in this layer.
+ */
+function lastNameSegment(name: string): string {
+  return name.split(/::|[.\\/]/).pop() ?? name;
 }
 
 // ─── Granular helpers (used by tests and internally) ─────────────────────────
@@ -242,6 +255,35 @@ export function resolveHints(
   hints: RawRelationshipHint[],
   symbols: Symbol[],
   languageConfigs?: LanguageConfigs,
+  allFiles?: readonly string[],
+  /**
+   * Wave 3 (Tier B): when `true`, consume the type-env's `hint.receiverType`
+   * (receiverType-FIRST member-call resolution) and enable the ported
+   * return-type unwrap in chain binding. Default `false` → byte-identical
+   * pre-Wave-3 behaviour (the field is also never populated when the flag is off
+   * in Phase 2, so this is doubly safe — the zero-code rollback lever).
+   */
+  typeEnvResolution = false,
+  /**
+   * Wave 4 (Task 5): when `true`, the call-target selector narrows candidates by
+   * callable-kind + arity + receiver-type and emits an edge ONLY when exactly one
+   * survives (refuse-on-ambiguity). Default `false` → byte-identical pre-Wave-4
+   * behaviour (the legacy `candidates[0]` / global-fallback path runs and the
+   * Wave-4 filters never execute). The zero-code rollback lever.
+   */
+  callRefuseAmbiguous = false,
+  /**
+   * Wave 7 (§3.1): when `true`, the heritage hint loop disambiguates
+   * interface-vs-class parents (an `inherits` hint may be UPGRADED to an
+   * `implements` edge, and vice-versa) via {@link resolveHeritageRelType}, and
+   * `computeMRO` applies the per-language collision tie-break rules. Default
+   * `false` → the hint's `kind` is trusted verbatim and `computeMRO` runs its
+   * language-blind single-loop → byte-identical pre-Wave-7 edges. The additive
+   * `heritageKind` hint flavor (Go embed / Ruby mixin) is also only populated in
+   * Phase 2 when this flag's env is on, so the new Go/Ruby edges only appear with
+   * the flag on. The zero-code rollback lever.
+   */
+  heritageDisambiguation = false,
 ): ResolveHintsResult {
   const symbolMap = buildSymbolMap(symbols);
   const extNodes = new Map<string, ExternalDependencyNode>();
@@ -270,6 +312,18 @@ export function resolveHints(
     ctx.symbols.add(sym.location.filePath, sym.name, sym.id, sym.kind, symbolMetadata(sym));
   }
 
+  // ─── Wave 1: Activate the import-resolution graph ──────────────────────────
+  // Populate ctx.importMap / packageMap / namedImportMap from the import hints +
+  // the repo file list, BEFORE the hint loop's per-file `ctx.resolve` calls fire.
+  // This turns on the dead Tiers 2a / 2a-named / 2b. When `allFiles` is omitted
+  // (legacy/test call sites) OR no language configs are loaded, the sub-pass is
+  // skipped and the maps stay empty → byte-identical pre-wave Tier-1/3 behaviour
+  // (the built-in rollback lever).
+  if (allFiles && allFiles.length > 0 && languageConfigs) {
+    const importHints = hints.filter((h) => h.kind === "import");
+    populateImportMaps(ctx, importHints, allFiles, languageConfigs);
+  }
+
   // ─── E1 MRO / chain support indexes (built once) ───────────────────────────
   // methodsByOwner: ownerId → method/function Symbols owned by that type. Feeds
   // both MRO-aware member-call resolution and chain binding.
@@ -284,8 +338,10 @@ export function resolveHints(
   // HINTS (independent of edge resolution, so available before the hint loop).
   const mroLinear = buildMroLinearizationFromHints(hints, symbols, symbolById);
 
-  // Shared selector deps (parity selector + per-language resolvers).
-  const callDeps: CallResolutionDeps = { ctx, symbolById, symbolMap };
+  // Shared selector deps (parity selector + per-language resolvers). Wave 4: the
+  // refuse-on-ambiguity flag rides here so the selector can switch between the
+  // byte-identical legacy path (off) and the filtered single-survivor path (on).
+  const callDeps: CallResolutionDeps = { ctx, symbolById, symbolMap, refuseAmbiguous: callRefuseAmbiguous };
 
   // DEPENDS_ON external-dependency fan-out reporting (behavior unchanged; count only).
   let dependsOnEdgeCount = 0;
@@ -401,20 +457,40 @@ export function resolveHints(
           // same-file precise hit. If it yields nothing, we fall through to the
           // byte-identical parity selector below.
           let target: Symbol | undefined;
-          if (resolver.strategy === "mro" && hint.receiverText) {
+          // Wave 3 (Tier B): the type-env may have resolved a bare receiver to a
+          // type name even when the resolver doesn't propagate return types (e.g.
+          // a `new User()` local), so attempt member-call resolution when EITHER
+          // a receiverText OR a flag-supplied receiverType is present.
+          const teReceiverType = typeEnvResolution ? hint.receiverType : undefined;
+          if (resolver.strategy === "mro" && (hint.receiverText || teReceiverType)) {
             target = resolveMemberCallTarget(
               hint.targetName,
-              hint.receiverText,
+              hint.receiverText ?? "",
               caller,
               { symbolById, symbolMap, methodsByOwner, mroLinear },
               resolver.propagatesReturnTypes,
+              teReceiverType,
+              typeEnvResolution,
             );
           }
 
-          // ── Parity selector (today's behaviour, byte-identical) ─────────────
+          // ── Parity selector (today's behaviour byte-identical when the Wave-4
+          // refuse flag is off; filtered single-survivor path when on). Wave 4
+          // threads the call's `argCount`/`callForm` and the (typeEnv-gated)
+          // `receiverType` so the selector can narrow by kind/arity/owning-type.
+          // `teReceiverType` is already gated on `typeEnvResolution`, so when that
+          // flag is off the receiver-type branch stays dark. ──────────────────
           if (!target) {
             target = resolver.selectCallTarget(
-              { calleeName: hint.targetName, receiverText: hint.receiverText, caller, sourceFile: hint.sourceFile },
+              {
+                calleeName: hint.targetName,
+                receiverText: hint.receiverText,
+                caller,
+                sourceFile: hint.sourceFile,
+                argCount: hint.argCount,
+                callForm: hint.callForm,
+                receiverType: teReceiverType,
+              },
               callDeps,
             );
           }
@@ -428,10 +504,39 @@ export function resolveHints(
           const childCandidates = symbolMap.get(hint.childSymbolId) ?? [];
           const child = childCandidates.find((s) => s.location.filePath === hint.sourceFile) ?? childCandidates[0];
           if (!child) break;
-          const parent = (symbolMap.get(hint.targetName) ?? []).find((s) => s.id !== child.id);
+          // Try the name as written first (preserves any qualified-keyed match),
+          // then fall back to the simple last segment so a fully-qualified
+          // `extends \Ns\Class` resolves to the in-tree `Class` symbol.
+          const simpleTarget = lastNameSegment(hint.targetName);
+          const parent =
+            (symbolMap.get(hint.targetName) ?? []).find((s) => s.id !== child.id) ??
+            (simpleTarget !== hint.targetName
+              ? (symbolMap.get(simpleTarget) ?? []).find((s) => s.id !== child.id)
+              : undefined);
           if (!parent) break;
-          const relType: RelationType = hint.kind === "inherits" ? "inherits" : "implements";
-          add({ id: relId(relType, child.id, parent.id), source: child.id, target: parent.id, relType, metadata: {} });
+          // Wave 7 (§3.1, Task 1): decide inherits-vs-implements BEFORE building
+          // the relId so the emitted edge AND `computeMRO`'s interfaceParent
+          // classification (relType==="implements" || kind==="interface") agree —
+          // fixing overrides-vs-methodImplements for free. When the flag is off,
+          // trust the hint's `kind` verbatim (byte-identical). When on, the
+          // symbol-table-first / language-gated heuristic may upgrade an
+          // `inherits` hint to `implements` (e.g. external `IDisposable`) or the
+          // reverse when the symbol table proves the parent is a class. EXCEPTION:
+          // Go-embed / Ruby-mixin hints (those carrying a `heritageKind` flavor)
+          // already have their relType DECIDED by the Phase-2 emission
+          // (embed→inherits, mixin→implements) — a Ruby module is extracted as a
+          // `class`-kind symbol, so re-disambiguating would wrongly flip a mixin
+          // back to `inherits`. Trust the hint's kind for those.
+          const relType: RelationType =
+            heritageDisambiguation && !hint.heritageKind
+              ? resolveHeritageRelType(simpleTarget, hint.sourceFile, hint.language, symbolMap)
+              : hint.kind === "inherits" ? "inherits" : "implements";
+          // Carry the Go-embed / Ruby-mixin flavor onto the edge metadata so the
+          // `extend`-vs-`include`/`prepend` distinction is recorded (Task 4).
+          const metadata: Record<string, string> = hint.heritageKind
+            ? { heritage: hint.heritageKind }
+            : {};
+          add({ id: relId(relType, child.id, parent.id), source: child.id, target: parent.id, relType, metadata });
           break;
         }
       }
@@ -446,7 +551,16 @@ export function resolveHints(
   // touches existing edge ids. `add` dedups, so re-emission is a no-op. When no
   // symbol carries method `ownerId` (e.g. synthetic fixtures), it emits nothing —
   // golden output stays byte-identical.
-  const mro = computeMRO(symbols, relationships);
+  //
+  // Wave 7 (§3.1, Task 2): thread a per-class `languageOf` accessor (typocop's
+  // `Symbol` carries no `.language`, so it is derived from each class's heritage
+  // hint language — the child class's language) and the heritage flag. When the
+  // flag is off, the accessor is still passed but `computeMRO` runs its
+  // language-blind single-loop (byte-identical edges); the additive diagnostics
+  // (`entries`) are computed regardless.
+  const classLanguage = buildClassLanguageMap(hints, symbols, symbolMap);
+  const languageOf = (classId: string): Language | undefined => classLanguage.get(classId);
+  const mro = computeMRO(symbols, relationships, languageOf, heritageDisambiguation);
   for (const rel of mro.relationships) add(rel);
 
   return {
@@ -477,6 +591,34 @@ export interface ResolveHintsResult {
 }
 
 // ─── E1 MRO-aware member-call resolution (ADDITIVE helpers) ───────────────────
+
+/**
+ * Wave 7 (§3.1, Task 2): build a `classId → Language` map from the heritage
+ * HINTS. typocop's `Symbol` carries no `.language`, so the per-class language is
+ * derived from the language stamped on each heritage hint (the child class's
+ * language). Resolves the hint's `childSymbolId` NAME to a concrete symbol id
+ * (preferring the same-file candidate) so `computeMRO`'s per-class rules can be
+ * keyed by symbol id. Classes with no heritage hint (no parents) are absent and
+ * default to `undefined` (the single-inheritance/default rule).
+ */
+function buildClassLanguageMap(
+  hints: RawRelationshipHint[],
+  symbols: Symbol[],
+  symbolMap: Map<string, Symbol[]>,
+): Map<string, Language> {
+  void symbols;
+  const out = new Map<string, Language>();
+  for (const hint of hints) {
+    if (hint.kind !== "inherits" && hint.kind !== "implements") continue;
+    if (!hint.childSymbolId) continue;
+    const childCandidates = symbolMap.get(hint.childSymbolId) ?? [];
+    const child =
+      childCandidates.find((s) => s.location.filePath === hint.sourceFile) ?? childCandidates[0];
+    if (!child) continue;
+    if (!out.has(child.id)) out.set(child.id, hint.language);
+  }
+  return out;
+}
 
 /**
  * Build a `classId → C3-linearised ancestor ids` map from the heritage HINTS,
@@ -533,31 +675,55 @@ function resolveMemberCallTarget(
     mroLinear: Map<string, string[]>;
   },
   propagatesReturnTypes: boolean,
+  /** Wave 3 (Tier B): the type-env's resolved receiver type NAME for a bare local. */
+  receiverTypeName?: string,
+  /** Wave 3 (Tier B): enable the ported return-type unwrap in chain binding. */
+  useReturnTypeUnwrap = false,
 ): Symbol | undefined {
-  // Resolve the receiver type. `this`/`self` always work; chained receivers only
-  // when the resolver propagates return types.
-  const text = receiverText.trim();
-  const isSelf = text === "this" || text === "self";
-  if (!isSelf && !propagatesReturnTypes) return undefined;
-
   const chainDeps: ChainBindingDeps = {
     symbolById: deps.symbolById,
     symbolMap: deps.symbolMap,
     methodsByOwner: deps.methodsByOwner,
   };
-  const receiverType = resolveReceiverType(receiverText, caller, chainDeps);
+
+  // Search a resolved receiver TYPE symbol's own methods, then its linearised
+  // ancestors, for the method. PRECISION GUARDRAIL: returns `undefined` (→ caller
+  // tries the next tier / parity) rather than emitting a guessed edge.
+  const searchType = (receiverType: Symbol): Symbol | undefined => {
+    const ownMethod = (deps.methodsByOwner.get(receiverType.id) ?? []).find((m) => m.name === calleeName);
+    if (ownMethod && ownMethod.id !== caller.id) return ownMethod;
+    const linear = deps.mroLinear.get(receiverType.id) ?? [];
+    for (const ancestorId of linear) {
+      const m = (deps.methodsByOwner.get(ancestorId) ?? []).find((mm) => mm.name === calleeName);
+      if (m && m.id !== caller.id) return m;
+    }
+    return undefined;
+  };
+
+  // ── Wave 3 (Tier B): receiverType-FIRST. When the per-file type-env resolved
+  // the bare receiver to a type NAME, resolve THAT to a class symbol and search
+  // it directly — this is the branch that turns `u.save()`→`User.save`. Only
+  // fires when the type name resolves to a real class symbol; otherwise we fall
+  // through to the existing receiver-text path (and then to parity), never
+  // emitting an edge from a type name with no class. ─────────────────────────
+  if (receiverTypeName) {
+    const typeSym = typeNameToSymbol(receiverTypeName, chainDeps);
+    if (typeSym) {
+      const hit = searchType(typeSym);
+      if (hit) return hit;
+    }
+  }
+
+  // Resolve the receiver type from its raw text. `this`/`self` always work;
+  // chained receivers only when the resolver propagates return types.
+  const text = receiverText.trim();
+  const isSelf = text === "this" || text === "self";
+  if (!isSelf && !propagatesReturnTypes) return undefined;
+
+  const receiverType = resolveReceiverType(receiverText, caller, chainDeps, useReturnTypeUnwrap);
   if (!receiverType) return undefined;
 
-  // Search the receiver type's own methods first, then its linearised ancestors.
-  const ownMethod = (deps.methodsByOwner.get(receiverType.id) ?? []).find((m) => m.name === calleeName);
-  if (ownMethod && ownMethod.id !== caller.id) return ownMethod;
-
-  const linear = deps.mroLinear.get(receiverType.id) ?? [];
-  for (const ancestorId of linear) {
-    const m = (deps.methodsByOwner.get(ancestorId) ?? []).find((mm) => mm.name === calleeName);
-    if (m && m.id !== caller.id) return m;
-  }
-  return undefined;
+  return searchType(receiverType);
 }
 
 // ─── Phase 3 entry point ─────────────────────────────────────────────────────
@@ -578,12 +744,33 @@ export async function resolveReferences(
   symbols: Symbol[],
   hints?: RawRelationshipHint[],
   repoRoot?: string,
+  allFiles?: readonly string[],
+  /**
+   * Wave 3 (Tier B): forwarded to {@link resolveHints} to enable receiverType-
+   * first member-call resolution + the chain-binding return-type unwrap. Default
+   * `false` → byte-identical pre-Wave-3 (the zero-code rollback lever).
+   */
+  typeEnvResolution = false,
+  /**
+   * Wave 4 (Task 5): forwarded to {@link resolveHints} to enable refuse-on-
+   * ambiguity call-target selection (callable-kind + arity + receiver-type
+   * filtering, single-survivor-or-nothing). Default `false` → byte-identical
+   * pre-Wave-4 behaviour (the zero-code rollback lever).
+   */
+  callRefuseAmbiguous = false,
+  /**
+   * Wave 7 (§3.1): forwarded to {@link resolveHints} to enable interface-vs-class
+   * heritage disambiguation + the per-language `computeMRO` collision tie-break
+   * rules. Default `false` → byte-identical pre-Wave-7 (the zero-code rollback
+   * lever).
+   */
+  heritageDisambiguation = false,
 ): Promise<ResolveHintsResult> {
   if (hints && hints.length > 0) {
     const languageConfigs = repoRoot
       ? await loadLanguageConfigs(repoRoot)
       : undefined;
-    return resolveHints(hints, symbols, languageConfigs);
+    return resolveHints(hints, symbols, languageConfigs, allFiles, typeEnvResolution, callRefuseAmbiguous, heritageDisambiguation);
   }
 
   // Legacy path: derive relationships from symbol kinds and signatures

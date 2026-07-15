@@ -9,7 +9,14 @@ import { executeFindDeadCode } from "./dead-code-tool.js";
 import { executeTool } from "./tools.js";
 import type { SymbolKind, Visibility } from "../../core/domain.js";
 
-interface FixtureNode { id: string; name: string; kind?: SymbolKind; visibility?: Visibility }
+interface FixtureNode {
+  id: string;
+  name: string;
+  kind?: SymbolKind;
+  visibility?: Visibility;
+  entryPointKind?: string;
+  entryPointReason?: string;
+}
 
 function makeGraph(uncalled: FixtureNode[]): GraphAdapter {
   function nodeRow(n: FixtureNode) {
@@ -21,6 +28,8 @@ function makeGraph(uncalled: FixtureNode[]): GraphAdapter {
           filePath: `/repo/${n.id}.ts`,
           startLine: "1", startColumn: "0", endLine: "9", endColumn: "0",
           visibility: n.visibility ?? "private",
+          ...(n.entryPointKind !== undefined ? { entryPointKind: n.entryPointKind } : {}),
+          ...(n.entryPointReason !== undefined ? { entryPointReason: n.entryPointReason } : {}),
         },
       },
     };
@@ -84,6 +93,25 @@ describe("executeFindDeadCode", () => {
     const res = await executeFindDeadCode({ kind: "variable" }, adapter);
     expect(res.symbols.map((s) => s.name)).toEqual(["scratchVar"]);
     expect(res.summary).toContain("kind: variable");
+  });
+
+  it("surfaces a 'kept because' note for entry points excluded by persisted entryPointKind/entryPointReason (T1)", async () => {
+    const adapter = makeAdapter(makeGraph([
+      {
+        id: "ep1",
+        name: "renderWidget", // NOT entry-point-name-shaped → only the persisted field keeps it out
+        kind: "function",
+        visibility: "private",
+        entryPointKind: "route",
+        entryPointReason: "base:2.00, framework:nextjs-api-route",
+      },
+    ]));
+    const res = await executeFindDeadCode({}, adapter);
+    expect(res.symbols).toHaveLength(0);
+    expect(res.summary).toContain("Kept 1 uncalled entry point");
+    expect(res.summary).toContain("renderWidget");
+    expect(res.summary).toContain("route");
+    expect(res.summary).toContain("nextjs-api-route");
   });
 
   it("routes through executeTool by name", async () => {

@@ -5,23 +5,52 @@
 import type { GraphAdapter, GraphNode } from "../../core/ports/persistence.js";
 import type { Symbol, Relationship, QueryResult } from "../../core/domain.js";
 import { MAX_TRAVERSAL_DEPTH } from "../../platform/utils/limits.js";
-import { rowToNode, graphNodeToSymbol } from "./graph-helpers.js";
-import type { CypherNodeRow } from "./graph-helpers.js";
+import { graphNodeToSymbol, rowToTouchedNode } from "./graph-helpers.js";
+import type { DataFlowTraceRow, TouchedNode } from "./graph-helpers.js";
 import { resolveSymbol, type SymbolResolution } from "./symbol-resolver.js";
 import { classifyLayer } from "./framework-layers.js";
 
 // ─── Graph query helpers using GraphAdapter ───────────────────────────────────
 
-async function findDependencies(graph: GraphAdapter, symbolId: string): Promise<GraphNode[]> {
-  const rows = await graph.runCypher<CypherNodeRow>(
-    `MATCH (s:Symbol)-[e:CALLS*1..${MAX_TRAVERSAL_DEPTH}]->(n:Symbol) WHERE s.id = $val OR s.name = $val RETURN DISTINCT n`,
+/**
+ * Wave 5: find the CALLS-reachable dependencies of an entry point AND, per
+ * reachable node, the EDGE-RESOLVED data-touch evidence — whether it is a route
+ * handler (`HANDLES_ROUTE` → APIEndpoint) or a data-access symbol
+ * (`READS_FROM_DB`/`WRITES_TO_DB` → DBModel), plus the touch edge's `confidence`.
+ *
+ * The data-touch edges point Symbol → (synthetic) endpoint/model, so from the
+ * handler / data-access symbol's perspective they are OUTBOUND. The `OPTIONAL
+ * MATCH` arms return null for graphs indexed before the data-touch pass ran —
+ * `touchLayer`/`edgeConfidence` stay undefined and the caller falls back to the
+ * `classifyLayer` regex (graceful degradation).
+ */
+async function findDependencies(graph: GraphAdapter, symbolId: string): Promise<TouchedNode[]> {
+  const rows = await graph.runCypher<DataFlowTraceRow>(
+    `MATCH (s:Symbol)-[e:CALLS*1..${MAX_TRAVERSAL_DEPTH}]->(n:Symbol) WHERE s.id = $val OR s.name = $val ` +
+      `OPTIONAL MATCH (n)-[hr:HANDLES_ROUTE]->(:Symbol) ` +
+      `OPTIONAL MATCH (n)-[rw:READS_FROM_DB|WRITES_TO_DB]->(:Symbol) ` +
+      `RETURN DISTINCT n, hr IS NOT NULL AS hasRoute, rw IS NOT NULL AS hasDb, ` +
+      `coalesce(hr.confidence, rw.confidence) AS edgeConfidence`,
     { val: symbolId },
   );
-  return rows.map(rowToNode);
+  return rows.map(rowToTouchedNode);
+}
+
+/** Mean of a non-empty number list. */
+function mean(xs: number[]): number {
+  return xs.reduce((a, b) => a + b, 0) / xs.length;
 }
 
 /** Return type for executeDataFlowTrace, including resolution info for callers. */
-export type DataFlowTraceResult = { resolution: SymbolResolution } & Pick<QueryResult, "symbols" | "relationships" | "clusters" | "processes" | "confidence" | "riskLevel" | "affectedFlows">;
+export type DataFlowTraceResult = {
+  resolution: SymbolResolution;
+  /**
+   * Wave 8 (T7): `[0,1]` edge confidence per symbol id, read off the data-touch
+   * edge that classified the node. Only populated for edge-resolved nodes; used
+   * to surface `edgeConfidence` on the MCP response. Empty for the regex path.
+   */
+  edgeConfidenceById?: ReadonlyMap<string, number>;
+} & Pick<QueryResult, "symbols" | "relationships" | "clusters" | "processes" | "confidence" | "riskLevel" | "affectedFlows">;
 
 /**
  * Execute a data flow tracing query using GraphAdapter.runCypher().
@@ -35,6 +64,7 @@ export async function executeDataFlowTrace(
   maxResults: number,
   graphAdapter: GraphAdapter,
   framework?: string,
+  minConfidence?: number,
 ): Promise<DataFlowTraceResult> {
   // Req 13.1, 1.1, 1.2, 1.4 — resolve entry point symbol (exact → fuzzy → not_found)
   const resolution = await resolveSymbol(entryPoint, graphAdapter);
@@ -55,19 +85,35 @@ export async function executeDataFlowTrace(
   // Both "exact" and "fuzzy" provide a resolved node
   const entryNode = resolution.node;
 
-  // Req 13.2-13.5 — trace through all dependencies
-  const dependencyNodes = await findDependencies(graphAdapter, entryPoint);
+  // Req 13.2-13.5 — trace through all dependencies (edge-resolved touch evidence)
+  const allDependencyNodes = await findDependencies(graphAdapter, entryPoint);
 
-  // Classify nodes by layer using framework-aware classification (Req 4.2, 4.3, 4.4, 4.5)
+  // Wave 8 (T7): optional confidence floor. Drop EDGE-RESOLVED nodes whose
+  // touch-edge confidence is below `minConfidence`. Nodes WITHOUT a touch edge
+  // (regex-classified, no `edgeConfidence`) are kept — the filter only prunes
+  // confidence-bearing edges, so a trace with no `minConfidence` is unchanged.
+  const hasFloor = typeof minConfidence === "number" && Number.isFinite(minConfidence);
+  const dependencyNodes = hasFloor
+    ? allDependencyNodes.filter(
+        (d) => d.edgeConfidence === undefined || d.edgeConfidence >= (minConfidence as number),
+      )
+    : allDependencyNodes;
+
+  // Classify nodes by layer. Wave 5: prefer the EDGE-RESOLVED layer (a real
+  // HANDLES_ROUTE → `api`, a real READS/WRITES_TO_DB → `model`) over the
+  // `classifyLayer` name/path/signature regex, which is now the documented
+  // FALLBACK for nodes with no data-touch edge (graceful degradation on graphs
+  // indexed before the data-touch pass ran). `controller`/`service`/`repository`
+  // have no dedicated edge type, so they still come from the regex.
   const layeredNodes = new Map<string, GraphNode[]>();
   layeredNodes.set("api", [entryNode]);
 
-  for (const node of dependencyNodes) {
-    const layer = classifyLayer(node, framework);
+  for (const dep of dependencyNodes) {
+    const layer = dep.touchLayer ?? classifyLayer(dep.node, framework);
     if (!layeredNodes.has(layer)) {
       layeredNodes.set(layer, []);
     }
-    layeredNodes.get(layer)!.push(node);
+    layeredNodes.get(layer)!.push(dep.node);
   }
 
   // Build ordered path: API → Controller → Service → Repository → Model
@@ -100,10 +146,31 @@ export async function executeDataFlowTrace(
   const hasModel = (layeredNodes.get("model") ?? []).length > 0;
   const isFullTrace = hasApi && hasController && hasModel;
 
-  const confidence = isFullTrace ? 0.92 : pathSymbols.length > 1 ? 0.75 : 0.60;
+  // Wave 5: when the trace is backed by REAL data-touch edges, derive confidence
+  // from those edges' `metadata.confidence` (a ground-truth signal, stronger than
+  // the name-regex guess) and elevate it above the regex ladder. The hardcoded
+  // ladder is kept STRICTLY as the fallback for the no-edge / pre-data-touch case
+  // (same graceful-degradation principle as the layer classification above).
+  const edgeConfidences = dependencyNodes
+    .map((d) => d.edgeConfidence)
+    .filter((c): c is number => typeof c === "number");
+  const ladderConfidence = isFullTrace ? 0.92 : pathSymbols.length > 1 ? 0.75 : 0.6;
+  const confidence = edgeConfidences.length > 0
+    // Floor at the ladder value so an edge-resolved trace is never scored LOWER
+    // than the regex path, and lift toward 1.0 with the edges' own confidence.
+    ? Math.max(0, Math.min(1, Math.max(ladderConfidence, mean(edgeConfidences) + 0.05)))
+    : ladderConfidence;
+
+  // Wave 8 (T7): per-symbol edge confidence map (id → [0,1]) for the nodes whose
+  // layer was edge-resolved, so the MCP layer can surface `edgeConfidence`.
+  const edgeConfidenceById = new Map<string, number>();
+  for (const dep of dependencyNodes) {
+    if (dep.edgeConfidence !== undefined) edgeConfidenceById.set(dep.node.id, dep.edgeConfidence);
+  }
 
   return {
     resolution,
+    edgeConfidenceById,
     symbols: allSymbols,
     relationships,
     clusters: [],

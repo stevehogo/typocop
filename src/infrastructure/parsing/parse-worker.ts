@@ -34,6 +34,12 @@ import {
 import { extractSymbolsWithQueries, extractSymbols } from "./extract-symbols.js";
 import { generateSymbolId } from "./symbol-id.js";
 import { sha256Hex } from "../../platform/utils/hash.js";
+import { isFrameworkExtractionEnabled } from "../../platform/utils/limits.js";
+import {
+  extractFrameworkRecords,
+  type FrameworkRecords,
+} from "./frameworks/extract-framework-records.js";
+import type { Symbol } from "../../core/domain.js";
 import type {
   ParseTask,
   ParseTaskResult,
@@ -76,27 +82,107 @@ export async function runParseTask(
   // Hash the content the parser already read (A2) — no second fs.readFile.
   const contentHash = sha256Hex(parsed.content);
 
+  let baseSymbols: Symbol[];
+  let baseHints: ParseTaskSuccessHints;
   try {
     const result = extractSymbolsWithQueries(parsed.tree, relativePath, language, parser);
     if (result.symbols.length > 0) {
-      return { index, symbols: result.symbols, hints: result.hints, contentHash };
+      baseSymbols = result.symbols;
+      baseHints = result.hints;
+    } else {
+      // Structural fallback with deterministic IDs — lazily build the eager AST.
+      const ast = fromSyntaxNode(parsed.tree.rootNode);
+      baseSymbols = extractSymbols(ast, relativePath).map((sym) => ({
+        ...sym,
+        id: generateSymbolId(
+          sym.location.filePath,
+          sym.name,
+          sym.location.startLine,
+          sym.location.startColumn,
+        ),
+      }));
+      baseHints = [];
     }
-    // Structural fallback with deterministic IDs — lazily build the eager AST.
-    const ast = fromSyntaxNode(parsed.tree.rootNode);
-    const fallback = extractSymbols(ast, relativePath).map((sym) => ({
-      ...sym,
-      id: generateSymbolId(
-        sym.location.filePath,
-        sym.name,
-        sym.location.startLine,
-        sym.location.startColumn,
-      ),
-    }));
-    return { index, symbols: fallback, hints: [], contentHash };
   } catch (err) {
     // Extraction blew up on a degenerate tree — skip the file, keep the worker.
     return { index, skipped: true, reason: `extraction failed: ${String(err)}` };
   }
+
+  // ── Wave 6 framework pass (flag-gated, per-file path/text gate) ─────────────
+  // Runs over the ALREADY-PARSED tree. Read the flag in-worker (workers inherit
+  // `process.env`), so this path matches the in-process path. When OFF, none of
+  // the below executes and the output is byte-identical to pre-Wave-6.
+  if (isFrameworkExtractionEnabled()) {
+    let fw: FrameworkRecords;
+    try {
+      fw = await extractFrameworkRecords(parsed.tree, language, relativePath, parsed.content, filePath);
+    } catch {
+      // Never let the framework pass take down the worker.
+      fw = { routes: [], eventSubscribers: [], symbolEnrichments: [], documentationEnrichments: [], extraSymbols: [] };
+    }
+    const symbols = applyFrameworkSymbols(baseSymbols, fw);
+    if (fw.routes.length > 0 || fw.eventSubscribers.length > 0) {
+      return {
+        index,
+        symbols,
+        hints: baseHints,
+        contentHash,
+        routes: fw.routes,
+        eventSubscribers: fw.eventSubscribers,
+      };
+    }
+    return { index, symbols, hints: baseHints, contentHash };
+  }
+
+  return { index, symbols: baseSymbols, hints: baseHints, contentHash };
+}
+
+/** Hint-array type for the success result (kept local to avoid a wider import). */
+type ParseTaskSuccessHints = Extract<ParseTaskResult, { hints: unknown }>["hints"];
+
+/**
+ * Fold the framework pass's extra symbols + `responseKeys` + Eloquent
+ * `documentation` enrichments into the file's base symbols. Synthetic
+ * (path-driven) Symbols are appended; route-handler `responseKeys` (E3) are
+ * stamped onto the matching method Symbol by name; Eloquent model summaries (T6)
+ * are appended to the matching class Symbol's `documentation` (NO new persisted
+ * field). Pure; returns the SAME array when there is nothing to apply
+ * (byte-identical output).
+ */
+function applyFrameworkSymbols(base: Symbol[], fw: FrameworkRecords): Symbol[] {
+  if (
+    fw.extraSymbols.length === 0 &&
+    fw.symbolEnrichments.length === 0 &&
+    fw.documentationEnrichments.length === 0
+  ) {
+    return base;
+  }
+
+  let enriched: Symbol[] = base;
+
+  if (fw.symbolEnrichments.length > 0) {
+    const keysByMethod = new Map<string, readonly string[]>();
+    for (const e of fw.symbolEnrichments) keysByMethod.set(e.methodName, e.responseKeys);
+    enriched = enriched.map((sym) => {
+      const keys = sym.kind === "method" ? keysByMethod.get(sym.name) : undefined;
+      return keys && keys.length > 0 ? { ...sym, responseKeys: keys } : sym;
+    });
+  }
+
+  if (fw.documentationEnrichments.length > 0) {
+    const docByClass = new Map<string, string>();
+    for (const e of fw.documentationEnrichments) docByClass.set(e.className, e.documentation);
+    enriched = enriched.map((sym) => {
+      if (sym.kind !== "class") return sym;
+      const doc = docByClass.get(sym.name);
+      if (!doc) return sym;
+      // Append to any existing documentation rather than overwrite it.
+      const documentation = sym.documentation ? `${sym.documentation}\n${doc}` : doc;
+      return { ...sym, documentation };
+    });
+  }
+
+  return fw.extraSymbols.length > 0 ? [...enriched, ...fw.extraSymbols] : enriched;
 }
 
 /**

@@ -36,3 +36,12 @@ ingestion/
 .kiro/~hooks~/
 .typocop-obsidian
 docs/issues/
+docs/brainstorm/
+docs/plans/
+docs/refactoring/
+docs/COMPETITOR*
+docs/ENRICHMENT*
+docs/GRAPH-TOOLS-*
+docs/GRAPUCO*
+docs/LORADB*
+docs/PARSER-HIGHEST*

@@ -34,6 +34,67 @@ export interface CachedRelationshipHint {
   // are JSON-round-tripped) preserve these fields across the incremental path.
   readonly receiverText?: string;
   readonly enclosingSymbolId?: string;
+  // ── Wave 3 Tier-B receiver-type carrier (OPTIONAL; additive; `call` hints) ──
+  // Mirror of `RawRelationshipHint.receiverType` (the AST type-env's resolved
+  // receiver type NAME). Without this field the incremental cache would silently
+  // DROP it on a cache-reuse run, disabling Tier-B member-call resolution for
+  // unchanged files. Kept structurally in sync.
+  readonly receiverType?: string;
+  // ── Wave 4 call-resolution precision carriers (OPTIONAL; additive; `call`) ──
+  // Mirror of `RawRelationshipHint.argCount` / `callForm`. Without these the
+  // incremental cache would silently DROP them on a cache-reuse run, disabling
+  // Wave 4's arity / callable-kind filtering for unchanged files. The literal
+  // union is re-stated here (not imported) so `core/` stays a leaf; it assigns
+  // freely against `RawRelationshipHint.callForm` under structural typing. Kept
+  // structurally in sync.
+  readonly argCount?: number;
+  readonly callForm?: "free" | "member" | "constructor";
+  // ── Wave 1 named-binding carrier (OPTIONAL; additive; `import` hints only) ──
+  // Mirror of `RawRelationshipHint.namedBindings`. Without this field the
+  // incremental cache would silently DROP named bindings on a cache-reuse run,
+  // turning off Tier 2a-named for unchanged files. Kept structurally in sync.
+  readonly namedBindings?: { local: string; exported: string }[];
+  // ── Wave 7 (§3.1) heritage-flavor carrier (OPTIONAL; additive; heritage) ────
+  // Mirror of `RawRelationshipHint.heritageKind` (Go embedding / Ruby mixin
+  // flavor). Without this field the incremental cache would silently DROP the
+  // flavor on a cache-reuse run, dropping the `metadata.heritage` edge tag for
+  // unchanged files. The literal union is re-stated here (not imported) so
+  // `core/` stays a leaf; it assigns freely under structural typing. Kept
+  // structurally in sync.
+  readonly heritageKind?: "embed" | "include" | "extend" | "prepend";
+}
+
+/**
+ * A cached extracted HTTP route (Wave 6). Pure JSON — structurally identical to
+ * `ExtractedRoute` (`infrastructure/parsing/frameworks/extracted-records.ts`);
+ * re-stated here so `core/` stays a leaf. Kept structurally in sync. Without
+ * round-tripping these through the cache, a warm-cache (unchanged) file would
+ * silently DROP its framework routes on the incremental path.
+ */
+export interface CachedExtractedRoute {
+  readonly filePath: string;
+  readonly httpMethod: string;
+  readonly routePath: string | null;
+  readonly controllerName: string | null;
+  readonly methodName: string | null;
+  readonly middleware: string[];
+  readonly prefix: string | null;
+  readonly lineNumber: number;
+  readonly handlerNodeId?: string;
+}
+
+/**
+ * A cached extracted event subscriber (Wave 6). Pure JSON — structurally
+ * identical to `ExtractedEventSubscriber`; re-stated here so `core/` stays a
+ * leaf. Kept structurally in sync.
+ */
+export interface CachedExtractedEventSubscriber {
+  readonly filePath: string;
+  readonly topicName: string;
+  readonly className: string | null;
+  readonly methodName: string | null;
+  readonly framework: string;
+  readonly lineNumber: number;
 }
 
 /**
@@ -55,6 +116,14 @@ export interface CachedFileEntry {
   readonly symbols: Symbol[];
   /** Raw relationship hints extracted from the file (re-resolved globally each run). */
   readonly hints: CachedRelationshipHint[];
+  /**
+   * Wave 6 framework routes for this file (OPTIONAL; additive). Present only when
+   * the framework pass ran and produced records, so warm-cache (unchanged) files
+   * re-emit them on the incremental path instead of dropping them.
+   */
+  readonly routes?: CachedExtractedRoute[];
+  /** Wave 6 framework event subscribers for this file (OPTIONAL; additive). */
+  readonly eventSubscribers?: CachedExtractedEventSubscriber[];
 }
 
 /**

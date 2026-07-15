@@ -73,7 +73,9 @@ export async function runFullCLI(argv: string[]): Promise<void> {
   try {
     await executeCLI(command);
     await drainAllPools();
-    process.exit(0);
+    // Honour an exit code a command set on success (e.g. `check-recursion`
+    // exits 1 when it finds issues, for CI gating). Unset ⇒ 0, as before.
+    process.exit(process.exitCode ?? 0);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     process.stderr.write(msg + "\n");

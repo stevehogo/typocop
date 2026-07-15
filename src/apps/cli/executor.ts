@@ -19,7 +19,10 @@ import { FileEmbeddingCache } from "../../infrastructure/cache/embedding-cache.j
 import { executeObsidianExport } from "../../application/export-render/index.js";
 import { createFileWatcher, type FileWatcher } from "../../infrastructure/watch/file-watcher.js";
 import { augment } from "../../application/querying/augment.js";
+import { scanRecursionSuspects, formatRecursionReport } from "../../application/querying/recursion-report.js";
+import { stopConnectionServer } from "../../infrastructure/remote-transport/autostart-runtime.js";
 import { mergeTypocopHook, type ClaudeSettings } from "./setup.js";
+import { isTypeEnvEnabled, isLspTypesEnabled, isDataTouchEnabled, isDataTouchEventsEnabled, isDataTouchSingleModelFallbackEnabled, isCallRefuseAmbiguousEnabled, isFrameworkExtractionEnabled, isHeritageDisambiguationEnabled } from "../../platform/utils/limits.js";
 
 /**
  * A5: build the disk-backed parse + embedding caches for a prefix.
@@ -181,6 +184,29 @@ export async function executeIndexingPipeline(
       incremental,
       cache,
       embeddingCache,
+      // Wave 3 (Tier B): derive the type-env flag from env at the composition
+      // root. Default OFF; Phase 2 reads the same env directly in the workers.
+      typeEnvResolution: isTypeEnvEnabled(),
+      // Wave 3 (Tier A1): derive the TS-compiler-API flag from env. Default OFF;
+      // when on, a post-Phase-2 pass lazy-imports `typescript` and overrides
+      // `receiverType` for TS/JS hints (precedence over Tier B).
+      lspTypes: isLspTypesEnabled(),
+      // Wave 5: derive the data-touch flag + sub-flags from env. All default OFF
+      // (the wave is byte-identical until enabled).
+      dataTouch: isDataTouchEnabled(),
+      dataTouchEvents: isDataTouchEventsEnabled(),
+      dataTouchSingleModelFallback: isDataTouchSingleModelFallbackEnabled(),
+      // Wave 4 (Task 5): derive the refuse-on-ambiguity flag from env. Default
+      // OFF (the wave is byte-identical until enabled).
+      callRefuseAmbiguous: isCallRefuseAmbiguousEnabled(),
+      // Wave 6: derive the framework-extraction flag from env. Default OFF
+      // (DELIBERATE DEVIATION from the plan's default-ON, for program-wide
+      // consistency + safety); the wave is byte-identical until enabled.
+      frameworkExtraction: isFrameworkExtractionEnabled(),
+      // Wave 7 (§3.1): derive the heritage-disambiguation flag from env. Default
+      // OFF (the wave is byte-identical until enabled); Phase 2 reads the same env
+      // directly in the parse workers for the Go/Ruby heritage emission.
+      heritageDisambiguation: isHeritageDisambiguationEnabled(),
     };
 
     const result = await runIndexingPipeline(pipelineConfig);
@@ -361,6 +387,18 @@ export async function executeWatch(
       incremental: true,
       cache,
       embeddingCache,
+      typeEnvResolution: isTypeEnvEnabled(),
+      lspTypes: isLspTypesEnabled(),
+      // Wave 5: data-touch flag + sub-flags (default OFF) on the watch path too.
+      dataTouch: isDataTouchEnabled(),
+      dataTouchEvents: isDataTouchEventsEnabled(),
+      dataTouchSingleModelFallback: isDataTouchSingleModelFallbackEnabled(),
+      // Wave 4 (Task 5): refuse-on-ambiguity flag (default OFF) on the watch path too.
+      callRefuseAmbiguous: isCallRefuseAmbiguousEnabled(),
+      // Wave 6: framework-extraction flag (default OFF) on the watch path too.
+      frameworkExtraction: isFrameworkExtractionEnabled(),
+      // Wave 7 (§3.1): heritage-disambiguation flag (default OFF) on the watch path too.
+      heritageDisambiguation: isHeritageDisambiguationEnabled(),
     };
     try {
       const result = await reindexChangedFiles(batch, pipelineConfig);
@@ -582,6 +620,13 @@ export const TYPOCOP_AUGMENT_MARKER = "[typocop]";
  * any failure as "no context"; this function therefore swallows EVERY error so
  * the CLI exits 0 even when the DB is unavailable, locked, or empty.
  */
+/** `check-recursion` — report self-shadowing recursion (no DB). Returns exit code 0/1. */
+export async function executeCheckRecursion(rootPath: string, json: boolean, includeVendor = false): Promise<number> {
+  const findings = await scanRecursionSuspects(rootPath, { includeVendor });
+  console.log(formatRecursionReport(findings, { json }));
+  return findings.length > 0 ? 1 : 0;
+}
+
 export async function executeAugment(pattern: string): Promise<void> {
   if (!pattern || pattern.trim().length < 3) return;
   let adapter: DatabaseAdapter | undefined;
@@ -729,6 +774,11 @@ export async function executeCLI(command: CLICommand): Promise<void> {
       break;
     }
 
+    case "check-recursion": {
+      process.exitCode = await executeCheckRecursion(command.sourcePath, command.json, command.includeVendor);
+      break;
+    }
+
     case "setup": {
       await executeSetup(command.settingsPath);
       break;
@@ -752,6 +802,24 @@ export async function executeCLI(command: CLICommand): Promise<void> {
       console.error(`  Last Indexed:  ${chalk.cyan(status.lastIndexed ?? "never")}`);
       console.error(`  Symbols:       ${chalk.cyan(status.symbolCount)}`);
       console.error(`  Relationships: ${chalk.cyan(status.relationshipCount)}`);
+      break;
+    }
+
+    case "stop-server": {
+      const discoveryPath = configurationManager.getConfiguration().ladybugdb.serverDiscoveryPath;
+      const spinner = ora("Stopping LadybugDB connection server...").start();
+      try {
+        const result = await stopConnectionServer(discoveryPath);
+        if (result.stopped) {
+          spinner.succeed(chalk.green(`Connection server stopped (pid ${result.pid}).`));
+        } else {
+          // Not an error: no live server to stop, or it didn't exit in time.
+          spinner.info(chalk.yellow(result.reason ?? "No running connection server found."));
+        }
+      } catch (err) {
+        spinner.fail(chalk.red("Failed to stop the connection server."));
+        throw err;
+      }
       break;
     }
 

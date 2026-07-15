@@ -28,6 +28,36 @@ describe("parseArgs", () => {
     });
   });
 
+  it("parses the stop-server command", () => {
+    const command = parseArgs(["node", "typocop", "stop-server"]);
+    expect(command).toEqual({ type: "stop-server" });
+  });
+
+  it("parses the check-recursion command (defaults json/include-vendor false)", () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    const command = parseArgs(["node", "typocop", "check-recursion", "-p", "./src"]);
+    expect(command).toEqual({ type: "check-recursion", sourcePath: "./src", json: false, includeVendor: false });
+  });
+
+  it("parses the check-recursion command with --json", () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    const command = parseArgs(["node", "typocop", "check-recursion", "-p", "./src", "--json"]);
+    expect(command).toEqual({ type: "check-recursion", sourcePath: "./src", json: true, includeVendor: false });
+  });
+
+  it("parses the check-recursion command with --include-vendor", () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    const command = parseArgs(["node", "typocop", "check-recursion", "-p", "./src", "--include-vendor"]);
+    expect(command).toEqual({ type: "check-recursion", sourcePath: "./src", json: false, includeVendor: true });
+  });
+
+  it("rejects check-recursion when the path does not exist", () => {
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+    expect(() => parseArgs(["node", "typocop", "check-recursion", "-p", "./nope"])).toThrow(
+      "Source path does not exist: ./nope",
+    );
+  });
+
   it("auto-detects language when --lang is omitted", () => {
     vi.mocked(fs.existsSync).mockReturnValue(true);
     vi.mocked(languageModule.detectDirectoryLanguage).mockReturnValue("python");

@@ -1,5 +1,5 @@
 /**
- * Token-budgeted context slicing (D4; ported from arbor `slice.rs`).
+ * Token-budgeted context slicing (D4).
  *
  * Given a resolved target symbol and its related symbols (depth-1 callers and
  * callees, as produced by {@link executeContextRetrieval}), collect the minimal
@@ -7,9 +7,9 @@
  *
  * Ordering is deterministic BFS: the target first, then depth-1 callers, then
  * depth-1 callees (each group preserving its input order). Pinned symbols are
- * always emitted FIRST and always included regardless of budget — exactly as
- * arbor does (pinned nodes bypass the budget so the agent never loses a symbol
- * it explicitly asked to keep). Collection stops at the budget or the depth
+ * always emitted FIRST and always included regardless of budget — pinned nodes
+ * bypass the budget so the agent never loses a symbol it explicitly asked to
+ * keep. Collection stops at the budget or the depth
  * limit, recording why via {@link TruncationReason}.
  *
  * `estimateTokens` uses a dependency-free chars/4 heuristic in v1 (no tokenizer
@@ -71,7 +71,7 @@ export interface SliceOptions {
  * v1 has NO tokenizer dependency; this is the swappable seam. We approximate the
  * source the agent would read for the symbol from the fields we actually persist
  * — name, signature, file path, and a fixed per-line allowance over the symbol's
- * span (mirroring arbor's `lines * 40` chars/line estimate) — then divide by 4.
+ * span (a `lines * 40` chars/line estimate) — then divide by 4.
  */
 export function estimateTokens(symbol: Symbol): number {
   const name = symbol.name ?? "";
@@ -99,7 +99,7 @@ export function sliceContext(
 ): ContextSlice {
   const estimate = options.estimateTokens ?? estimateTokens;
   const maxDepth = options.maxDepth ?? 1;
-  // 0 == unlimited (arbor semantics).
+  // 0 == unlimited.
   const effectiveBudget = options.tokenBudget === 0 ? Number.POSITIVE_INFINITY : options.tokenBudget;
   const pinSet = new Set(options.pin ?? []);
 

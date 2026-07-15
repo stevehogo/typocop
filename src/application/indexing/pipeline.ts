@@ -14,6 +14,7 @@ import type {
   Language,
   Process,
   Relationship,
+  RelationType,
   Symbol,
 } from "../../core/domain.js";
 import { persistedKey } from "../../core/domain.js";
@@ -28,9 +29,11 @@ import { extractAllSymbols, extractAllSymbolsWithPerFile } from "./parsing/index
 import { classifyFiles } from "./cache/classify.js";
 import { PARSE_VERSION } from "../../infrastructure/parsing/parse-version.js";
 import { sha256Hex } from "../../platform/utils/hash.js";
+import { enrichHintsWithTsTypes } from "../../infrastructure/parsing/ts-types/ts-compiler.js";
 import { resolveReferences } from "./resolution/index.js";
 import { clusterSymbols, type AIClient } from "./clustering/index.js";
-import { traceProcesses } from "./processes/index.js";
+import { traceProcesses, annotateEntryPoints } from "./processes/index.js";
+import { runDataTouchPass } from "./data-touch/index.js";
 import { buildSearchIndex, type EmbeddingResult } from "./search/index.js";
 import { EMBEDDING_CONCURRENCY } from "../../platform/utils/limits.js";
 import { createMetricsCollector, formatMetrics, type IndexingMetrics } from "./metrics.js";
@@ -121,6 +124,111 @@ export interface PipelineConfig {
    */
   readonly cache?: IndexCachePort;
   readonly delta?: PipelineDelta;
+  /**
+   * Wave 3 (Tier B) AST type-env resolution. **Default `false`.** Derived from
+   * `TYPOCOP_TYPE_ENV` at the composition root (see {@link isTypeEnvEnabled}).
+   * When `true`, Phase 3 consumes the `receiverType` the type-env stamped on call
+   * hints (receiverType-first member-call resolution) and enables the ported
+   * return-type unwrap in chain binding. Phase 2 reads the SAME env directly
+   * (inside `extractSymbolsWithQueries`, which runs in parse workers that inherit
+   * `process.env`), so the two phases agree. Only affects TS/JS/Python/Go/Java/PHP.
+   * When off, hints carry no `receiverType` and resolution is byte-identical to
+   * pre-Wave-3.
+   */
+  readonly typeEnvResolution?: boolean;
+  /**
+   * Wave 3 (Tier A1) TypeScript-compiler-API receiver-type resolution.
+   * **Default `false`.** Derived from `TYPOCOP_LSP_TYPES` at the composition root
+   * (see {@link isLspTypesEnabled}). When `true`, a post-Phase-2 whole-corpus pass
+   * builds ONE TS `Program` per project (via a LAZY `import("typescript")` — the
+   * compiler is NEVER loaded when this is off) and, for TS/JS `call` hints,
+   * resolves the receiver's nominal type from the real type checker, stamping it
+   * onto `hint.receiverType` with PRECEDENCE over the Tier-B AST answer. Phase 3
+   * consumes `hint.receiverType` uniformly (no extra Phase-3 change). Only affects
+   * TS/JS; other languages are untouched (the A2 seam will add real language
+   * servers behind the same merge interface later). Heavy + measurement-gated
+   * (plan §8) — stays OFF by default. When off, the compiler is never imported and
+   * the emitted graph is byte-identical to a Tier-A-absent run.
+   */
+  readonly lspTypes?: boolean;
+  /**
+   * Wave 5 data-touch detection pass. **Default `false`.** Derived from
+   * `TYPOCOP_DATA_TOUCH` at the composition root (see {@link isDataTouchEnabled}).
+   * When `true`, a post-resolution whole-corpus pass detects DB models / route
+   * handlers over the resolved `calls` graph and emits
+   * `readsFromDb`/`writesToDb`/`handlesRoute` edges (plus synthetic anchor
+   * Symbols). When off, the pass never runs and the emitted graph is
+   * byte-identical to pre-Wave-5. (The pass is wired into the pipeline in a later
+   * stage; this flag is the gate.)
+   */
+  readonly dataTouch?: boolean;
+  /**
+   * Wave 5 sub-flag (`dataTouch.events`). **Default `false`.** Enables the
+   * heuristic event-channel detector (`publishesEvent`/`subscribesTo`). Noisy
+   * until Wave 6 supplies extracted channel args, so it stays OFF; only
+   * meaningful when {@link dataTouch} is on. Derived from
+   * `TYPOCOP_DATA_TOUCH_EVENTS`.
+   */
+  readonly dataTouchEvents?: boolean;
+  /**
+   * Wave 5 sub-flag (`dataTouch.singleModelFallback`). **Default `false`.**
+   * Enables the noisiest DB-resolution strategy (link a DB call to the sole model
+   * when exactly one exists). OFF by default for precision-over-recall; only
+   * meaningful when {@link dataTouch} is on. Derived from
+   * `TYPOCOP_DATA_TOUCH_SINGLE_MODEL_FALLBACK`.
+   */
+  readonly dataTouchSingleModelFallback?: boolean;
+  /**
+   * Wave 4 (Task 5) refuse-on-ambiguity call-resolution discipline. **Default
+   * `false`.** Derived from `TYPOCOP_CALL_REFUSE_AMBIGUOUS` at the composition
+   * root (see {@link isCallRefuseAmbiguousEnabled}). When `true`, Phase 3's
+   * call-target selector narrows candidates by callable-kind + arity +
+   * receiver-type and emits a `calls` edge ONLY when exactly one survives
+   * (otherwise no edge), raising precision at a bounded recall cost. When off,
+   * the selector runs the byte-identical legacy `candidates[0]` / global-fallback
+   * path and the Wave-4 filters never execute → emitted graph is byte-identical
+   * to pre-Wave-4. The additive `argCount`/`callForm` hint fields (Tasks 1-4) are
+   * harmless when this is off. Reversible: flag off restores prior behaviour
+   * exactly.
+   */
+  readonly callRefuseAmbiguous?: boolean;
+  /**
+   * Wave 6 framework-extraction pass. **Default `false`.** Derived from
+   * `TYPOCOP_FRAMEWORK_EXTRACTION` at the composition root (see
+   * {@link isFrameworkExtractionEnabled}).
+   *
+   * DELIBERATE DEVIATION from the wave plan's default-ON: ships default-OFF for
+   * program-wide consistency + safety (like {@link dataTouch} /
+   * {@link callRefuseAmbiguous}). When `true`, the per-file Phase-2 framework
+   * pass extracts routes / event subscribers (and Magento2 / `responseKeys`)
+   * over the already-parsed tree, gated PER FILE by a cheap path/text probe.
+   * When `false`, the pass never runs and Phase-2 output is byte-identical to
+   * pre-Wave-6 for ALL files; non-framework files are byte-identical even when
+   * it is `true` (the gate skips them).
+   *
+   * The flag is read DIRECTLY in the parse worker (which inherits `process.env`),
+   * so the worker and in-process paths agree; this `PipelineConfig` field exists
+   * for per-run testability and is linked to {@link PARSE_VERSION} so toggling it
+   * invalidates the warm cache.
+   */
+  readonly frameworkExtraction?: boolean;
+  /**
+   * Wave 7 (§3.1) heritage / MRO correctness disambiguation. **Default `false`.**
+   * Derived from `TYPOCOP_HERITAGE_DISAMBIGUATION` at the composition root (see
+   * {@link isHeritageDisambiguationEnabled}). When `true`, gates the
+   * edge-changing parts: (a) Phase-3 interface-vs-class disambiguation in the
+   * heritage hint loop (an `inherits` hint may become an `implements` edge — and
+   * vice-versa), (b) the per-language tie-break rules in `computeMRO`, and
+   * (c) the Phase-2 Go anonymous-struct-embedding + Ruby `include`/`extend`/
+   * `prepend` mixin heritage emission (the Phase-2 part is read DIRECTLY from the
+   * env in the parse worker, which inherits `process.env`; this field carries the
+   * Phase-3 half). When off, heritage relTypes trust `hint.kind`, `computeMRO`
+   * runs its language-blind single-loop, and no Go-embed / Ruby-mixin edges are
+   * produced → byte-identical to pre-Wave-7. The additive ambiguity diagnostics
+   * (`MROResult.entries`) are inert/always-on regardless. Linked to
+   * {@link PARSE_VERSION} so toggling invalidates the warm cache.
+   */
+  readonly heritageDisambiguation?: boolean;
 }
 
 /**
@@ -197,18 +305,58 @@ export async function runIndexingPipeline(config: PipelineConfig): Promise<Pipel
     runPhase2(config, fileNodes, progress.onProgress),
   );
   progress.done();
-  const { symbols: phase2Symbols, hints, skippedFiles } = phase2;
+  const { symbols: phase2Symbols, skippedFiles } = phase2;
+  // `let` (not `const`): Wave 3 Tier-A1 re-binds `hints` below with the
+  // compiler-API-enriched set (precedence over the Tier-B `receiverType`).
+  let hints = phase2.hints;
+
+  // ── Wave 3 Tier-A1: TS-compiler-API receiver-type enrichment ────────────────
+  // A whole-corpus, post-Phase-2 pass (Phase 2 is per-file and may run in worker
+  // threads that cannot share a TS `Program`, so the type-checker cannot live
+  // there). Builds ONE `Program` per project via a LAZY `import("typescript")`
+  // and, for TS/JS `call` hints, overrides `hint.receiverType` with the real
+  // type checker's answer (PRECEDENCE over Tier B; on a miss the Tier-B answer
+  // survives). Timed under the `typeEnv` phase. Gated on `config.lspTypes` —
+  // when off, `enrichHintsWithTsTypes` is never called, `typescript` is never
+  // imported, and `hints` is byte-identical to today. Covers both the full run
+  // and the watch path (`reindexChangedFiles` delegates to this function).
+  if (config.lspTypes) {
+    let tsTypedReceivers = 0;
+    hints = await metrics.time("typeEnv", () =>
+      enrichHintsWithTsTypes(hints, {
+        sourcePath,
+        onResolved: () => {
+          tsTypedReceivers += 1;
+        },
+      }),
+    );
+    if (verbose) {
+      console.error(
+        `[pipeline] Tier-A1 (TS compiler API): ${tsTypedReceivers} receiver type(s) resolved`,
+      );
+    }
+  }
+
   // E3: fold `member.access` hints into each consumer symbol's `accessedKeys`
   // (purely additive — see {@link attachAccessedKeys}). All later phases see the
   // augmented list; the added optional prop is ignored by resolution/clustering,
   // so the graph stays byte-identical apart from the new Symbol prop.
-  const symbols = attachAccessedKeys(phase2Symbols, hints);
+  // `let` (not `const`): Wave 2 re-binds it after Phase 5 with the additive
+  // entry-point annotation (see {@link annotateEntryPoints}).
+  let symbols = attachAccessedKeys(phase2Symbols, hints);
   metrics.set("skippedFiles", skippedFiles);
   metrics.set("filesParsed", phase2.filesParsed);
   metrics.set("symbolCount", symbols.length);
   metrics.set("hintCount", hints.length);
   if (verbose) {
     console.error(`[pipeline] Phase 2 complete: ${symbols.length} symbols extracted, ${hints.length} relationship hints`);
+    // Wave 6: surface the framework records threaded out of Phase 2 (shared with
+    // the data-touch pass). Empty unless `frameworkExtraction` is on.
+    if (phase2.routes.length > 0 || phase2.eventSubscribers.length > 0) {
+      console.error(
+        `[pipeline] Framework extraction: ${phase2.routes.length} route(s), ${phase2.eventSubscribers.length} event subscriber(s)`,
+      );
+    }
     if (phase2.classification) {
       const c = phase2.classification;
       console.error(
@@ -238,13 +386,78 @@ export async function runIndexingPipeline(config: PipelineConfig): Promise<Pipel
   if (verbose) console.error("[pipeline] Starting Phase 3: Resolution");
 
   // Phase 3: Resolve references (Req 3.3)
-  const { relationships, extNodes, dependsOnStats } = await metrics.time("resolution", () =>
-    resolveReferences(symbols, hints, sourcePath),
+  //
+  // Wave 1: thread the repo file list (relative `fileNode.path`s — the same form
+  // as `hint.sourceFile` and `Symbol.location.filePath`) so Phase 3 can resolve
+  // import specifiers to concrete paths and populate the import/package/named
+  // maps (Tiers 2a / 2a-named / 2b). Omitting this arg is the zero-code rollback.
+  // Wave 3: Phase 3 consumes `hint.receiverType` (receiverType-first member-call
+  // resolution) when EITHER type tier is on — Tier B (`typeEnvResolution`, the AST
+  // env that populates `receiverType` in Phase 2) OR Tier A1 (`lspTypes`, the
+  // compiler-API pass that just overrode it above). Both produce the SAME field,
+  // so Phase 3 stays tier-agnostic (no extra Phase-3 change beyond Tier B). When
+  // both are off, no hint carries `receiverType` and this is a no-op.
+  const consumeReceiverType = (config.typeEnvResolution ?? false) || (config.lspTypes ?? false);
+  // Wave 4 (Task 5): forward the refuse-on-ambiguity flag to Phase 3. Default OFF
+  // → byte-identical pre-Wave-4 selection.
+  const callRefuseAmbiguous = config.callRefuseAmbiguous ?? false;
+  // Wave 7 (§3.1): forward the heritage-disambiguation flag to Phase 3 (the
+  // interface-vs-class relType decision + the per-language `computeMRO` rules).
+  // Default OFF → byte-identical pre-Wave-7. The Phase-2 half (Go/Ruby heritage
+  // emission) reads the same env directly in the parse worker.
+  const heritageDisambiguation = config.heritageDisambiguation ?? false;
+  // `let` (not `const`): the Wave 5 data-touch pass (below) re-binds both with
+  // the additive synthetic Symbols + data-touch edges before clustering/persist.
+  const resolution = await metrics.time("resolution", () =>
+    resolveReferences(symbols, hints, sourcePath, fileNodes.map((f) => f.path), consumeReceiverType, callRefuseAmbiguous, heritageDisambiguation),
   );
+  let relationships = resolution.relationships;
+  const { extNodes, dependsOnStats } = resolution;
   metrics.set("relationshipCount", relationships.length);
   metrics.set("externalDependencyCount", extNodes.size);
   if (verbose) console.error(`[pipeline] Phase 3 complete: ${relationships.length} relationships resolved`);
   if (verbose && dependsOnStats) console.error(`[pipeline] Phase 3 DEPENDS_ON fan-out: ${dependsOnStats.edgeCount} edges (max ${dependsOnStats.maxFanOutPerImport} per external import)`);
+
+  // ── Phase 3.5: Data-touch detection + flow assembly (Wave 5) ────────────────
+  // GLOBAL post-resolution pass, gated behind `config.dataTouch` (default OFF —
+  // byte-identical when off). Detects DB models / route handlers over the
+  // resolved `calls` graph and emits `readsFromDb`/`writesToDb`/`handlesRoute`
+  // edges (plus synthetic anchor Symbols), then assembles end-to-end flows
+  // (`GET /users -> users`) as additive `Process` records. The augmented
+  // `symbols`/`relationships` flow into clustering/persist unchanged (the new
+  // edges are global aggregates rewritten wholesale, like DEPENDS_ON; the new
+  // synthetic Symbols are excluded from clustering + search). The flows are
+  // APPENDED to the Phase-5 `Process[]` below. This is a whole-graph re-run on
+  // every full/delta index (no per-file delta bookkeeping).
+  let dataTouchFlows: Process[] = [];
+  if (config.dataTouch) {
+    const pass = await metrics.time("dataTouch", async () =>
+      runDataTouchPass(symbols, relationships, {
+        events: config.dataTouchEvents,
+        singleModelFallback: config.dataTouchSingleModelFallback,
+        // Wave 6 → Wave 5 feed: thread the Phase-2 structured records so the
+        // data-touch pass emits HIGH-confidence `handlesRoute`/`subscribesTo`
+        // edges from them (Step 0) and the heuristics defer. Empty unless
+        // framework extraction also ran (records only flow when BOTH flags are
+        // on), so this is additive and default-unchanged.
+        extractedRoutes: phase2.routes,
+        extractedEvents: phase2.eventSubscribers,
+      }),
+    );
+    if (pass.newSymbols.length > 0) symbols = [...symbols, ...pass.newSymbols];
+    if (pass.newRelationships.length > 0) relationships = [...relationships, ...pass.newRelationships];
+    dataTouchFlows = pass.flows;
+    metrics.set("dataTouchEdgeCount", pass.newRelationships.length);
+    metrics.set("syntheticSymbolCount", pass.newSymbols.length);
+    metrics.set("relationshipCount", relationships.length);
+    metrics.set("symbolCount", symbols.length);
+    if (verbose) {
+      console.error(
+        `[pipeline] Phase 3.5 (data-touch): ${pass.newRelationships.length} edge(s), ` +
+          `${pass.newSymbols.length} synthetic Symbol(s), ${pass.flows.length} flow(s) assembled`,
+      );
+    }
+  }
 
   if (verbose) console.error("[pipeline] Starting Phase 4: Clustering");
 
@@ -259,7 +472,21 @@ export async function runIndexingPipeline(config: PipelineConfig): Promise<Pipel
 
   // Phase 5: Trace processes (Req 3.5)
   metrics.startPhase("processes");
-  const processes = traceProcesses(symbols, relationships);
+  const callFlowProcesses = traceProcesses(symbols, relationships);
+  // Wave 5: APPEND the assembled data-touch flows (computed in Phase 3.5) to the
+  // call-flow Processes — additive, not a replacement. Both ride the same
+  // `Process`/`HAS_STEP` persistence; data-flow Processes are distinguished by
+  // their name convention (`GET /users -> users`) and `dataflow_*` id. Empty when
+  // `config.dataTouch` is off, so `processes` stays byte-identical pre-Wave-5.
+  const processes = dataTouchFlows.length > 0
+    ? [...callFlowProcesses, ...dataTouchFlows]
+    : callFlowProcesses;
+  // Wave 2 (1.1): annotate entry-point symbols with `entryPointKind` /
+  // `entryPointReason` so the persisted Symbol node carries them. Purely
+  // additive — symbols below the entry-point threshold are returned unchanged,
+  // so search/clustering/persisted shape stay identical where no metadata
+  // applies (the new optional props are ignored by every downstream phase).
+  symbols = annotateEntryPoints(symbols, relationships);
   metrics.endPhase("processes");
   metrics.set("processCount", processes.length);
   if (verbose) console.error(`[pipeline] Phase 5 complete: ${processes.length} processes traced`);
@@ -386,7 +613,12 @@ export async function runIndexingPipeline(config: PipelineConfig): Promise<Pipel
     : null;
   const symbolsToInsert = insertScope === null
     ? symbols
-    : symbols.filter((s) => insertScope.has(s.location.filePath));
+    // Wave 5: synthetic data-touch anchors (`dbmodel:`/`apiendpoint:`/`eventchannel:`)
+    // are GLOBAL aggregates, like clusters/processes — the data-touch pass
+    // re-derives them whole-graph each run. Always (re)insert them regardless of
+    // the changed-file scope so the wholesale-rewritten data-touch edges never
+    // dangle on a delta write (keeps delta == full).
+    : symbols.filter((s) => s.synthetic || insertScope.has(s.location.filePath));
 
   // B3 (vector streaming): an embedding is in-scope for this run's vector write
   // when no delta is active (full write) OR its file is in the changed+added
@@ -551,6 +783,14 @@ interface Phase2Output {
   readonly symbols: Symbol[];
   readonly hints: RawRelationshipHintLike[];
   readonly skippedFiles: number;
+  /**
+   * Wave 6 framework records, surfaced from Phase 2 in original walk order
+   * (shared with Wave 5; consumed by the data-touch pass). Empty unless the
+   * framework pass ran. On the incremental path these are merged from
+   * freshly-parsed AND warm-cache (unchanged) files so they round-trip.
+   */
+  readonly routes: ExtractedRouteLike[];
+  readonly eventSubscribers: ExtractedEventSubscriberLike[];
   /** Files actually re-parsed this run (changed+added minus skips on the full path). */
   readonly filesParsed: number;
   /** A4 delta plan derived from the classify buckets (undefined on a full run). */
@@ -571,6 +811,14 @@ interface Phase2Output {
  *  Both the freshly-parsed `RawRelationshipHint` and the cached
  *  `CachedRelationshipHint` assign to this under structural typing. */
 type RawRelationshipHintLike = CachedFileEntry["hints"][number];
+
+/** Structural aliases for the Wave 6 framework records as they flow through the
+ *  pipeline. Both the freshly-parsed `ExtractedRoute`/`ExtractedEventSubscriber`
+ *  and the cached `CachedExtractedRoute`/`CachedExtractedEventSubscriber` assign
+ *  to these under structural typing, so freshly-parsed and warm-cache records
+ *  merge into the same array without conversion. */
+type ExtractedRouteLike = NonNullable<CachedFileEntry["routes"]>[number];
+type ExtractedEventSubscriberLike = NonNullable<CachedFileEntry["eventSubscribers"]>[number];
 
 /**
  * Phase 2 with A5 incremental orchestration.
@@ -601,10 +849,21 @@ async function runPhase2(
 
   // Full path: no cache wired or incremental explicitly disabled (--full/--refresh).
   if (cache === undefined || !incremental) {
-    const { symbols, hints, skippedFiles } = await extractAllSymbols(fileNodes, sourcePath, {
-      onProgress,
-    });
-    return { symbols, hints, skippedFiles, filesParsed: fileNodes.length - skippedFiles };
+    const { symbols, hints, skippedFiles, routes, eventSubscribers } = await extractAllSymbols(
+      fileNodes,
+      sourcePath,
+      { onProgress },
+    );
+    return {
+      symbols,
+      hints,
+      skippedFiles,
+      // Coalesce: `ParsingResult` declares these required, but defend against a
+      // partial mock so the orchestrator's consumers always see arrays.
+      routes: routes ?? [],
+      eventSubscribers: eventSubscribers ?? [],
+      filesParsed: fileNodes.length - skippedFiles,
+    };
   }
 
   // ── Incremental path ────────────────────────────────────────────────────────
@@ -659,6 +918,10 @@ async function runPhase2(
   // cached entry for this run, so they contribute nothing — exactly as a full run.
   const mergedSymbols: Symbol[] = [];
   const mergedHints: RawRelationshipHintLike[] = [];
+  // Wave 6 framework records, merged in the same walk order so the incremental
+  // output is byte-identical to a full parse (slot-by-original-index guarantee).
+  const mergedRoutes: ExtractedRouteLike[] = [];
+  const mergedEventSubscribers: ExtractedEventSubscriberLike[] = [];
   // Next cache snapshot, also built in walk order (insertion order is irrelevant
   // to correctness but keeps the manifest stable across no-edit runs).
   const nextCache = new Map<string, CachedFileEntry>();
@@ -668,12 +931,19 @@ async function runPhase2(
     if (fresh !== undefined) {
       mergedSymbols.push(...fresh.symbols);
       mergedHints.push(...fresh.hints);
+      if (fresh.routes !== undefined) mergedRoutes.push(...fresh.routes);
+      if (fresh.eventSubscribers !== undefined) mergedEventSubscribers.push(...fresh.eventSubscribers);
       nextCache.set(fileNode.path, {
         contentHash: fresh.contentHash,
         mtimeMs: fileNode.mtimeMs,
         parseVersion: PARSE_VERSION,
         symbols: fresh.symbols,
         hints: fresh.hints,
+        // Round-trip framework records per file (only present when non-empty).
+        ...(fresh.routes !== undefined && fresh.routes.length > 0 ? { routes: fresh.routes } : {}),
+        ...(fresh.eventSubscribers !== undefined && fresh.eventSubscribers.length > 0
+          ? { eventSubscribers: fresh.eventSubscribers }
+          : {}),
       });
       continue;
     }
@@ -684,6 +954,10 @@ async function runPhase2(
     if (cached !== undefined && cached.parseVersion === PARSE_VERSION) {
       mergedSymbols.push(...cached.symbols);
       mergedHints.push(...cached.hints);
+      // Warm-cache framework records re-emit here (PARSE_VERSION bump guarantees
+      // a pre-Wave-6 entry is stale and re-parsed, so these are Wave-6-shaped).
+      if (cached.routes !== undefined) mergedRoutes.push(...cached.routes);
+      if (cached.eventSubscribers !== undefined) mergedEventSubscribers.push(...cached.eventSubscribers);
       nextCache.set(fileNode.path, cached);
     }
   }
@@ -706,6 +980,8 @@ async function runPhase2(
     symbols: dedupedSymbols,
     hints: mergedHints,
     skippedFiles: parsed.skippedFiles,
+    routes: mergedRoutes,
+    eventSubscribers: mergedEventSubscribers,
     filesParsed: toParse.length - parsed.skippedFiles,
     delta,
     saveCache,
@@ -837,6 +1113,26 @@ function attachAccessedKeys(
   });
 }
 
+/**
+ * Maps a {@link RelationType} to its Cypher REL-table label where the default
+ * `relType.toUpperCase()` would NOT produce the intended snake_case table name.
+ *
+ * Most relTypes (`calls` → `CALLS`, `inherits` → `INHERITS`) round-trip cleanly,
+ * but `dependsOn` and the Wave 5 camelCase data-touch types collapse their word
+ * boundaries under `toUpperCase()` (`readsFromDb` → `READSFROMDB`, NOT
+ * `READS_FROM_DB`). Listing them here keeps the persisted edge label in lock-step
+ * with the `CREATE REL TABLE` / `REL_LABEL_MAP` / `KNOWN_REL_TYPES` entries in the
+ * Ladybug adapter. Any relType NOT in this map falls back to `toUpperCase()`.
+ */
+export const RELTYPE_EDGE_LABEL: Partial<Record<RelationType, string>> = {
+  dependsOn: "DEPENDS_ON",
+  readsFromDb: "READS_FROM_DB",
+  writesToDb: "WRITES_TO_DB",
+  handlesRoute: "HANDLES_ROUTE",
+  publishesEvent: "PUBLISHES_EVENT",
+  subscribesTo: "SUBSCRIBES_TO",
+};
+
 export function countPersistRows(
   vectorEntries: number,
   symbols: readonly Symbol[],
@@ -929,6 +1225,18 @@ async function storeInDatabases(
       // countPersistRows is unaffected (props, not rows).
       responseKeys: JSON.stringify(s.responseKeys ?? []),
       accessedKeys: JSON.stringify(s.accessedKeys ?? []),
+      // Wave 2: export flag + entry-point classification props (string, empty
+      // when absent). countPersistRows is unaffected (props, not rows).
+      // Tri-state isExported: persist "" when the export checker abstained
+      // (undefined) so the read side leaves it undefined and the
+      // `isExported ?? visibility` fallback still fires — never collapse to "false".
+      isExported: s.isExported === undefined ? "" : s.isExported ? "true" : "false",
+      entryPointKind: s.entryPointKind ?? "",
+      entryPointReason: s.entryPointReason ?? "",
+      // Wave 5: synthetic-Symbol tag (data-touch DB-model / API-endpoint anchors).
+      // Persisted as "true"/"" so the read side leaves it undefined for real
+      // symbols. countPersistRows is unaffected (prop, not row).
+      synthetic: s.synthetic ? "true" : "",
     })),
     countNodes,
     nodeEvents,
@@ -976,11 +1284,14 @@ async function storeInDatabases(
 
   // ── Relationship groups (one type each) ─────────────────────────────────────
   // Resolved relationships carry mixed relTypes; group by the SAME mapping used
-  // by the per-row path ("dependsOn" → "DEPENDS_ON", else relType.toUpperCase())
-  // so each batch call sees a single type, preserving insertion order per type.
+  // by the per-row path so each batch call sees a single type, preserving
+  // insertion order per type. Most relTypes round-trip through `toUpperCase()`,
+  // but the camelCase data-touch types (Wave 5) do NOT collapse to the snake_case
+  // REL table names (`readsFromDb` → `READSFROMDB` ≠ `READS_FROM_DB`), so they are
+  // mapped explicitly via RELTYPE_EDGE_LABEL alongside the existing dependsOn case.
   const edgesByType = new Map<string, RelationshipRow[]>();
   for (const r of relationships) {
-    const type = r.relType === "dependsOn" ? "DEPENDS_ON" : r.relType.toUpperCase();
+    const type = RELTYPE_EDGE_LABEL[r.relType] ?? r.relType.toUpperCase();
     const rows = edgesByType.get(type) ?? [];
     rows.push({ fromId: keyOf(r.source), toId: keyOf(r.target), properties: r.metadata });
     edgesByType.set(type, rows);

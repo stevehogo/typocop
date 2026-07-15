@@ -25,9 +25,24 @@ const CALLER_PREVIEW = 10;
 /** Max caller names kept in the structured `evidence` array (bounds response size). */
 const EVIDENCE_CAP = 50;
 
-/** Mirror of dead-code.ts isExported — part of the public surface (no in-repo caller required). */
+/**
+ * Mirror of dead-code.ts isExported — part of the public surface (no in-repo
+ * caller required).
+ *
+ * Wave 8 (T1): prefer the REAL persisted `isExported` signal (Wave 2) over the
+ * `visibility`/`kind` proxy, falling back to the proxy for pre-Wave-2 graphs.
+ */
 function isExported(symbol: Symbol): boolean {
-  return symbol.visibility === "public" || symbol.kind === "export";
+  return symbol.isExported ?? (symbol.visibility === "public" || symbol.kind === "export");
+}
+
+/**
+ * True when a symbol is a framework/runtime entry point (so legitimately
+ * uncalled in-repo). Wave 8 (T1): prefer the persisted `entryPointKind` (Wave 2)
+ * over the `isEntryPointName` NAME regex; the regex is the pre-Wave-2 fallback.
+ */
+function isEntryPoint(symbol: Symbol): boolean {
+  return symbol.entryPointKind !== undefined || isEntryPointName(symbol.name);
 }
 
 /** One incoming caller of the target (id + display name). */
@@ -81,7 +96,7 @@ export async function verifyUsage(symbol: string, graph: GraphAdapter): Promise<
 
   // No incoming CALLS edges. Decide whether that proves death.
   const exported = isExported(sym);
-  const entryPoint = isEntryPointName(sym.name);
+  const entryPoint = isEntryPoint(sym);
   if (exported || entryPoint) {
     const why = exported
       ? "it is exported (part of the public surface)"

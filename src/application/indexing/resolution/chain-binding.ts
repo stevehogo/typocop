@@ -13,6 +13,7 @@
  * caller's owner type.
  */
 import type { Symbol } from "../../../core/domain.js";
+import { extractReturnTypeName } from "./return-type.js";
 
 export interface ChainBindingDeps {
   /** id → Symbol. */
@@ -23,8 +24,27 @@ export interface ChainBindingDeps {
   readonly methodsByOwner: ReadonlyMap<string, Symbol[]>;
 }
 
-/** Strip generics/decorations to a bare type name (`Promise<User>` → `User`). */
-export function bareTypeName(returnType: string): string | undefined {
+/**
+ * Strip generics/decorations to a bare type name.
+ *
+ * Default (Wave-3 flag OFF) — BYTE-IDENTICAL to pre-Wave-3: unwrap ONE generic
+ * level, take the leading identifier. It cannot tell a wrapper (`Promise`) from a
+ * container (`List`).
+ *
+ * `useReturnTypeUnwrap=true` (Wave 3 Tier-B, Task 2) — delegate to the ported
+ * {@link extractReturnTypeName}: distinguish wrapper generics (`Promise<User>`→
+ * `User`, `Result<User,E>`→`User`) from containers (`List<User>`→`List`), unwrap
+ * Go pointers / Rust refs / nullable unions, and return `undefined` for genuine
+ * unions / primitives / bare wrappers (its `undefined` is intentional — a
+ * precision refusal, NOT a fallback to the old behaviour).
+ */
+export function bareTypeName(
+  returnType: string,
+  useReturnTypeUnwrap = false,
+): string | undefined {
+  if (useReturnTypeUnwrap) {
+    return extractReturnTypeName(returnType);
+  }
   const trimmed = returnType.trim();
   // Unwrap a single Promise<...>/Array<...>/... wrapper to the inner type.
   const generic = trimmed.match(/^[A-Za-z_$][\w$]*<\s*(.+?)\s*>$/);
@@ -38,7 +58,7 @@ export function bareTypeName(returnType: string): string | undefined {
 }
 
 /** Resolve a bare type NAME to its defining class/struct/interface symbol. */
-function typeNameToSymbol(
+export function typeNameToSymbol(
   typeName: string,
   deps: ChainBindingDeps,
 ): Symbol | undefined {
@@ -57,11 +77,12 @@ export function stepChain(
   receiverType: Symbol,
   methodName: string,
   deps: ChainBindingDeps,
+  useReturnTypeUnwrap = false,
 ): Symbol | undefined {
   const methods = deps.methodsByOwner.get(receiverType.id) ?? [];
   const method = methods.find((m) => m.name === methodName);
   if (!method?.returnType) return undefined;
-  const typeName = bareTypeName(method.returnType);
+  const typeName = bareTypeName(method.returnType, useReturnTypeUnwrap);
   if (!typeName) return undefined;
   return typeNameToSymbol(typeName, deps);
 }
@@ -82,6 +103,7 @@ export function resolveReceiverType(
   receiverText: string,
   caller: Symbol,
   deps: ChainBindingDeps,
+  useReturnTypeUnwrap = false,
 ): Symbol | undefined {
   const text = receiverText.trim();
   if (text === "this" || text === "self") {
@@ -96,9 +118,9 @@ export function resolveReceiverType(
   const chain = text.match(/^(.*)\.([A-Za-z_$][\w$]*)\s*\(\s*\)$/);
   if (chain) {
     const [, head, method] = chain;
-    const headType = resolveReceiverType(head, caller, deps);
+    const headType = resolveReceiverType(head, caller, deps, useReturnTypeUnwrap);
     if (!headType) return undefined;
-    return stepChain(headType, method, deps);
+    return stepChain(headType, method, deps, useReturnTypeUnwrap);
   }
 
   // `this.field` / `self.field`: field types need flow analysis — skip in v1.

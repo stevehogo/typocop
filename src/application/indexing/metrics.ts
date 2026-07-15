@@ -15,7 +15,18 @@
 export type PhaseName =
   | "structure"
   | "parsing"
+  // Wave 3 (Tier B): the per-file AST type-env walk. It currently runs INSIDE the
+  // `parsing` phase (within `extractSymbolsWithQueries`, reusing the live tree),
+  // so this slot stays 0 until/unless the env is hoisted into a top-level pass.
+  // Declared here so the phase exists in the closed `Record<PhaseName,...>` enum.
+  | "typeEnv"
   | "resolution"
+  // Wave 5: the post-resolution data-touch detection + flow-assembly pass. Runs
+  // between resolution and clustering when `PipelineConfig.dataTouch` is on; stays
+  // 0 when the flag is off (the pass never runs). Declared here so the phase
+  // exists in the closed `Record<PhaseName,...>` enum (the pass itself is wired in
+  // a later stage).
+  | "dataTouch"
   | "clustering"
   | "processes"
   | "search"
@@ -96,6 +107,14 @@ export interface IndexingMetrics {
   readonly adaptiveSplitCount: number;
   /** Oversized rows routed alone by chunkByBudget's onOversizedItem hook. */
   readonly oversizedRowCount: number;
+
+  // ── Wave 5: data-touch pass counters ──
+  // Both stay 0 unless the (default-off) data-touch pass runs. Counts only —
+  // never source code or symbol text.
+  /** Data-touch edges emitted (readsFromDb/writesToDb/handlesRoute/…). */
+  readonly dataTouchEdgeCount: number;
+  /** Synthetic Symbols minted by the data-touch pass (dbmodel:/apiendpoint:). */
+  readonly syntheticSymbolCount: number;
 }
 
 /**
@@ -156,7 +175,10 @@ type CountField =
   | "nodeBatchCount"
   | "relationshipBatchCount"
   | "adaptiveSplitCount"
-  | "oversizedRowCount";
+  | "oversizedRowCount"
+  // Wave 5 data-touch counters. Stay 0 when the pass is off (flag default).
+  | "dataTouchEdgeCount"
+  | "syntheticSymbolCount";
 
 /** Accumulating elapsed-millisecond fields. */
 type ElapsedField = "embeddingElapsedMs";
@@ -164,7 +186,9 @@ type ElapsedField = "embeddingElapsedMs";
 const PHASE_NAMES: readonly PhaseName[] = [
   "structure",
   "parsing",
+  "typeEnv",
   "resolution",
+  "dataTouch",
   "clustering",
   "processes",
   "search",
@@ -179,7 +203,9 @@ export function createMetricsCollector(): MetricsCollector {
   const phases: Record<PhaseName, number> = {
     structure: 0,
     parsing: 0,
+    typeEnv: 0,
     resolution: 0,
+    dataTouch: 0,
     clustering: 0,
     processes: 0,
     search: 0,
@@ -193,7 +219,9 @@ export function createMetricsCollector(): MetricsCollector {
   const phaseRss: Record<PhaseName, number> = {
     structure: 0,
     parsing: 0,
+    typeEnv: 0,
     resolution: 0,
+    dataTouch: 0,
     clustering: 0,
     processes: 0,
     search: 0,
@@ -228,6 +256,8 @@ export function createMetricsCollector(): MetricsCollector {
     relationshipBatchCount: 0,
     adaptiveSplitCount: 0,
     oversizedRowCount: 0,
+    dataTouchEdgeCount: 0,
+    syntheticSymbolCount: 0,
   };
 
   const elapsed: Record<ElapsedField, number> = {
@@ -312,6 +342,8 @@ export function createMetricsCollector(): MetricsCollector {
         relationshipBatchCount: counts.relationshipBatchCount,
         adaptiveSplitCount: counts.adaptiveSplitCount,
         oversizedRowCount: counts.oversizedRowCount,
+        dataTouchEdgeCount: counts.dataTouchEdgeCount,
+        syntheticSymbolCount: counts.syntheticSymbolCount,
       };
     },
   };

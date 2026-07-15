@@ -17,13 +17,26 @@
 import type { RelationType } from "../../core/domain.js";
 import type { SymbolResolution } from "./symbol-resolver.js";
 
-/** Edge relations a v1 edge-existence claim may assert. */
+/**
+ * Edge relations an edge-existence claim may assert.
+ *
+ * Wave 8 (T2): widened to include the MRO-derived heritage edges
+ * `overrides` (a subclass method overrides one reachable via the linearised
+ * ancestor chain) and `methodImplements` (a concrete method satisfies an
+ * interface/trait contract). The edge mapper (`verify-edge.ts`
+ * `edgeLabelToRelType`) already surfaces both from the persisted
+ * OVERRIDES/METHODIMPLEMENTS edges, so the verifier path is reachable once the
+ * enum lists them. Kept in sync with the MCP surface in TWO other places:
+ * `registration.ts` (the `relation` enum) and `validation.ts` (`validRelations`).
+ */
 export const CLAIM_EDGE_RELATIONS = [
   "calls",
   "imports",
   "inherits",
   "implements",
   "references",
+  "overrides",
+  "methodImplements",
 ] as const satisfies readonly RelationType[];
 
 /** A relation usable in an edge claim (subset of {@link RelationType}). */

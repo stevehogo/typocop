@@ -38,7 +38,9 @@ export type CLICommand =
   | { type: "ollama"; url?: string }
   | { type: "watch"; config: CLIConfig }
   | { type: "augment"; pattern: string }
-  | { type: "setup"; settingsPath?: string };
+  | { type: "setup"; settingsPath?: string }
+  | { type: "stop-server" }
+  | { type: "check-recursion"; sourcePath: string; json: boolean; includeVendor: boolean };
 
 const supportedLanguages: Language[] = [
   "php", "typescript", "javascript", "python", "java",
@@ -187,6 +189,26 @@ export function parseArgs(rawArgs: string[]): CLICommand {
       parsedCommand = {
         type: "status"
       };
+    });
+
+  program
+    .command("stop-server")
+    .description("Gracefully stop the running LadybugDB connection server (the one this prefix's discovery file points at)")
+    .action(() => {
+      parsedCommand = { type: "stop-server" };
+    });
+
+  program
+    .command("check-recursion")
+    .description("Report self-shadowing recursion (this.X()/$this->X() that recurses into itself instead of super / a different X). Exits 1 if any found.")
+    .requiredOption("-p, --path <path>", "Source directory path to scan")
+    .option("--json", "Emit findings as JSON", false)
+    .option("--include-vendor", "Also scan vendor/ (lets signal A resolve framework base classes; slow)", false)
+    .action((options) => {
+      if (!fs.existsSync(options.path)) {
+        throw new CLIValidationError(`Source path does not exist: ${options.path}`);
+      }
+      parsedCommand = { type: "check-recursion", sourcePath: options.path, json: options.json, includeVendor: options.includeVendor };
     });
 
   program

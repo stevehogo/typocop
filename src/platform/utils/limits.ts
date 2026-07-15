@@ -132,6 +132,216 @@ export function isParseWorkersEnabled(): boolean {
   return v === "1" || v === "true" || v === "yes" || v === "on";
 }
 
+/** Environment opt-in for the Wave 3 Tier-B AST type-env ({@link isTypeEnvEnabled}). */
+export const TYPE_ENV_ENV = "TYPOCOP_TYPE_ENV";
+
+/**
+ * Whether the Wave 3 Tier-B AST type-environment resolution is enabled. **OPT-IN
+ * — default `false`.** Gates (a) building the per-file type-env in Phase 2,
+ * (b) populating `RawRelationshipHint.receiverType`, (c) the `receiverType`-first
+ * branch in `resolveMemberCallTarget` (Phase 3), and (d) the ported
+ * `extractReturnTypeName` swap in chain-binding. When unset, none of those fire
+ * and the emitted graph is byte-identical to pre-Wave-3.
+ *
+ * Read in BOTH Phase 2 (inside `extractSymbolsWithQueries`, which runs in parse
+ * workers that inherit `process.env`) and the composition root (to derive
+ * `PipelineConfig.typeEnvResolution` for Phase 3) — both consult this single env
+ * so the two phases agree. Mirrors the {@link isParseWorkersEnabled} pattern.
+ */
+export function isTypeEnvEnabled(): boolean {
+  const raw = process.env[TYPE_ENV_ENV];
+  if (raw === undefined) return false;
+  const v = raw.trim().toLowerCase();
+  return v === "1" || v === "true" || v === "yes" || v === "on";
+}
+
+/** Environment opt-in for the Wave 3 Tier-A LSP / TS-compiler-API type tier ({@link isLspTypesEnabled}). */
+export const LSP_TYPES_ENV = "TYPOCOP_LSP_TYPES";
+
+/**
+ * Whether the Wave 3 Tier-A (A1) compiler-API receiver-type resolution is
+ * enabled. **OPT-IN — default `false`.** When `true`, a post-Phase-2,
+ * whole-corpus pass builds ONE TypeScript `Program` per project (via a LAZY
+ * `await import("typescript")` — the ~tens-of-MB compiler is NEVER loaded when
+ * this is off) and, for TS/JS `call` hints, resolves the receiver's nominal type
+ * from the real type checker. That answer is stamped onto `hint.receiverType`
+ * with PRECEDENCE over the Tier-B (`TYPOCOP_TYPE_ENV`) AST answer; Phase 3 then
+ * consumes `hint.receiverType` uniformly (no Phase-3 change beyond Tier B).
+ *
+ * The two tiers are independent flags (plan §10): Tier A (this) → Tier B → the
+ * parity selector. When this is off the compiler is never imported and the
+ * emitted graph is byte-identical to a Tier-A-absent run.
+ *
+ * Heavy + new + measurement-gated (plan §8): the default stays OFF until a
+ * large-repo perf measurement justifies flipping it. Mirrors the
+ * {@link isParseWorkersEnabled} / {@link isTypeEnvEnabled} reader pattern.
+ */
+export function isLspTypesEnabled(): boolean {
+  const raw = process.env[LSP_TYPES_ENV];
+  if (raw === undefined) return false;
+  const v = raw.trim().toLowerCase();
+  return v === "1" || v === "true" || v === "yes" || v === "on";
+}
+
+/** Shared truthy-env parser (`1`/`true`/`yes`/`on`, default `false`). */
+function isEnvTruthy(name: string): boolean {
+  const raw = process.env[name];
+  if (raw === undefined) return false;
+  const v = raw.trim().toLowerCase();
+  return v === "1" || v === "true" || v === "yes" || v === "on";
+}
+
+/** Shared falsy-env parser (`0`/`false`/`no`/`off`, default `false` — i.e. unset
+ *  is NOT falsy). Used for opt-OUT flags that default ON. */
+function isEnvFalsy(name: string): boolean {
+  const raw = process.env[name];
+  if (raw === undefined) return false;
+  const v = raw.trim().toLowerCase();
+  return v === "0" || v === "false" || v === "no" || v === "off";
+}
+
+/** Environment opt-in for the Wave 5 data-touch detection pass ({@link isDataTouchEnabled}). */
+export const DATA_TOUCH_ENV = "TYPOCOP_DATA_TOUCH";
+/** Environment opt-in for the Wave 5 heuristic event detector ({@link isDataTouchEventsEnabled}). */
+export const DATA_TOUCH_EVENTS_ENV = "TYPOCOP_DATA_TOUCH_EVENTS";
+/** Environment opt-in for the Wave 5 single-model DB fallback ({@link isDataTouchSingleModelFallbackEnabled}). */
+export const DATA_TOUCH_SINGLE_MODEL_FALLBACK_ENV = "TYPOCOP_DATA_TOUCH_SINGLE_MODEL_FALLBACK";
+
+/**
+ * Whether the Wave 5 data-touch detection pass is enabled. **OPT-IN — default
+ * `false`.** Gates the whole post-resolution pass that detects DB models /
+ * route handlers and emits `readsFromDb`/`writesToDb`/`handlesRoute` edges (plus
+ * synthetic anchor Symbols). When unset the pass never runs and the emitted graph
+ * is byte-identical to pre-Wave-5. Derived at the composition root into
+ * `PipelineConfig.dataTouch`; mirrors the {@link isTypeEnvEnabled} reader pattern.
+ */
+export function isDataTouchEnabled(): boolean {
+  return isEnvTruthy(DATA_TOUCH_ENV);
+}
+
+/**
+ * Whether the Wave 5 heuristic event detector is enabled (sub-flag of the
+ * data-touch pass — conceptually `dataTouch.events`). **OPT-IN — default
+ * `false`.** Pure-heuristic `emit`/`publish`/`send` detection is noisy (the
+ * publish verbs are wildly overloaded), so the event detector stays dark until
+ * Wave 6 supplies extracted channel args. Only meaningful when
+ * {@link isDataTouchEnabled} is also on.
+ */
+export function isDataTouchEventsEnabled(): boolean {
+  return isEnvTruthy(DATA_TOUCH_EVENTS_ENV);
+}
+
+/**
+ * Whether the Wave 5 single-model DB fallback (strategy 5) is enabled (sub-flag
+ * of the data-touch pass — conceptually `dataTouch.singleModelFallback`).
+ * **OPT-IN — default `false`.** This is the noisiest DB-resolution strategy
+ * (links any DB call to the sole model when exactly one exists), so it is gated
+ * off by default to favour precision over recall. Only meaningful when
+ * {@link isDataTouchEnabled} is also on.
+ */
+export function isDataTouchSingleModelFallbackEnabled(): boolean {
+  return isEnvTruthy(DATA_TOUCH_SINGLE_MODEL_FALLBACK_ENV);
+}
+
+/** Environment opt-in for the Wave 6 framework-extraction pass ({@link isFrameworkExtractionEnabled}). */
+export const FRAMEWORK_EXTRACTION_ENV = "TYPOCOP_FRAMEWORK_EXTRACTION";
+
+/**
+ * Whether the Wave 6 framework-extraction pass is enabled. **OPT-IN — default
+ * `false`.**
+ *
+ * NOTE — DELIBERATE DEVIATION from the wave plan's default-ON: for program-wide
+ * consistency and safety this flag ships **default-OFF**, like the other gated
+ * waves ({@link isDataTouchEnabled} / {@link isCallRefuseAmbiguousEnabled}).
+ * Tests enable it explicitly; the operator flips it on alongside data-touch.
+ *
+ * When OFF, the per-file framework pass never runs and Phase-2 output
+ * (symbols/hints/records) is byte-identical to pre-Wave-6 for ALL files. When ON,
+ * the pass is gated PER FILE by a cheap path + source-text probe, so
+ * non-framework files still produce byte-identical output. Read directly inside
+ * the parse worker (`runParseTask`), which inherits `process.env`, so the worker
+ * and in-process paths agree — and also derived at the composition root into
+ * `PipelineConfig.frameworkExtraction` for per-run testability. Mirrors the
+ * {@link isParseWorkersEnabled} / {@link isTypeEnvEnabled} reader pattern.
+ */
+export function isFrameworkExtractionEnabled(): boolean {
+  return isEnvTruthy(FRAMEWORK_EXTRACTION_ENV);
+}
+
+/** Environment flag for the short-lived Laravel AST-vs-regex routing A/B ({@link isLaravelAstRoutesEnabled}). */
+export const LARAVEL_AST_ROUTES_ENV = "TYPOCOP_LARAVEL_AST_ROUTES";
+
+/**
+ * Whether the Wave 6 (Task 8) AST Laravel route extractor REPLACES the legacy
+ * regex `parseRouteDefinitions` route emission. **Default `true` (ON).**
+ *
+ * SHORT-LIVED A/B flag (Task 8): the AST extractor (`extractLaravelRoutes`) is a
+ * strict superset of the regex (it captures everything the regex did plus
+ * handlers/groups/resources), so it ships ON by default and is the only Laravel
+ * route producer the live pipeline uses (the dispatcher calls `extractLaravelRoutes`
+ * directly; the regex `parseRouteDefinitions` is dead scaffolding). This flag exists
+ * for ONE release so an operator can fall back to the regex route emission while
+ * route-count parity is confirmed on a real Laravel repo, then it is removed.
+ *
+ * Set `TYPOCOP_LARAVEL_AST_ROUTES=0`/`false` to restore the regex route emission in
+ * the (dead) `parseRouteDefinitions` path. Mirrors the {@link isFrameworkExtractionEnabled}
+ * reader pattern but defaults ON (opt-OUT) because the AST extractor is the
+ * confirmed superset.
+ */
+export function isLaravelAstRoutesEnabled(): boolean {
+  return !isEnvFalsy(LARAVEL_AST_ROUTES_ENV);
+}
+
+/** Environment opt-in for the Wave 4 refuse-on-ambiguity call discipline ({@link isCallRefuseAmbiguousEnabled}). */
+export const CALL_REFUSE_AMBIGUOUS_ENV = "TYPOCOP_CALL_REFUSE_AMBIGUOUS";
+
+/**
+ * Whether the Wave 4 (Task 5) refuse-on-ambiguity call-resolution discipline is
+ * enabled. **OPT-IN — default `false`.** When `true`, Phase 3's call-target
+ * selector narrows candidates by callable-kind + arity + receiver-type and emits
+ * a `calls` edge ONLY when exactly one candidate survives (otherwise no edge),
+ * trading bounded recall for precision. When unset, the selector runs the
+ * byte-identical legacy `candidates[0]` / global-fallback path and the Wave-4
+ * filters never execute → emitted graph is byte-identical to pre-Wave-4. Derived
+ * at the composition root into `PipelineConfig.callRefuseAmbiguous`; mirrors the
+ * {@link isTypeEnvEnabled} reader pattern.
+ */
+export function isCallRefuseAmbiguousEnabled(): boolean {
+  return isEnvTruthy(CALL_REFUSE_AMBIGUOUS_ENV);
+}
+
+/** Environment opt-in for the Wave 7 heritage interface-vs-class disambiguation ({@link isHeritageDisambiguationEnabled}). */
+export const HERITAGE_DISAMBIGUATION_ENV = "TYPOCOP_HERITAGE_DISAMBIGUATION";
+
+/**
+ * Whether the Wave 7 (§3.1) heritage / MRO correctness disambiguation is enabled.
+ * **OPT-IN — default `false`.** When `true`, gates the EDGE-CHANGING parts:
+ *  (a) Phase-3 interface-vs-class disambiguation in the heritage hint loop
+ *      ({@link resolveHeritageRelType} may upgrade an `inherits` hint to an
+ *      `implements` edge — and vice-versa — via the symbol table first, then a
+ *      C#/Java `^I[A-Z]` / Swift-protocol / others-extends heuristic),
+ *  (b) the per-language tie-break rules in `computeMRO`'s collision loop
+ *      (C++ leftmost-base, C#/Java/Kotlin class-method-beats-interface +
+ *      2+-interface ambiguity, Rust qualified-syntax-null, default first-def),
+ *  (c) the Phase-2 Go anonymous-struct-embedding + Ruby `include`/`extend`/
+ *      `prepend` mixin heritage emission.
+ *
+ * When OFF: today's `hint.kind`-trusted heritage relType + today's
+ * language-blind single-loop `computeMRO` + no Go-embedding / Ruby-mixin edges →
+ * BYTE-IDENTICAL golden output. The ambiguity diagnostics (`MROResult.entries`)
+ * are ADDITIVE/inert (no edge change) and stay ALWAYS-ON regardless of this flag.
+ *
+ * Read in BOTH Phase 2 (inside `extractSymbolsWithQueries` / the parse worker,
+ * which inherit `process.env`, for the Go/Ruby emission) and the composition root
+ * (to derive `PipelineConfig.heritageDisambiguation` for the Phase-3 paths) —
+ * both consult this single env so the two phases agree. Mirrors the
+ * {@link isTypeEnvEnabled} / {@link isFrameworkExtractionEnabled} reader pattern,
+ * and is linked to {@link PARSE_VERSION} so toggling it invalidates the warm cache.
+ */
+export function isHeritageDisambiguationEnabled(): boolean {
+  return isEnvTruthy(HERITAGE_DISAMBIGUATION_ENV);
+}
+
 /**
  * Bounded concurrency for Phase 6 embedding generation (Phase C).
  *
