@@ -1,7 +1,7 @@
 # Templates: multi-wave plan folder
 
 Copy these skeletons and fill every `<placeholder>`. Delete guidance comments (`<!-- … -->`).
-Structure is normative — `scripts/verify-plan.py` checks for the marked sections. Add sections
+Structure is normative — `scripts/verify-plan.mjs` checks for the marked sections. Add sections
 freely; don't remove the required ones. Number waves from 0 (wave 0 = the foundation wave).
 Small plans may compact task blocks (Covers/Files merged, Steps inlined) — the invariants are
 the `### Task <ID> — ` heading, exact paths, an exact verify command, and a commit line.
@@ -90,6 +90,7 @@ WAVE 2 — <A>   WAVE 3 — <B>       │  <which tracks are parallel and why (n
 - **Dead code stays dead.** Don't migrate commented-out/unused blocks — note them for the cleanup task; never enable dead behavior mid-migration.
 - **Per-wave testing summary:** at each gate, write/refresh `docs/<effort>-summary/wave-<N>-<theme>.md` — *what changed · how to verify · what is intentionally NOT changed yet* (prevents false-regression reports while the tree is deliberately half-migrated) — and add its row to that folder's index README.
 - **Keep state truthful:** after each task, tick the wave file's checklist; after each gate, update this README's rollup and <any external checklist tooling reads>.
+- **Backlog drift is append-only.** If the source gains, loses, or splits a row mid-effort: never renumber or delete an ID (commit messages carry them) — add the new heading to the wave that owns its dependencies, retitle a dropped one `(withdrawn <date>: <why>)`, split as `<ID>a`/`<ID>b`, and record any cross-wave move in **both** wave Status sections. Then re-run the plan verifier with the updated IDs.
 - <do-not-touch list / hard rules>
 
 ## Status tracking (wave rollup)
@@ -123,7 +124,7 @@ Task-level state lives in each wave file — this table is the wave-level rollup
 - **Tooling:** <skills / workflows / agents the tasks invoke — or "none exist — follow Steps directly">
 
 <!-- Appended by Step 4 once verification passes: -->
-> Plan verified: <YYYY-MM-DD> — verify-plan.py PASS; manual checks done (<one-line notes>)
+> Plan verified: <YYYY-MM-DD> — verify-plan.mjs PASS; manual checks done (<one-line notes>)
 ```
 
 ---
@@ -135,7 +136,7 @@ Task-level state lives in each wave file — this table is the wave-level rollup
      existing architecture (restyles, migrations of content/values) — there the README's
      **Architecture:** paragraph is enough. Litmus test: if you're writing rejected-alternatives and
      dependency rules to justify the README blurb, promote them here.
-     Wire it: the README's **Architecture:** line links to this file; verify-plan.py FAILS an
+     Wire it: the README's **Architecture:** line links to this file; verify-plan.mjs FAILS an
      unwired ARCHITECTURE.md. Keep the Status line current at wave gates. Scale to the effort:
      small systems may collapse §2–4 into one diagram + §5, and drop §10 if deploy is unchanged.
      Every diagram (C4 views §2–4, runtime flows §7) is a Mermaid fenced block that follows
@@ -173,7 +174,27 @@ Task-level state lives in each wave file — this table is the wave-level rollup
      sentence enforces it. -->
 
 ## 5. Canonical module layout
-<!-- The one directory tree everything else references. -->
+<!-- The one directory tree everything else references. **RULE — design this section with the
+     `clean-code` and `senior-architect` skills loaded**, and DEFAULT to a feature-first +
+     layered-inside layout (layer-base × feature-base) unless the effort is too small to earn it.
+     How you organise the tree is a real decision; record the chosen axis as an ADR (§11). Options,
+     default first:
+       • feature-first, layered inside (hybrid — DEFAULT): feature folders on top, with `ports/`
+         (interfaces) kept apart from `adapters/` (implementations) inside each, a `shared/` kernel
+         for the common vocabulary, and a host folder for wiring. Best once there is >1 adapter per
+         port — but right-size it: don't spawn single-file layer folders for a tiny effort.
+       • by-layer (transport / domain / data): clearest dependency direction, but one feature
+         scatters across many folders — use only when the system is too thin/uniform for features to
+         earn their own folders.
+       • by-feature ("screaming architecture"): a folder per capability — the tree says what the app
+         DOES, but layer boundaries blur.
+     Whichever axis, GROUP the tree so §4's dependency rule is VISIBLE in it: ports apart from
+     concretes, the domain/kernel importing nothing outward, and ONE composition root where the
+     concretes are constructed and injected. Annotate each entry with its role + the task/wave ID
+     that creates it. Then close with a short **Module conventions** list — the cross-cutting rules
+     that keep the layout clean, stack-appropriate, each with its reason: module system +
+     import-specifier style, type-only imports (keep the graph acyclic), NO barrel/re-export hubs,
+     ports-vs-adapters, validation at the boundary, errors as values, branded domain primitives. -->
 
 ## 6. Data architecture
 <!-- Stores + roles, tables/entities grouped by lifecycle, derived-not-stored rules, enum parity. -->
@@ -323,7 +344,7 @@ for any value the spec does NOT state explicitly>
      decision in both artifacts: ARCHITECTURE links here for the mechanism.
 
      Placement & naming: in the plan folder, named `design-<feature>.md`. Wire it: the wave file that
-     builds the feature links to it via a **Design:** header line (verify-plan.py FAILS any design doc
+     builds the feature links to it via a **Design:** header line (verify-plan.mjs FAILS any design doc
      that no non-design plan file links, directly or via its spine — just like an unwired
      ARCHITECTURE.md). Traceability: every Correctness Property cites the backlog/requirement IDs it
      validates (`**Validates: M4, M5**`), the same IDs the wave's task headings use.

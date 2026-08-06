@@ -1,33 +1,42 @@
 ---
 name: writing-wave-plans
-description: >-
-  Write a MULTI-WAVE implementation plan — a plan FOLDER (README orchestrator + one file per
-  wave, each wave owning its OWN status tracking) — for large multi-workstream efforts:
-  migrations or programs driven by an estimation sheet / backlog with ~10+ tasks across
-  categories, phased rollouts, or work needing parallel tracks. Extends
-  superpowers:writing-plans (bite-sized tasks, exact file paths, verification steps, one
-  commit per task) with: a reality-baseline survey BEFORE writing (repo facts, toolchain pins,
-  and what the EXECUTION ENVIRONMENT can actually verify — gates may only demand runnable
-  checks), backlog-ID traceability (every backlog row = one task heading), a dependency graph
-  with parallel tracks, per-wave verification gates (build/tests → fresh-context audit →
-  triage fix-vs-defer → remediation commit → tester-facing testing summary → context
-  checkpoint), an optional ARCHITECTURE.md (principles, C4 views, ADRs,
-  wave↔architecture coverage map — for efforts that BUILD/reshape a system rather than
-  transform within one), optional per-feature design documents (overview, components &
-  interfaces, data models, correctness properties — for a feature whose HOW must be settled
-  before its tasks), and a post-write verification pass so the plan ships pre-checked. Use
-  when asked for a "wave plan", a master plan covering a whole estimation sheet, a plan "with
-  state tracking per wave", or a build plan with an architecture design. For single-feature
-  plans use plain writing-plans.
+description: "Write a multi-wave implementation plan: a folder with a README + one file per wave, each owning its status tracking. Use for a 'wave plan', per-wave state tracking, or a master plan over a backlog or estimation sheet (~10+ tasks, phases, parallel tracks). For one feature use writing-plans."
+risk: safe
+source: self
+date_added: "2026-07-15"
 ---
 
 # Writing multi-wave plans
 
 **Announce at start:** "I'm using the writing-wave-plans skill to create the implementation plan."
 
+## When to Use
+
+Use the **multi-wave folder** format when ANY of these hold:
+
+- a backlog / estimation source with ~10+ rows;
+- multiple categories with a dependency spine (a foundation layer the rest build on);
+- a phased or staged rollout;
+- parallelizable tracks;
+- the user asks for a "wave plan", a master plan covering a whole estimation sheet, per-wave state tracking, or a build plan with an architecture design.
+
+Use **plain `superpowers:writing-plans`** (a single file) for one feature or fix.
+
+**Project type is irrelevant** — the format fits frontend, backend/API, data/ETL, CLI, library, and infra work alike; the examples in this skill span domains, and the exemplars show one frontend plan ([`references/exemplar-plan.md`](references/exemplar-plan.md)) and one backend architecture ([`references/exemplar-architecture.md`](references/exemplar-architecture.md)).
+
 **Inherits `superpowers:writing-plans`** — read/apply its discipline first: assume zero context, bite-sized tasks (one 2–5-min action per step), exact file paths, complete code where it's knowable at plan time, exact verification commands with expected output, DRY/YAGNI, one commit per task, and its execution-handoff question at the end. (If that skill isn't available in the environment, the summary in this sentence IS the discipline — proceed without it.) This skill adds the *folder structure, traceability, and verification layers* for efforts too big for one file.
 
-**Choose the format:** single file (plain writing-plans) for one feature/fix. Multi-wave folder when ANY of: a backlog/estimation source with ~10+ rows; multiple categories with a dependency spine (a foundation layer the rest build on); phased/staged rollout; parallelizable tracks; the user asks for waves or per-wave state tracking. **Project type is irrelevant** — the format fits frontend, backend/API, data/ETL, CLI, library, and infra work alike; the examples in this skill span domains, and the exemplars show one frontend plan ([`references/exemplar-plan.md`](references/exemplar-plan.md)) and one backend architecture ([`references/exemplar-architecture.md`](references/exemplar-architecture.md)).
+### What this adds over `writing-plans`
+
+| Layer | Step |
+|---|---|
+| **Reality-baseline survey before writing** — repo facts, toolchain pins, and what the *execution environment* can actually verify (gates may only demand runnable checks) | 1 |
+| **Backlog-ID traceability** — every backlog row becomes exactly one task heading | 2 |
+| **Dependency graph** with parallel tracks | 2–3 |
+| **Per-wave verification gates** — build/tests → fresh-context audit → triage fix-vs-defer → remediation commit → tester-facing testing summary → context checkpoint | 3 |
+| **Optional `ARCHITECTURE.md`** — principles, C4 views, ADRs, wave↔architecture coverage map; for efforts that *build or reshape* a system rather than transform within one | 3 |
+| **Optional per-feature `design-<feature>.md`** — overview, components & interfaces, data models, correctness properties; for a feature whose *how* must be settled before its tasks | 3 |
+| **Post-write verification pass**, so the plan ships pre-checked | 4 |
 
 **Save to:** `docs/plans/YYYY-MM-DD-<effort>/` in the target repo (or the repo's own plan-folder convention if its CLAUDE.md declares one).
 
@@ -55,7 +64,7 @@ The plan is only as good as its facts. Before writing a single task:
 - Order risk deliberately — the riskiest, hardest-to-reverse work late, behind cheap reversible groundwork (e.g. the payment/checkout flow or a table-rewriting migration last; additive, zero-behavior-change scaffold or token commits first).
 - Human/process-only tasks (sign-off, device passes, releases) stay IN the plan, explicitly marked "human — agent prepares, doesn't perform".
 - **End with a cross-cutting QA/release wave** (the spines above all do). Besides its own backlog rows, it is the **landing zone for gate-deferred findings**: every wave gate re-homes what it doesn't fix onto named tasks there, so deferrals accumulate against owners instead of evaporating. If the backlog has no such rows, add a plan-only `QA-FINAL` task to hold them.
-- **Decide whether the effort needs an `ARCHITECTURE.md`** (Step 3, Template 3): yes when the plan *builds or reshapes a system* — new services/apps, data stores/schemas, transports, trust boundaries, module layout. No for transformations within an existing architecture (restyles, content/value migrations) — the README's Architecture paragraph carries those.
+- **Decide whether the effort needs an `ARCHITECTURE.md`** (Step 3, Template 3): yes when the plan *builds or reshapes a system* — new services/apps, data stores/schemas, transports, trust boundaries, a new module/folder layout. No for transformations within an existing architecture (restyles, content/value migrations) — the README's Architecture paragraph carries those.
 - **Decide which features (if any) need a `design-<feature>.md`** (Step 3, Template 4): a per-feature design document for any feature whose *how* must be settled before its task steps — non-trivial control flow, interacting components with concrete interfaces/data models, or invariants worth property-testing. It's a *different artifact* from `ARCHITECTURE.md`: architecture is the program-wide shape (one per plan, spans all waves); a design doc is one feature's mechanism (zero or more per plan, scoped to the wave that builds it). Most straightforward CRUD/config waves need none.
 
 ## Step 3 — Write the folder
@@ -93,24 +102,55 @@ The plan is only as good as its facts. Before writing a single task:
    **(g) Context checkpoint** — the executor stops after the gate commit and invites the user to `/compact` or `/clear` before the next wave. The executor can't compact context itself (`/compact` is user-invoked), but a passed gate is where compaction is lossless *by construction* — every fact the next wave needs is already on disk (wave Status sections, README rollup, git history), so the plan directs compaction to happen there rather than mid-wave.
 7. Footer: "Wave N done when …" → link to next wave.
 
-**`ARCHITECTURE.md` (optional third artifact — Template 3)** — only when Step 2 decided the effort builds/reshapes a system. It records the *shape and why it holds*: load-bearing principles (each with a consequence), C4-style views + the dependency rule, canonical module layout, data architecture, runtime flows (each naming the wave that delivers it), trust boundaries, ADRs (*context → decision → rejected alternatives → consequences*; amendments/supersessions are dated notes, never rewrites), a **build-sequence ↔ architecture coverage table** (the contract with the wave files — re-cut waves means updating it), and second-order risks with recommended seams. **Diagrams are Mermaid, not ASCII** — write every C4 view and runtime flow as a ` ```mermaid ` fenced block that obeys [`references/mermaid.md`](references/mermaid.md), a hard compatibility ruleset the model must follow (safe-character node/edge labels, `graph TD`/`graph LR`/`sequenceDiagram` only, no `stateDiagram-v2`, no hex `style`) so the diagrams render identically in VS Code, GitHub, and Kiro. Hard rule: **it introduces no new decisions** — every choice traces to the spec/decisions source; it only consolidates and surfaces consequences. Wire it: the README's **Architecture:** line links to it (the verifier fails an unwired ARCHITECTURE.md); update its Status line at wave gates. Filled-in example: [`references/exemplar-architecture.md`](references/exemplar-architecture.md).
+**Optional artifacts.** Two more documents may belong in the folder; most plans need neither. Full guidance, decision table, and hard rules: [`references/optional-artifacts.md`](references/optional-artifacts.md).
 
-**`design-<feature>.md` (optional per-feature design documents — Template 4)** — one for each feature Step 2 flagged as needing its *how* settled before task steps. It's the "design" layer between the requirements/backlog (*what/why*) and the wave file (*how to build it, task by task*): **Overview** (mechanism + delivering wave + rows covered), **Architecture** (a Mermaid flow obeying [`references/mermaid.md`](references/mermaid.md)), **Key Design Decisions** (each with its consequence), **Error Handling** (failure→behaviour table), **Components & Interfaces** (file layout, exact exported signatures, internal flow, integration point), **Data Models**, **Correctness Properties** (universal "for any…" statements, each citing the backlog/requirement IDs it validates — the same IDs the wave's task headings use), and **Testing Strategy**. Distinct from `ARCHITECTURE.md`: program-wide shape vs one feature's mechanism — a plan may have zero, one, or several. When both artifacts exist they must not conflict: a design doc works *within* `ARCHITECTURE.md`'s principles and ADRs and adds only feature-local decisions; if a feature's design would breach one, amend the ADR (dated note) first — until then `ARCHITECTURE.md` wins. Don't duplicate content between them: ARCHITECTURE's runtime-flow section stays program-level and *links* the design doc for the mechanism. Split long ones into sibling `design-<feature>-components.md` / `design-<feature>-correctness.md` files (each with a backlink). Wire it: the wave file that builds the feature links to it (**the verifier fails an unwired `design*.md`**). Diagrams are Mermaid, never ASCII. Filled-in (split) example: [`references/exemplar-design.md`](references/exemplar-design.md).
+- **`ARCHITECTURE.md`** (Template 3) — one per plan, program-wide shape. Add it only when Step 2 decided the effort *builds or reshapes* a system. It introduces **no new decisions**; the README's **Architecture:** line must link it.
+- **`design-<feature>.md`** (Template 4) — zero or more per plan, one feature's mechanism. Add one for each feature Step 2 flagged as needing its *how* settled before task steps. The wave that builds the feature must link it.
+
+Both use Mermaid diagrams obeying [`references/mermaid.md`](references/mermaid.md), never ASCII, and the verifier fails either one if it is left unwired.
 
 ## Step 4 — Verify the plan before handing it off
 
 Ship the plan pre-verified; fix defects in the plan files (this is authoring, not executing):
 
-1. **Run the canned verifier** (don't re-improvise it):
-   `python3 <skill-base-dir>/scripts/verify-plan.py <plan-folder> --ids "F1-F8,U1-U11,E1-E2,…"`
-   It fails on: backlog IDs with missing/duplicate `### Task <ID> —` headings, broken internal links, wave files without a `## Status tracking` section / `Status:` line / gate task, README without the rollup, an `ARCHITECTURE.md` the README never references, and any `design*.md` that no non-design plan file links — directly or via its design-doc spine (orphan design docs and self-referential clusters fail). Links/paths in every `*.md` in the folder (incl. ARCHITECTURE.md and design docs) are scanned. It warns on referenced repo paths that don't exist (to-be-created dirs and deliberately-quoted stale paths are legitimate — review each) **and on package scripts the plan's code invokes (`yarn x` / `npm run x` / `pnpm x`) that the repo-root `package.json` doesn't define** — the classic "gate demands a test suite the repo doesn't have" defect; write the degraded form instead. `--strict` turns warnings into failures. Iterate until PASS.
+1. **Run the canned verifier** (don't re-improvise it). Iterate until PASS:
+
+   ```
+   node <skill-base-dir>/scripts/verify-plan.mjs <plan-folder> --ids "F1-F8,U1-U11,E1-E2,…"
+   ```
+
+   **Flags.** `--ids` is mandatory — without it the run fails rather than silently skipping coverage. Ranges keep zero-padding (`F01-F03` → F01, F02, F03); a mixed-prefix range (`F1-U3`) is an error, not a silent expansion. `--ids-from-readme` derives the list from the README wave-files table and additionally checks each wave file holds the rows attributed to it. `--no-ids` skips coverage — only for a plan with genuinely no backlog source. `--strict` turns warnings into failures.
+
+   **It fails on:** backlog IDs with missing or duplicate `### Task <ID> —` headings · broken internal links · a wave file lacking a `## Status tracking` section, `Status:` line, or gate task · a `wave-*.md` the README never references (orphan wave — dropped work) · a README with no rollup · an unwired `ARCHITECTURE.md` · any `design*.md` no non-design plan file links, directly or via its spine.
+
+   **It warns on:** referenced repo paths that don't exist (to-be-created dirs and deliberately-quoted stale paths are legitimate — review each) · package scripts the plan invokes (`yarn x` / `npm run x` / `pnpm x`) that the root `package.json` doesn't define — the classic "gate demands a test suite the repo doesn't have" defect; write the degraded form instead.
+
+   Editing the verifier? Run its regression suite: `node <skill-base-dir>/scripts/test-verify-plan.mjs`.
 2. **Anchor check (manual):** spot-check cited line numbers — the script verifies paths, not line contents.
 3. **Spec fidelity:** re-read the authority doc for every quoted value (scales, state specs, durations); where the plan encodes a value the spec *doesn't* state, add a provenance note rather than implying it's spec'd.
 4. **Tooling check:** every workflow/skill/script invocation in gates uses names, args, and option keys that actually exist — **and is runnable in the execution environment** per the capability baseline (a script `package.json` doesn't define, or an e2e rung with no browsers installed, is a broken gate: write its degraded form instead).
 5. **Blast-radius sanity:** any step that edits a *shared or generated* file — one whose changes fan out to many outputs — must name the actual mechanism and scope before claiming the change is local. Examples across stacks: an SCSS partial auto-injected per-component vs imported once globally; a barrel/`index` re-export; a codegen source or template; a base class, a DI/service registration, a shared config or migration. Confirm how the file is consumed.
 6. **Command dry-run:** any verification command whose *exact output* the plan asserts — run it (in a scratch copy with the change hand-applied, if it needs the change). Classic traps: `grep -c` counts LINES, not occurrences; multi-file grep output order isn't stable across runs/tools (ugrep vs GNU grep); locale-dependent sorting.
 7. **Diagram compatibility (if an `ARCHITECTURE.md` or any `design*.md` exists):** every ` ```mermaid ` block obeys [`references/mermaid.md`](references/mermaid.md) — `graph TD`/`graph LR`/`sequenceDiagram` only (no `stateDiagram-v2`, no `(( ))` nodes), no hex `style` declarations, and node/edge/message labels use only the safe characters in that file's table. Paste one into a renderer if unsure it parses.
-8. **Record the outcome:** append `> Plan verified: <date> — verify-plan.py PASS; manual checks 2–7 done (<one-line notes>)` at the bottom of the plan README — "verified" must be a recorded state, not a memory.
+8. **Record the outcome:** append `> Plan verified: <date> — verify-plan.mjs PASS; manual checks 2–7 done (<one-line notes>)` at the bottom of the plan README — "verified" must be a recorded state, not a memory.
+
+## Backlog drift — when the source moves after the plan is written
+
+Traceability is a hard rule (Step 2) and the verifier enforces it against a fixed ID set, so a backlog that changes mid-effort breaks the invariant unless drift is handled deliberately. On a multi-wave effort it *will* change. Write this protocol into **Shared conventions** so the executor follows it rather than improvising:
+
+| What changed | What to do |
+|---|---|
+| **Row added** | Add one `### Task <ID> —` heading to the wave that owns its place on the dependency spine — a later wave if its dependencies aren't met yet. Add it to that wave's Status checklist and the README's row list. |
+| **Row removed / obsoleted** | Never delete the heading. Retitle it `### Task <ID> — <name> (withdrawn <date>: <why>)` and tick it `[x]` with that note. A deleted ID makes git history unreadable. |
+| **Row split** | Keep the original ID as a suffixed pair (`F4a`, `F4b`) and note the split in both headings. Update the README row list. |
+| **Row moved between waves** | Move the heading, and record the move in **both** wave Status sections — the one losing it and the one gaining it. |
+| **Wave re-cut** | Update the README wave-files table, the dependency graph, and — if it exists — `ARCHITECTURE.md`'s build-sequence coverage table. |
+
+Three rules keep the ledger honest:
+
+- **IDs are append-only.** Never renumber. Commit messages carry IDs, so a renumber silently re-points history.
+- **Record drift where it happened** — the affected wave's Status section, not just the README. A later wave must inherit the change, not rediscover it.
+- **Re-verify after any drift:** re-run Step 4's verifier with the updated ID list. `--ids-from-readme` derives that list from the README wave-files table and additionally checks each wave file actually contains the rows the table attributes to it — which is what catches a table that drifted out of sync with its own waves.
 
 ## Execution handoff
 

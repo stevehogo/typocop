@@ -62,6 +62,35 @@ graph TD
 writer to Postgres and the only reader of Snowflake, always through a service-layer function.
 Nothing bypasses the seam.
 
+## 5. Canonical module layout  ← by-layer, service-seam axis (ADR-002); the tree makes the dependency rule visible
+
+The organising axis is a decision, not a default — ADR-002 chose the service-layer seam over
+per-route logic. The tree is grouped so §4's dependency rule reads off it directly:
+
+```
+src/
+  db/                # Prisma schema + client + migrations — the ONLY module that imports Prisma (Wave 0)
+  services/          # framework-agnostic logic + queries — THE seam (ADR-002); imports db/, never a route
+    portfolio.ts     #   read/write operations for portfolio items (Waves 1–2)
+    events.ts        #   append-only event-log writer (Wave 2)
+  server/
+    functions/       # TanStack server functions — thin wrappers: validate input, call a service (Wave 1)
+    rest/            # REST handlers — thin wrappers over the SAME services (Wave 4)
+  routes/            # file-based routes; loaders call server functions, never db/ directly
+  components/        # UI primitives and composites — no data access
+  lib/               # cross-cutting: auth session, config, structured logging
+```
+
+**Module conventions** (the rules that keep the layout clean):
+- **One-directional seam.** `routes/` → `server/` → `services/` → `db/`; a lower layer never imports
+  an upper one, and only `services/*` may touch `db/`. Grep-enforced at every gate.
+- **Thin wrappers only.** A server function or REST handler validates input and delegates — no
+  business logic leaks out of `services/*` (ADR-002).
+- **No barrel files.** Import from the owning module, not an `index.ts` re-export hub — this avoids
+  import cycles and over-bundling.
+- **Types co-located; shared shapes in one module.** Domain types live with the service that owns
+  them; only truly cross-feature shapes go in `lib/`.
+
 ## 7. Runtime flows  ← (one numbered flow per critical path; name the delivering wave)
 
 ### 7.2 Write / mutation path (Wave 2) — transactional + event + invalidation
